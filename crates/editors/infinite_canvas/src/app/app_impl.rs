@@ -170,7 +170,7 @@ impl InfiniteCanvasEditor {
         };
         let entities = canvas.entities().to_vec();
         drop(canvas);
-        let mut viewport = DirectEditorViewport::new(editors.host().clone(), self.render_scale);
+        let mut viewport = DirectEditorViewport::new(editors.host().clone(), view_scale(editors));
         self.show_toolbar(ui, &entities, editors, &mut viewport);
         if let Some(error) = self.image_import_error.clone() {
             ui.horizontal(|ui| {
@@ -296,7 +296,7 @@ impl InfiniteCanvasEditor {
             ui.allocate_painter(ui.available_size(), egui::Sense::click_and_drag());
         let canvas_rect = editors.host().view().unwrap_or(response.rect);
         let canvas_clip_rect = ui.clip_rect();
-        self.render_scale = (canvas_rect.width() / DEFAULT_VIEW_WIDTH).max(f32::EPSILON);
+        self.render_scale = view_scale(editors);
         let mut viewport = DirectEditorViewport::new(editors.host().clone(), self.render_scale);
         self.viewport_center = self.screen_to_world(canvas_clip_rect.center(), canvas_rect);
         if std::mem::take(&mut self.fit_selection_requested) {
@@ -441,7 +441,6 @@ impl InfiniteCanvasEditor {
             &entities,
             editors,
             &direct_editor_rects,
-            &mut viewport,
         );
         if self.grouped_inspector_edit_active
             && ui.ctx().input(|input| input.pointer.any_released())
@@ -470,6 +469,10 @@ impl InfiniteCanvasEditor {
         }
         self.take_action(action.or(keyboard_action), editors);
     }
+}
+
+fn view_scale(editors: &Access) -> f32 {
+    editors.host().view_scale().unwrap_or(1.0).max(f32::EPSILON)
 }
 
 fn fit_into_view(viewport: &mut DirectEditorViewport, clip: Rect, target: Rect) {

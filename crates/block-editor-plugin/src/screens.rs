@@ -252,12 +252,13 @@ impl Screens {
                 y,
                 width,
                 height,
+                scale,
             }) => {
                 if let Some(session) = self.sessions.get(instance) {
-                    session.set_view(egui::Rect::from_min_size(
-                        egui::pos2(*x, *y),
-                        egui::vec2(*width, *height),
-                    ));
+                    session.set_view(
+                        egui::Rect::from_min_size(egui::pos2(*x, *y), egui::vec2(*width, *height)),
+                        *scale,
+                    );
                 }
             }
             Message::Editor(EditorMessage::Close { instance }) => {

@@ -68,8 +68,8 @@ struct Instance {
     reported_audio: AudioStatus,
     reported_size: Option<egui::Vec2>,
     block_picks: Vec<BlockPickRequest>,
-    view: Option<egui::Rect>,
-    reported_view: Option<egui::Rect>,
+    view: Option<EditorView>,
+    reported_view: Option<EditorView>,
     view_changes: Vec<ViewChange>,
     presenting: bool,
     reported_presenting: bool,
@@ -81,6 +81,12 @@ struct Instance {
     replacements: HashMap<(Uuid, Uuid), Replacement>,
     next_replacement: u64,
     leaving: bool,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) struct EditorView {
+    pub(crate) rect: egui::Rect,
+    pub(crate) scale: f32,
 }
 
 enum Replacement {
@@ -298,7 +304,7 @@ impl Instances {
         screen.request.screen
     }
 
-    pub(super) fn set_view(&mut self, instance: EditorInstanceId, view: egui::Rect) {
+    pub(super) fn set_view(&mut self, instance: EditorInstanceId, view: EditorView) {
         if let Some(entry) = self.entries.get_mut(&instance) {
             entry.view = Some(view);
         }
@@ -524,10 +530,11 @@ impl Instances {
                 if let Some(view) = entry.view {
                     opened.push(Message::Editor(EditorMessage::ViewChanged {
                         instance,
-                        x: view.min.x,
-                        y: view.min.y,
-                        width: view.width(),
-                        height: view.height(),
+                        x: view.rect.min.x,
+                        y: view.rect.min.y,
+                        width: view.rect.width(),
+                        height: view.rect.height(),
+                        scale: view.scale,
                     }));
                 }
             }
@@ -935,7 +942,7 @@ impl Instances {
                     opened: entry.opened,
                     aspect_ratio: entry.aspect_ratio,
                     intrinsic: entry.intrinsic,
-                    view: entry.view,
+                    view: entry.view.map(|view| view.rect),
                     artifact: matches!(entry.role, InstanceRole::Artifact(_)).then(|| {
                         super::ArtifactStatus {
                             data: entry.artifact.data.len(),

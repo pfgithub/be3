@@ -245,8 +245,8 @@ impl EguiSession {
         self.host.set_editable(editable);
     }
 
-    pub(crate) fn set_view(&self, view: egui::Rect) {
-        self.host.set_view(view);
+    pub(crate) fn set_view(&self, view: egui::Rect, scale: f32) {
+        self.host.set_view(view, scale);
     }
 
     pub(crate) fn resized(&mut self, size: egui::Vec2) {

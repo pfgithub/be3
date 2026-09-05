@@ -157,7 +157,7 @@ impl Viewport {
             self.pan = egui::Vec2::ZERO;
         }
         let view = egui::Rect::from_center_size(region.center() + self.pan, content * self.zoom);
-        self.host.set_view(view);
+        self.host.set_view(view, self.zoom);
     }
 
     fn settle(&mut self, region: egui::Rect) {

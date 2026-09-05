@@ -458,6 +458,7 @@ pub enum EditorMessage {
         y: f32,
         width: f32,
         height: f32,
+        scale: f32,
     },
     ChangeView {
         instance: EditorInstanceId,

@@ -22,6 +22,7 @@ mod wasm;
 mod web;
 mod web_view;
 
+pub(crate) use instances::EditorView;
 pub(crate) use runtime::{
     artifact, artifact_draft, aspect_ratio, block_picked, close, commit_creation, creation,
     creation_ready, editor_ui, flush, frame_child, frame_rects, install, intrinsic_size, kill,
@@ -189,7 +190,7 @@ pub(crate) struct EditorSlot<'a> {
     pub(crate) region: EditorRegion,
     pub(crate) frame: Option<FrameSpec>,
     pub(crate) size: egui::Vec2,
-    pub(crate) view: Option<egui::Rect>,
+    pub(crate) view: Option<EditorView>,
 }
 
 #[derive(Clone, Copy)]

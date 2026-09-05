@@ -163,11 +163,7 @@ impl InfiniteCanvasEditor {
 
     const TWO_FINGER_TAP_MAX_DRIFT: f32 = 24.0;
 
-    pub(super) fn handle_zoom_and_pan(
-        &mut self,
-        response: &egui::Response,
-        viewport: &mut DirectEditorViewport,
-    ) -> bool {
+    pub(super) fn handle_view_gestures(&mut self, response: &egui::Response) -> bool {
         let touch = response.ctx.input(|input| input.multi_touch());
         if touch.is_none() {
             self.finish_two_finger_touch(response);
@@ -187,29 +183,7 @@ impl InfiniteCanvasEditor {
                         state.max_touches.max(touch.num_touches)
                     }),
                 });
-                if (touch.zoom_delta - 1.0).abs() > f32::EPSILON {
-                    viewport.change_zoom(touch.zoom_delta, Some(touch.center_pos));
-                }
-                if touch.translation_delta != Vec2::ZERO {
-                    viewport.pan(touch.translation_delta);
-                }
                 return true;
-            }
-            if let Some(pointer) = response.ctx.pointer_hover_pos() {
-                let (scroll, zoom_delta, command) = response.ctx.input(|input| {
-                    (
-                        input.smooth_scroll_delta,
-                        input.zoom_delta(),
-                        input.modifiers.command,
-                    )
-                });
-                if (zoom_delta - 1.0).abs() > f32::EPSILON {
-                    viewport.change_zoom(zoom_delta, Some(pointer));
-                } else if command && scroll.y != 0.0 {
-                    viewport.change_zoom((scroll.y * 0.002).exp(), Some(pointer));
-                } else if scroll != Vec2::ZERO {
-                    viewport.pan(scroll);
-                }
             }
         }
 
@@ -220,8 +194,6 @@ impl InfiniteCanvasEditor {
         });
         if panning && response.hovered() {
             response.ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
-            let delta = response.ctx.input(|input| input.pointer.delta());
-            viewport.pan(delta);
             self.gesture = None;
             return true;
         }
@@ -298,7 +270,6 @@ impl InfiniteCanvasEditor {
         entities: &[CanvasEntity],
         editors: &Access,
         direct_editor_rects: &[Rect],
-        viewport: &mut DirectEditorViewport,
     ) -> (Option<CanvasLayerMove>, Option<EditorAction>) {
         self.pointer_world = response
             .hovered()
@@ -437,7 +408,7 @@ impl InfiniteCanvasEditor {
             return (None, keyboard_action);
         }
 
-        if self.handle_zoom_and_pan(response, viewport) {
+        if self.handle_view_gestures(response) {
             return (None, keyboard_action);
         }
 

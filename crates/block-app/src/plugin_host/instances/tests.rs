@@ -50,3 +50,4 @@ fn placed() -> (Instances, egui::Context, egui::Id) {
 
 mod a_plugin_reaches_only_the_hosts_its_manifest_names;
 mod input_is_withheld_from_screens_the_plugin_no_longer_has;
+mod the_view_a_screen_is_given_carries_the_scale_it_is_shown_at;

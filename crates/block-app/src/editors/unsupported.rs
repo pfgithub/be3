@@ -85,7 +85,6 @@ impl BlockEditor for UnsupportedEditor {
         &mut self,
         ui: &mut egui::Ui,
         _editors: &mut EditorAccess<'_>,
-        _scale: f32,
         _viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
         ui.centered_and_justified(|ui| {

@@ -252,13 +252,23 @@ a request in the same sense as the embedded size below.
 
 The host owns pan and zoom. Wherever an editor's content has a view of its
 own, the host works out the rectangle that content goes in and tells the
-instance, in the logical coordinates of its frame; the editor draws its
-content there and keeps no zoom or offset of its own. An instance moves the
-view only by asking - pan by a distance, zoom by a factor about a point in
-those same frame coordinates, or fit - and the host answers by moving
-whatever viewport the instance is being shown in, which may be a tab of its
-own or a canvas the block sits in. An instance never told where its view is
-fills the content it is given.
+instance, in the logical coordinates of its frame, along with the scale it is
+showing that content at; the editor draws its content there and keeps no zoom
+or offset of its own. The scale is what an editor with a world of its own
+rather than a picture of a known size needs, since the rectangle alone says
+how much of the world is on screen but not how large a unit of it is, and it
+is what a zoom readout reports. An instance moves the view only by asking -
+pan by a distance, zoom by a factor about a point in those same frame
+coordinates, or fit - and the host answers by moving whatever viewport the
+instance is being shown in, which may be a tab of its own or a canvas the
+block sits in. An instance never told where its view is fills the content it
+is given at a scale of one.
+
+Wheel, pinch and middle- or space-drag over an instance's viewport belong to
+the host, which reads them once for the outermost view they fall in: a gesture
+over a block being edited inside a canvas moves the canvas, not both. An
+editor leaves those gestures alone and turns only a gesture of its own into a
+request.
 
 An editor instance may report the size it would like to be given wherever the
 host embeds it. It is a request, not a constraint: the host may embed the

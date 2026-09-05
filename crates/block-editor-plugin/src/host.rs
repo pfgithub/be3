@@ -310,6 +310,12 @@ impl ChildHandle {
     }
 }
 
+#[derive(Clone, Copy)]
+struct View {
+    rect: egui::Rect,
+    scale: f32,
+}
+
 #[derive(Clone, Default)]
 pub struct EditorHost {
     waker: Waker,
@@ -323,7 +329,7 @@ pub struct EditorHost {
     next_pick: Rc<Cell<u64>>,
     editable: Rc<Cell<bool>>,
     client_id: Rc<Cell<Uuid>>,
-    view: Rc<Cell<Option<egui::Rect>>>,
+    view: Rc<Cell<Option<View>>>,
     view_changes: Rc<RefCell<Vec<ViewChange>>>,
     creation_ready: Rc<Cell<bool>>,
     creation_changed: Rc<Cell<bool>>,
@@ -402,7 +408,11 @@ impl EditorHost {
 
     pub fn view(&self) -> Option<egui::Rect> {
         let origin = self.region.get().origin;
-        self.view.get().map(|view| view.translate(origin))
+        self.view.get().map(|view| view.rect.translate(origin))
+    }
+
+    pub fn view_scale(&self) -> Option<f32> {
+        self.view.get().map(|view| view.scale)
     }
 
     pub fn pan_view(&self, delta: egui::Vec2) {
@@ -768,8 +778,8 @@ impl EditorHost {
         self.editable.set(editable);
     }
 
-    pub fn set_view(&self, view: egui::Rect) {
-        self.view.set(Some(view));
+    pub fn set_view(&self, view: egui::Rect, scale: f32) {
+        self.view.set(Some(View { rect: view, scale }));
     }
 
     pub fn take_view_changes(&self) -> Vec<ViewChange> {

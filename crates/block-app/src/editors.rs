@@ -75,6 +75,8 @@ pub enum DirectEditorViewportCommand {
 pub struct DirectEditorViewport {
     commands: Vec<DirectEditorViewportCommand>,
     content_rect: Option<egui::Rect>,
+    scale: f32,
+    gestures_read: bool,
 }
 
 impl DirectEditorViewport {
@@ -82,6 +84,8 @@ impl DirectEditorViewport {
         Self {
             commands: Vec::new(),
             content_rect: None,
+            scale: 1.0,
+            gestures_read: false,
         }
     }
 
@@ -118,6 +122,22 @@ impl DirectEditorViewport {
 
     pub fn replace_content_rect(&mut self, rect: Option<egui::Rect>) -> Option<egui::Rect> {
         std::mem::replace(&mut self.content_rect, rect)
+    }
+
+    pub fn scale(&self) -> f32 {
+        self.scale
+    }
+
+    pub fn replace_scale(&mut self, scale: f32) -> f32 {
+        std::mem::replace(&mut self.scale, scale)
+    }
+
+    pub fn gestures_read(&self) -> bool {
+        self.gestures_read
+    }
+
+    pub fn set_gestures_read(&mut self, read: bool) {
+        self.gestures_read = read;
     }
 }
 
@@ -199,11 +219,11 @@ pub fn embedded_editor_ui(
     id_salt: impl Hash,
     rect: egui::Rect,
     clip_rect: egui::Rect,
-    scale: f32,
     viewport: &mut DirectEditorViewport,
 ) -> Option<EditorAction> {
     let input = editors.direct_editor_viewport_input(block_id);
     let previous = viewport.replace_content_rect(Some(rect));
+    let previous_scale = viewport.replace_scale(embedded_scale(editors, block_id, rect));
     let action = ui
         .new_child(
             egui::UiBuilder::new()
@@ -215,14 +235,24 @@ pub fn embedded_editor_ui(
             ui.set_clip_rect(clip_rect.intersect(ui.clip_rect()));
             ui.set_max_size(rect.size());
             ui.set_min_size(rect.size());
-            editors.embedded_direct_editor_ui(block_id, ui, scale, viewport)
+            editors.embedded_direct_editor_ui(block_id, ui, viewport)
         })
         .inner;
     viewport.replace_content_rect(previous);
-    if input == DirectEditorViewportInput::Viewport {
+    viewport.replace_scale(previous_scale);
+    if input == DirectEditorViewportInput::Viewport && !viewport.gestures_read() {
         viewport_gesture_input(ui.ctx(), rect.intersect(clip_rect), None, viewport);
     }
     action
+}
+
+fn embedded_scale(editors: &mut EditorAccess<'_>, block_id: Uuid, rect: egui::Rect) -> f32 {
+    editors
+        .direct_editor_intrinsic_size(block_id)
+        .filter(|intrinsic| intrinsic.x > 0.0 && intrinsic.y > 0.0)
+        .map_or(1.0, |intrinsic| {
+            (rect.width() / intrinsic.x).min(rect.height() / intrinsic.y)
+        })
 }
 
 impl<'a> EditorAccess<'a> {
@@ -382,11 +412,10 @@ impl<'a> EditorAccess<'a> {
         &mut self,
         id: Uuid,
         ui: &mut egui::Ui,
-        scale: f32,
         viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
         self.with_editor_ui(id, ui, |editor, editors, ui| {
-            editor.embedded_direct_editor_ui(ui, editors, scale, viewport)
+            editor.embedded_direct_editor_ui(ui, editors, viewport)
         })?
     }
 
@@ -600,7 +629,6 @@ pub trait BlockEditor {
         &mut self,
         _ui: &mut egui::Ui,
         _editors: &mut EditorAccess<'_>,
-        _scale: f32,
         _viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
         None
@@ -609,10 +637,9 @@ pub trait BlockEditor {
         &mut self,
         ui: &mut egui::Ui,
         editors: &mut EditorAccess<'_>,
-        scale: f32,
         viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
-        self.direct_editor_ui(ui, editors, scale, viewport)
+        self.direct_editor_ui(ui, editors, viewport)
     }
 }
 
@@ -824,7 +851,7 @@ struct DirectEditorTabBands<'a, 'b> {
 }
 
 impl DirectEditorTabBands<'_, '_> {
-    fn draw(&mut self, ui: &mut egui::Ui, zoom: f32) -> Option<EditorAction> {
+    fn draw(&mut self, ui: &mut egui::Ui) -> Option<EditorAction> {
         let read_only = self.read_only;
         let owns_frame = self.owns_frame;
         let slot = self.slot.clone();
@@ -836,7 +863,7 @@ impl DirectEditorTabBands<'_, '_> {
         let editors = &mut *self.editors;
         let action = block_ui::frame::read_only_scope(ui, read_only, |ui| match owns_frame {
             true => editor.direct_editor_frame_ui(ui, editors, &slot, viewport),
-            false => editor.direct_editor_ui(ui, editors, zoom, viewport),
+            false => editor.direct_editor_ui(ui, editors, viewport),
         });
         if owns_frame {
             self.exit |= self.editor.take_direct_editor_frame_exit();
@@ -860,16 +887,16 @@ impl DirectEditorTabBands<'_, '_> {
             .scope(|ui| {
                 ui.set_clip_rect(rect.intersect(ui.clip_rect()));
                 ui.set_min_size(rect.size());
-                self.draw(ui, 1.0)
+                self.draw(ui)
             })
             .inner;
         self.record(action);
         let input = self.editor.direct_editor_viewport_input(self.editors);
-        if input == DirectEditorViewportInput::Viewport {
-            let viewport = match &mut self.outer {
-                Some(outer) => outer,
-                None => &mut self.viewport,
-            };
+        let viewport = match &mut self.outer {
+            Some(outer) => outer,
+            None => &mut self.viewport,
+        };
+        if input == DirectEditorViewportInput::Viewport && !viewport.gestures_read() {
             viewport_gesture_input(ui.ctx(), band.intersect(ui.clip_rect()), None, viewport);
         }
     }
@@ -921,13 +948,13 @@ impl block_ui::frame::FrameBands for DirectEditorTabBands<'_, '_> {
         );
         if !self.capabilities.supports_pan_and_zoom {
             let action = match self.owns_frame {
-                true => self.draw(ui, 1.0),
+                true => self.draw(ui),
                 false => {
                     egui::ScrollArea::both()
                         .auto_shrink([false, false])
                         .show(ui, |ui| {
                             ui.set_min_size(content_size);
-                            self.draw(ui, 1.0)
+                            self.draw(ui)
                         })
                         .inner
                 }
@@ -946,6 +973,7 @@ impl block_ui::frame::FrameBands for DirectEditorTabBands<'_, '_> {
             transformed_size,
         );
         self.viewport.replace_content_rect(Some(content_rect));
+        self.viewport.replace_scale(self.viewport_state.zoom);
         let fills_viewport = self.editor.direct_editor_fills_viewport();
 
         let mut viewport_input = self.editor.direct_editor_viewport_input(self.editors);
@@ -957,7 +985,6 @@ impl block_ui::frame::FrameBands for DirectEditorTabBands<'_, '_> {
             (false, true) => viewport_rect,
             (false, false) => content_rect,
         };
-        let zoom = self.viewport_state.zoom;
         let action = ui
             .new_child(
                 egui::UiBuilder::new()
@@ -968,7 +995,7 @@ impl block_ui::frame::FrameBands for DirectEditorTabBands<'_, '_> {
             .scope(|ui| {
                 ui.set_clip_rect(editor_rect.intersect(ui.clip_rect()));
                 ui.set_min_size(editor_rect.size());
-                self.draw(ui, zoom)
+                self.draw(ui)
             })
             .inner;
         self.record(action);
@@ -1065,6 +1092,18 @@ fn viewport_gesture_input(
     steered: Option<egui::Rect>,
     viewport: &mut DirectEditorViewport,
 ) {
+    if let Some(touch) = context.input(|input| input.multi_touch()) {
+        let center = touch.center_pos;
+        if viewport_rect.contains(center) && !steered.is_some_and(|rect| rect.contains(center)) {
+            if (touch.zoom_delta - 1.0).abs() > f32::EPSILON {
+                viewport.change_zoom(touch.zoom_delta, Some(center));
+            }
+            if touch.translation_delta != egui::Vec2::ZERO {
+                viewport.pan(touch.translation_delta);
+            }
+        }
+        return;
+    }
     let Some(pointer) = context.pointer_hover_pos().filter(|pointer| {
         viewport_rect.contains(*pointer) && !steered.is_some_and(|rect| rect.contains(*pointer))
     }) else {

@@ -23,8 +23,8 @@ use super::{
 use crate::{
     block_picker::BlockPicker,
     plugin_host::{
-        ArtifactSlot, ArtifactState, CreationSlot, CreationState, EditorBlock, HostChild,
-        HostChildStatus, InstanceRole,
+        ArtifactSlot, ArtifactState, CreationSlot, CreationState, EditorBlock, EditorView,
+        HostChild, HostChildStatus, InstanceRole,
     },
 };
 
@@ -338,11 +338,12 @@ impl PluginEditor {
         if self.plugin.capabilities.pan_and_zoom {
             viewport.auto_fit(self.block.id());
         }
-        let view = self.plugin.capabilities.pan_and_zoom.then(|| {
-            viewport
+        let view = self.plugin.capabilities.pan_and_zoom.then(|| EditorView {
+            rect: viewport
                 .content_rect()
                 .unwrap_or(rect)
-                .translate(-rect.min.to_vec2())
+                .translate(-rect.min.to_vec2()),
+            scale: viewport.scale(),
         });
         let frame = FrameSpec {
             chrome: match chrome {
@@ -363,7 +364,7 @@ impl PluginEditor {
         editors: &mut EditorAccess<'_>,
         frame: FrameSpec,
         size: egui::Vec2,
-        view: Option<egui::Rect>,
+        view: Option<EditorView>,
     ) -> Option<EditorAction> {
         self.region_ui(ui, editors, EditorRegion::Frame, Some(frame), size, view)
     }
@@ -375,7 +376,7 @@ impl PluginEditor {
         region: EditorRegion,
         frame: Option<FrameSpec>,
         size: egui::Vec2,
-        view: Option<egui::Rect>,
+        view: Option<EditorView>,
     ) -> Option<EditorAction> {
         if !self.has_region(region) {
             return None;
@@ -408,6 +409,7 @@ impl PluginEditor {
         let mut statuses = Vec::new();
         let mut views = Vec::new();
         let mut child_viewport = DirectEditorViewport::new();
+        child_viewport.set_gestures_read(self.plugin.capabilities.pan_and_zoom);
         for child in presentation
             .children
             .iter()
@@ -523,7 +525,6 @@ impl PluginEditor {
                 ("plugin-child", self.instance.0, child.child.0),
                 child.rect,
                 child.clip,
-                1.0,
                 viewport,
             );
             collect_view_changes(child.child, viewport, views);
@@ -837,11 +838,12 @@ impl BlockEditor for PluginEditor {
         if self.plugin.capabilities.pan_and_zoom {
             viewport.auto_fit(self.block.id());
         }
-        let view = self.plugin.capabilities.pan_and_zoom.then(|| {
-            viewport
+        let view = self.plugin.capabilities.pan_and_zoom.then(|| EditorView {
+            rect: viewport
                 .content_rect()
                 .unwrap_or(rect)
-                .translate(-rect.min.to_vec2())
+                .translate(-rect.min.to_vec2()),
+            scale: viewport.scale(),
         });
         let frame = FrameSpec {
             chrome: match slot.chrome {
@@ -876,7 +878,6 @@ impl BlockEditor for PluginEditor {
         &mut self,
         ui: &mut egui::Ui,
         editors: &mut EditorAccess<'_>,
-        _scale: f32,
         viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
         self.frame_editor_ui(ui, editors, viewport, false)
@@ -886,7 +887,6 @@ impl BlockEditor for PluginEditor {
         &mut self,
         ui: &mut egui::Ui,
         editors: &mut EditorAccess<'_>,
-        _scale: f32,
         viewport: &mut DirectEditorViewport,
     ) -> Option<EditorAction> {
         self.frame_editor_ui(ui, editors, viewport, false)

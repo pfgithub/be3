@@ -295,8 +295,6 @@ struct PendingComponentValuePick {
     entity_ids: Vec<Uuid>,
 }
 
-const DEFAULT_VIEW_WIDTH: f32 = 1280.0;
-
 pub(crate) struct InfiniteCanvasEditor {
     access: Access,
     presence_visible: bool,

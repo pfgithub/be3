@@ -9,6 +9,7 @@ fn view_messages_round_trip() {
             y: 4.0,
             width: 320.0,
             height: 240.5,
+            scale: 1.5,
         }),
         Message::Editor(EditorMessage::ChangeView {
             instance: EditorInstanceId(3),
