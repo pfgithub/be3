@@ -171,6 +171,13 @@ impl Element for ListNode {
         self.items.iter().map(|item| item.child).collect()
     }
 
+    fn kind(&self) -> &'static str {
+        match self.direction {
+            Direction::Horizontal => "row",
+            Direction::Vertical => "column",
+        }
+    }
+
     fn as_any(&self) -> &dyn Any {
         self
     }

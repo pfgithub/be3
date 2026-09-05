@@ -129,6 +129,10 @@ impl Element for ScrollNode {
         self.items.clone()
     }
 
+    fn kind(&self) -> &'static str {
+        "scroll"
+    }
+
     fn as_any(&self) -> &dyn Any {
         self
     }
@@ -148,6 +152,14 @@ impl Document {
             .get_mut_as::<ScrollNode>(scroll)
             .items
             .push(child);
+    }
+
+    pub fn scroll_offset(&self, scroll: NodeId) -> f32 {
+        self.arena.get_as::<ScrollNode>(scroll).offset
+    }
+
+    pub fn set_scroll_offset(&mut self, scroll: NodeId, offset: f32) {
+        self.arena.get_mut_as::<ScrollNode>(scroll).offset = offset;
     }
 
     pub fn set_scroll_on_change(

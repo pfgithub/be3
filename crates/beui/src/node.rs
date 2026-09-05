@@ -43,6 +43,12 @@ pub(crate) trait Element: Any {
 
     fn children(&self) -> Vec<NodeId>;
 
+    fn kind(&self) -> &'static str;
+
+    fn detail(&self) -> Option<String> {
+        None
+    }
+
     fn as_any(&self) -> &dyn Any;
     fn as_any_mut(&mut self) -> &mut dyn Any;
 }

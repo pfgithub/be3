@@ -27,6 +27,13 @@ pub fn caption(document: &mut Document, content: impl Into<String>) -> NodeId {
     line(document, content, FONT_SMALL, TEXT_MUTED)
 }
 
+pub fn code(document: &mut Document, content: impl Into<String>) -> NodeId {
+    let code = document.create_text(content, FONT_SMALL, TEXT);
+    document.set_text_monospace(code, true);
+    document.set_text_align(code, TextAlign::Start, TextAlign::Center);
+    code
+}
+
 pub fn paragraph(document: &mut Document, content: impl Into<String>) -> NodeId {
     let paragraph = document.create_text(content, FONT_BODY, TEXT_MUTED);
     document.set_text_wrap(paragraph, true);

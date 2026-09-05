@@ -78,6 +78,10 @@ impl Element for OutlineNode {
         self.child.into_iter().collect()
     }
 
+    fn kind(&self) -> &'static str {
+        "outline"
+    }
+
     fn as_any(&self) -> &dyn Any {
         self
     }

@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 
-use egui::{Context, Id, LayerId, Order, Rect};
+use egui::{pos2, Context, Event, Id, Key, LayerId, Order, Rect};
 
+use crate::inspector::{Inspector, PANEL_WIDTH};
 use crate::interact;
 use crate::layout;
 use crate::node::{Arena, NodeId};
@@ -12,6 +13,9 @@ pub struct Document {
     pub(crate) root: Option<NodeId>,
     pub(crate) focused: Option<NodeId>,
     pub(crate) activated: Option<NodeId>,
+    pub(crate) rects: HashMap<NodeId, Rect>,
+    pub(crate) inspector: Option<Box<Inspector>>,
+    pub(crate) inspectable: bool,
 }
 
 impl Document {
@@ -21,6 +25,9 @@ impl Document {
             root: None,
             focused: None,
             activated: None,
+            rects: HashMap::new(),
+            inspector: None,
+            inspectable: true,
         }
     }
 
@@ -30,6 +37,22 @@ impl Document {
 
     pub fn root(&self) -> Option<NodeId> {
         self.root
+    }
+
+    pub fn children(&self, id: NodeId) -> Vec<NodeId> {
+        self.arena.get(id).children()
+    }
+
+    pub fn node_kind(&self, id: NodeId) -> &'static str {
+        self.arena.get(id).kind()
+    }
+
+    pub fn node_detail(&self, id: NodeId) -> Option<String> {
+        self.arena.get(id).detail()
+    }
+
+    pub fn node_rect(&self, id: NodeId) -> Option<Rect> {
+        self.rects.get(&id).copied()
     }
 
     pub fn remove_node(&mut self, id: NodeId) {
@@ -50,7 +73,28 @@ impl Document {
     }
 
     pub fn show(&mut self, ctx: &Context, rect: Rect) {
+        if self.inspectable && inspector_toggled(ctx) {
+            self.inspector = match self.inspector {
+                Some(_) => None,
+                None => Some(Box::new(Inspector::new())),
+            };
+        }
+
+        let (content, panel) = match self.inspector {
+            Some(_) => split(rect),
+            None => (rect, Rect::NOTHING),
+        };
+        self.show_content(ctx, content);
+
+        if let Some(mut inspector) = self.inspector.take() {
+            inspector.show(self, ctx, panel);
+            self.inspector = Some(inspector);
+        }
+    }
+
+    fn show_content(&mut self, ctx: &Context, rect: Rect) {
         let Some(root) = self.root else {
+            self.rects.clear();
             return;
         };
         let painter = ctx.layer_painter(LayerId::new(Order::Middle, Id::new("beui")));
@@ -60,12 +104,39 @@ impl Document {
         interact::interact(self, ctx, &painter, &rects, root);
 
         let Some(root) = self.root else {
+            self.rects.clear();
             return;
         };
         let mut rects = HashMap::new();
         layout::layout(self, &painter, root, rect, &mut rects);
         paint::paint(self, &painter, &rects, root);
+        self.rects = rects;
     }
+}
+
+fn split(rect: Rect) -> (Rect, Rect) {
+    let width = PANEL_WIDTH.min(rect.width() / 2.0);
+    let edge = rect.right() - width;
+    (
+        Rect::from_min_max(rect.min, pos2(edge, rect.bottom())),
+        Rect::from_min_max(pos2(edge, rect.top()), rect.max),
+    )
+}
+
+fn inspector_toggled(ctx: &Context) -> bool {
+    ctx.input(|input| {
+        input.events.iter().any(|event| {
+            matches!(
+                event,
+                Event::Key {
+                    key: Key::I,
+                    pressed: true,
+                    modifiers,
+                    ..
+                } if modifiers.ctrl && modifiers.shift
+            )
+        })
+    })
 }
 
 impl Default for Document {

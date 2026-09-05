@@ -20,9 +20,18 @@ pub(crate) struct TextNode {
     pub(crate) horizontal: TextAlign,
     pub(crate) vertical: TextAlign,
     pub(crate) wrap: bool,
+    pub(crate) monospace: bool,
 }
 
 impl TextNode {
+    fn font(&self) -> FontId {
+        if self.monospace {
+            FontId::monospace(self.font_size)
+        } else {
+            FontId::proportional(self.font_size)
+        }
+    }
+
     fn wrap_width(&self, available_width: f32) -> f32 {
         if self.wrap {
             available_width.max(0.0)
@@ -37,7 +46,7 @@ impl Element for TextNode {
         painter
             .layout(
                 self.content.clone(),
-                FontId::proportional(self.font_size),
+                self.font(),
                 Color32::PLACEHOLDER,
                 self.wrap_width(available.x),
             )
@@ -62,7 +71,7 @@ impl Element for TextNode {
     ) {
         let galley = painter.layout(
             self.content.clone(),
-            FontId::proportional(self.font_size),
+            self.font(),
             self.color,
             self.wrap_width(rect.width()),
         );
@@ -96,6 +105,14 @@ impl Element for TextNode {
         Vec::new()
     }
 
+    fn kind(&self) -> &'static str {
+        "text"
+    }
+
+    fn detail(&self) -> Option<String> {
+        Some(format!("\"{}\"", self.content))
+    }
+
     fn as_any(&self) -> &dyn Any {
         self
     }
@@ -119,6 +136,7 @@ impl Document {
             horizontal: TextAlign::Start,
             vertical: TextAlign::Start,
             wrap: false,
+            monospace: false,
         })
     }
 
@@ -138,6 +156,10 @@ impl Document {
 
     pub fn set_text_wrap(&mut self, text: NodeId, wrap: bool) {
         self.arena.get_mut_as::<TextNode>(text).wrap = wrap;
+    }
+
+    pub fn set_text_monospace(&mut self, text: NodeId, monospace: bool) {
+        self.arena.get_mut_as::<TextNode>(text).monospace = monospace;
     }
 
     pub fn set_text_color(&mut self, text: NodeId, color: Color32) {

@@ -205,6 +205,7 @@ fn build_sidebar(document: &mut Document) -> NodeId {
     let shift_tab = styled::shortcut(document, "Shift+Tab", "move focus back");
     let enter = styled::shortcut(document, "Enter", "activate the focused button");
     let wheel = styled::shortcut(document, "Wheel", "scroll the row list");
+    let inspect = styled::shortcut(document, "Ctrl+Shift+I", "open the inspector");
 
     let content = unstyled::column(document, 12.0);
     document.append_child(content, heading, ItemSize::Intrinsic);
@@ -215,6 +216,7 @@ fn build_sidebar(document: &mut Document) -> NodeId {
     document.append_child(content, shift_tab, ItemSize::Intrinsic);
     document.append_child(content, enter, ItemSize::Intrinsic);
     document.append_child(content, wheel, ItemSize::Intrinsic);
+    document.append_child(content, inspect, ItemSize::Intrinsic);
 
     styled::card(document, content)
 }

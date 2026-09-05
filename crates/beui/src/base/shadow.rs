@@ -46,6 +46,10 @@ impl Element for ShadowNode {
         vec![self.shadow_root]
     }
 
+    fn kind(&self) -> &'static str {
+        "shadow"
+    }
+
     fn as_any(&self) -> &dyn Any {
         self
     }
@@ -99,6 +103,10 @@ impl Element for SlotNode {
 
     fn children(&self) -> Vec<NodeId> {
         self.content.into_iter().collect()
+    }
+
+    fn kind(&self) -> &'static str {
+        "slot"
     }
 
     fn as_any(&self) -> &dyn Any {

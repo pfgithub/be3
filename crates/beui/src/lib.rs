@@ -1,5 +1,6 @@
 mod base;
 mod document;
+mod inspector;
 mod interact;
 mod layout;
 mod node;

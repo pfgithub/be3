@@ -112,6 +112,10 @@ impl Element for ClickCatcherNode {
         self.child.into_iter().collect()
     }
 
+    fn kind(&self) -> &'static str {
+        "click-catcher"
+    }
+
     fn as_any(&self) -> &dyn Any {
         self
     }

@@ -65,6 +65,18 @@ impl Element for FillNode {
         self.child.into_iter().collect()
     }
 
+    fn kind(&self) -> &'static str {
+        "fill"
+    }
+
+    fn detail(&self) -> Option<String> {
+        let [red, green, blue, alpha] = self.color.to_array();
+        if alpha == 0 {
+            return Some("transparent".to_owned());
+        }
+        Some(format!("#{red:02x}{green:02x}{blue:02x}"))
+    }
+
     fn as_any(&self) -> &dyn Any {
         self
     }

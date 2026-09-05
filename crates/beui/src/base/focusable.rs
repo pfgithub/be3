@@ -72,6 +72,10 @@ impl Element for FocusableNode {
         self.child.into_iter().collect()
     }
 
+    fn kind(&self) -> &'static str {
+        "focusable"
+    }
+
     fn as_any(&self) -> &dyn Any {
         self
     }

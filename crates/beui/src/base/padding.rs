@@ -76,6 +76,10 @@ impl Element for PaddingNode {
         self.child.into_iter().collect()
     }
 
+    fn kind(&self) -> &'static str {
+        "padding"
+    }
+
     fn as_any(&self) -> &dyn Any {
         self
     }

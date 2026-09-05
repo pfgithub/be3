@@ -1,9 +1,13 @@
 use super::*;
 
+mod clicking_a_row_collapses_its_children;
 mod clicking_the_padding_around_a_button_label_activates_it;
+mod ctrl_shift_i_opens_and_closes_the_inspector;
 mod enter_activates_the_focused_button;
 mod shift_tab_moves_focus_to_the_previous_button;
 mod tab_moves_focus_to_the_next_button;
+mod the_inspector_follows_nodes_added_to_the_document;
+mod the_inspector_lists_the_document_tree;
 mod the_scroll_position_is_reported_to_its_listener;
 
 use std::cell::Cell;
@@ -12,6 +16,7 @@ use std::rc::Rc;
 use egui::{pos2, Color32, Context, Event, Key, Modifiers, PointerButton, Pos2, RawInput, Vec2};
 
 use crate::base::list::{Direction, ItemSize};
+use crate::inspector::Inspector;
 use crate::unstyled;
 
 const VIEWPORT: Vec2 = Vec2::new(400.0, 300.0);
@@ -59,6 +64,41 @@ impl Harness {
     pub(crate) fn key(&mut self, key: Key, modifiers: Modifiers) {
         self.frame(vec![key_event(key, true, modifiers)]);
         self.frame(vec![key_event(key, false, modifiers)]);
+    }
+
+    pub(crate) fn toggle_inspector(&mut self) {
+        self.key(
+            Key::I,
+            Modifiers {
+                ctrl: true,
+                shift: true,
+                ..Modifiers::NONE
+            },
+        );
+    }
+
+    pub(crate) fn inspector(&self) -> &Inspector {
+        self.document
+            .inspector
+            .as_ref()
+            .expect("the inspector is closed")
+    }
+
+    pub(crate) fn tree(&self) -> Vec<String> {
+        self.inspector()
+            .entries
+            .iter()
+            .map(|entry| format!("{}{}", "  ".repeat(entry.depth), entry.kind))
+            .collect()
+    }
+
+    pub(crate) fn row_center(&self, index: usize) -> Pos2 {
+        let inspector = self.inspector();
+        inspector
+            .document
+            .node_rect(inspector.rows[index].row)
+            .expect("the row was not laid out")
+            .center()
     }
 }
 
