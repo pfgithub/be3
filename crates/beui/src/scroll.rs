@@ -6,24 +6,62 @@ use egui::{pos2, vec2, Painter, Rect, Vec2};
 use crate::document::Document;
 use crate::node::{Element, InteractInput, NodeId};
 
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct ScrollPosition {
+    pub offset: f32,
+    pub content: f32,
+    pub viewport: f32,
+}
+
+impl ScrollPosition {
+    pub fn max_offset(&self) -> f32 {
+        (self.content - self.viewport).max(0.0)
+    }
+}
+
+pub(crate) type ScrollHandler = Box<dyn FnMut(&mut Document, ScrollPosition)>;
+
 pub(crate) struct ScrollNode {
     pub(crate) items: Vec<NodeId>,
-    pub(crate) top_index: usize,
     pub(crate) offset: f32,
+    pub(crate) on_change: Option<ScrollHandler>,
+    pub(crate) reported: Option<ScrollPosition>,
 }
 
 impl ScrollNode {
     pub(crate) fn new() -> Self {
         Self {
             items: Vec::new(),
-            top_index: 0,
             offset: 0.0,
+            on_change: None,
+            reported: None,
+        }
+    }
+
+    fn heights(&self, doc: &Document, painter: &Painter, width: f32) -> Vec<f32> {
+        let available = vec2(width, f32::INFINITY);
+        self.items
+            .iter()
+            .map(|&item| crate::layout::measure(doc, painter, item, available).y)
+            .collect()
+    }
+
+    fn position(&self, doc: &Document, painter: &Painter, rect: Rect) -> ScrollPosition {
+        let content = self.heights(doc, painter, rect.width()).iter().sum();
+        let position = ScrollPosition {
+            offset: self.offset,
+            content,
+            viewport: rect.height(),
+        };
+        ScrollPosition {
+            offset: position.offset.clamp(0.0, position.max_offset()),
+            ..position
         }
     }
 }
 
 impl Element for ScrollNode {
-    fn measure(&self, _doc: &Document, _painter: &Painter) -> Vec2 {
+    fn measure(&self, _doc: &Document, _painter: &Painter, _available: Vec2) -> Vec2 {
         Vec2::ZERO
     }
 
@@ -34,26 +72,30 @@ impl Element for ScrollNode {
         rect: Rect,
         out: &mut HashMap<NodeId, Rect>,
     ) {
-        let mut cursor = rect.top() - self.offset;
-        for &item in self.items.iter().skip(self.top_index) {
-            let height = crate::layout::measure(doc, painter, item).y;
-            let child_rect =
-                Rect::from_min_size(pos2(rect.left(), cursor), vec2(rect.width(), height));
-            crate::layout::layout(doc, painter, item, child_rect, out);
-            cursor += height;
+        let heights = self.heights(doc, painter, rect.width());
+        let content: f32 = heights.iter().sum();
+        let offset = self.offset.clamp(0.0, (content - rect.height()).max(0.0));
+
+        let mut cursor = rect.top() - offset;
+        for (&item, height) in self.items.iter().zip(&heights) {
             if cursor >= rect.bottom() {
                 break;
             }
+            if cursor + height > rect.top() {
+                let child_rect =
+                    Rect::from_min_size(pos2(rect.left(), cursor), vec2(rect.width(), *height));
+                crate::layout::layout(doc, painter, item, child_rect, out);
+            }
+            cursor += height;
         }
     }
 
     fn paint(&self, doc: &Document, painter: &Painter, rects: &HashMap<NodeId, Rect>, rect: Rect) {
         let clipped = painter.with_clip_rect(rect);
-        for &item in self.items.iter().skip(self.top_index) {
-            if !rects.contains_key(&item) {
-                break;
+        for item in &self.items {
+            if rects.contains_key(item) {
+                crate::paint::paint(doc, &clipped, rects, *item);
             }
-            crate::paint::paint(doc, &clipped, rects, item);
         }
     }
 
@@ -68,15 +110,19 @@ impl Element for ScrollNode {
     ) -> Vec<NodeId> {
         if input.scroll_delta != 0.0 && input.pointer_pos.is_some_and(|pos| rect.contains(pos)) {
             self.offset -= input.scroll_delta;
-            normalize_scroll(
-                doc,
-                painter,
-                &self.items,
-                &mut self.top_index,
-                &mut self.offset,
-            );
         }
-        self.items.iter().skip(self.top_index).copied().collect()
+
+        let position = self.position(doc, painter, rect);
+        self.offset = position.offset;
+        if self.on_change.is_some() && self.reported != Some(position) {
+            self.reported = Some(position);
+            if let Some(mut handler) = self.on_change.take() {
+                handler(doc, position);
+                self.on_change = Some(handler);
+            }
+        }
+
+        self.items.clone()
     }
 
     fn children(&self) -> Vec<NodeId> {
@@ -89,40 +135,5 @@ impl Element for ScrollNode {
 
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
-    }
-}
-
-fn normalize_scroll(
-    doc: &Document,
-    painter: &Painter,
-    items: &[NodeId],
-    top_index: &mut usize,
-    offset: &mut f32,
-) {
-    if items.is_empty() {
-        *top_index = 0;
-        *offset = 0.0;
-        return;
-    }
-    loop {
-        if *offset < 0.0 {
-            if *top_index == 0 {
-                *offset = 0.0;
-                return;
-            }
-            *top_index -= 1;
-            *offset += crate::layout::measure(doc, painter, items[*top_index]).y;
-            continue;
-        }
-        let height = crate::layout::measure(doc, painter, items[*top_index]).y;
-        if *offset > height && *top_index + 1 < items.len() {
-            *offset -= height;
-            *top_index += 1;
-            continue;
-        }
-        if *offset > height {
-            *offset = height;
-        }
-        return;
     }
 }

@@ -14,5 +14,7 @@ mod shadow;
 mod text;
 
 pub use document::Document;
-pub use list::{Direction, ItemSize};
+pub use list::{Align, Direction, ItemSize};
 pub use node::NodeId;
+pub use scroll::ScrollPosition;
+pub use text::TextAlign;

@@ -1,5 +1,6 @@
 use super::*;
 
+mod fixed_items_use_their_fixed_length;
 mod intrinsic_items_use_their_measured_length;
 mod percent_items_get_nothing_when_no_space_remains;
 mod percent_items_normalize_when_they_dont_sum_to_100;

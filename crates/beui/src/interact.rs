@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use egui::{Context, Painter, Rect};
+use egui::{Context, Event, Key, Painter, Rect};
 
 use crate::document::Document;
 use crate::node::{InteractInput, NodeId};
@@ -24,6 +24,29 @@ pub(crate) fn interact(
 
     if input.pressed_this_frame {
         doc.update_focus(focus_target);
+    }
+
+    for event in ctx.input(|input| input.events.clone()) {
+        let Event::Key {
+            key,
+            pressed,
+            modifiers,
+            ..
+        } = event
+        else {
+            continue;
+        };
+        match key {
+            Key::Tab if pressed => {
+                if modifiers.shift {
+                    doc.focus_previous();
+                } else {
+                    doc.focus_next();
+                }
+            }
+            Key::Enter | Key::Space => doc.set_focus_pressed(pressed),
+            _ => {}
+        }
     }
 }
 

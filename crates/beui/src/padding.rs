@@ -1,32 +1,41 @@
 use std::any::Any;
 use std::collections::HashMap;
 
-use egui::{Painter, Rect, Vec2};
+use egui::{vec2, Painter, Rect, Vec2};
 
 use crate::document::Document;
 use crate::node::{Element, InteractInput, NodeId};
 
 pub(crate) struct PaddingNode {
     pub(crate) child: Option<NodeId>,
-    pub(crate) amount: f32,
+    pub(crate) horizontal: f32,
+    pub(crate) vertical: f32,
 }
 
 impl PaddingNode {
-    pub(crate) fn new(amount: f32) -> Self {
+    pub(crate) fn new(horizontal: f32, vertical: f32) -> Self {
         Self {
             child: None,
-            amount,
+            horizontal,
+            vertical,
         }
+    }
+
+    fn amount(&self) -> Vec2 {
+        vec2(self.horizontal * 2.0, self.vertical * 2.0)
     }
 }
 
 impl Element for PaddingNode {
-    fn measure(&self, doc: &Document, painter: &Painter) -> Vec2 {
+    fn measure(&self, doc: &Document, painter: &Painter, available: Vec2) -> Vec2 {
         let inner = match self.child {
-            Some(child) => crate::layout::measure(doc, painter, child),
+            Some(child) => {
+                let available = (available - self.amount()).max(Vec2::ZERO);
+                crate::layout::measure(doc, painter, child, available)
+            }
             None => Vec2::ZERO,
         };
-        inner + Vec2::splat(self.amount * 2.0)
+        inner + self.amount()
     }
 
     fn layout(
@@ -37,7 +46,11 @@ impl Element for PaddingNode {
         out: &mut HashMap<NodeId, Rect>,
     ) {
         if let Some(child) = self.child {
-            crate::layout::layout(doc, painter, child, rect.shrink(self.amount), out);
+            let inner = Rect::from_min_max(
+                rect.min + vec2(self.horizontal, self.vertical),
+                rect.max - vec2(self.horizontal, self.vertical),
+            );
+            crate::layout::layout(doc, painter, child, inner, out);
         }
     }
 

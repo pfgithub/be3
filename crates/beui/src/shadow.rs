@@ -12,8 +12,8 @@ pub(crate) struct ShadowNode {
 }
 
 impl Element for ShadowNode {
-    fn measure(&self, doc: &Document, painter: &Painter) -> Vec2 {
-        crate::layout::measure(doc, painter, self.shadow_root)
+    fn measure(&self, doc: &Document, painter: &Painter, available: Vec2) -> Vec2 {
+        crate::layout::measure(doc, painter, self.shadow_root, available)
     }
 
     fn layout(
@@ -60,9 +60,9 @@ pub(crate) struct SlotNode {
 }
 
 impl Element for SlotNode {
-    fn measure(&self, doc: &Document, painter: &Painter) -> Vec2 {
+    fn measure(&self, doc: &Document, painter: &Painter, available: Vec2) -> Vec2 {
         match self.content {
-            Some(content) => crate::layout::measure(doc, painter, content),
+            Some(content) => crate::layout::measure(doc, painter, content, available),
             None => Vec2::ZERO,
         }
     }

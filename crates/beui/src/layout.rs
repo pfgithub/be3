@@ -5,8 +5,8 @@ use egui::{Painter, Rect, Vec2};
 use crate::document::Document;
 use crate::node::NodeId;
 
-pub(crate) fn measure(doc: &Document, painter: &Painter, id: NodeId) -> Vec2 {
-    doc.arena.get(id).measure(doc, painter)
+pub(crate) fn measure(doc: &Document, painter: &Painter, id: NodeId, available: Vec2) -> Vec2 {
+    doc.arena.get(id).measure(doc, painter, available)
 }
 
 pub(crate) fn layout(

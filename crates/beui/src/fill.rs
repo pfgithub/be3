@@ -23,9 +23,9 @@ impl FillNode {
 }
 
 impl Element for FillNode {
-    fn measure(&self, doc: &Document, painter: &Painter) -> Vec2 {
+    fn measure(&self, doc: &Document, painter: &Painter, available: Vec2) -> Vec2 {
         match self.child {
-            Some(child) => crate::layout::measure(doc, painter, child),
+            Some(child) => crate::layout::measure(doc, painter, child, available),
             None => Vec2::ZERO,
         }
     }

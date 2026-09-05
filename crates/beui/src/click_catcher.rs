@@ -10,6 +10,7 @@ pub(crate) struct ClickCatcherNode {
     pub(crate) child: Option<NodeId>,
     pub(crate) cursor: CursorIcon,
     pub(crate) armed: bool,
+    pub(crate) key_active: bool,
     pub(crate) hovered: bool,
     pub(crate) active: bool,
     pub(crate) on_click: Option<ClickHandler>,
@@ -23,6 +24,7 @@ impl ClickCatcherNode {
             child: None,
             cursor,
             armed: false,
+            key_active: false,
             hovered: false,
             active: false,
             on_click: None,
@@ -30,12 +32,16 @@ impl ClickCatcherNode {
             on_active_change: None,
         }
     }
+
+    pub(crate) fn is_active(&self) -> bool {
+        self.armed || self.key_active
+    }
 }
 
 impl Element for ClickCatcherNode {
-    fn measure(&self, doc: &Document, painter: &Painter) -> Vec2 {
+    fn measure(&self, doc: &Document, painter: &Painter, available: Vec2) -> Vec2 {
         match self.child {
-            Some(child) => crate::layout::measure(doc, painter, child),
+            Some(child) => crate::layout::measure(doc, painter, child, available),
             None => Vec2::ZERO,
         }
     }
@@ -81,8 +87,7 @@ impl Element for ClickCatcherNode {
             }
             self.armed = false;
         }
-        let active = self.armed;
-        if hovered || active {
+        if hovered || self.is_active() {
             painter.ctx().set_cursor_icon(self.cursor);
         }
         if hovered != self.hovered {
@@ -92,6 +97,7 @@ impl Element for ClickCatcherNode {
                 self.on_hover_change = Some(handler);
             }
         }
+        let active = self.is_active();
         if active != self.active {
             self.active = active;
             if let Some(mut handler) = self.on_active_change.take() {

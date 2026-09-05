@@ -4,12 +4,14 @@ use std::collections::HashMap;
 use egui::{Painter, Rect, Vec2};
 
 use crate::document::Document;
-use crate::node::{ChangeHandler, Element, InteractInput, NodeId};
+use crate::node::{ChangeHandler, ClickHandler, Element, InteractInput, NodeId};
 
 pub(crate) struct FocusableNode {
     pub(crate) child: Option<NodeId>,
     pub(crate) focused: bool,
     pub(crate) on_focus_change: Option<ChangeHandler>,
+    pub(crate) on_activate_change: Option<ChangeHandler>,
+    pub(crate) on_activate: Option<ClickHandler>,
 }
 
 impl FocusableNode {
@@ -18,14 +20,16 @@ impl FocusableNode {
             child: None,
             focused: false,
             on_focus_change: None,
+            on_activate_change: None,
+            on_activate: None,
         }
     }
 }
 
 impl Element for FocusableNode {
-    fn measure(&self, doc: &Document, painter: &Painter) -> Vec2 {
+    fn measure(&self, doc: &Document, painter: &Painter, available: Vec2) -> Vec2 {
         match self.child {
-            Some(child) => crate::layout::measure(doc, painter, child),
+            Some(child) => crate::layout::measure(doc, painter, child, available),
             None => Vec2::ZERO,
         }
     }

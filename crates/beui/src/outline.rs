@@ -11,25 +11,27 @@ pub(crate) struct OutlineNode {
     pub(crate) color: Color32,
     pub(crate) width: f32,
     pub(crate) corner_radius: u8,
+    pub(crate) offset: f32,
     pub(crate) visible: bool,
 }
 
 impl OutlineNode {
-    pub(crate) fn new(color: Color32, width: f32, corner_radius: u8) -> Self {
+    pub(crate) fn new(color: Color32, width: f32, corner_radius: u8, offset: f32) -> Self {
         Self {
             child: None,
             color,
             width,
             corner_radius,
+            offset,
             visible: false,
         }
     }
 }
 
 impl Element for OutlineNode {
-    fn measure(&self, doc: &Document, painter: &Painter) -> Vec2 {
+    fn measure(&self, doc: &Document, painter: &Painter, available: Vec2) -> Vec2 {
         match self.child {
-            Some(child) => crate::layout::measure(doc, painter, child),
+            Some(child) => crate::layout::measure(doc, painter, child, available),
             None => Vec2::ZERO,
         }
     }
@@ -49,10 +51,10 @@ impl Element for OutlineNode {
     fn paint(&self, doc: &Document, painter: &Painter, rects: &HashMap<NodeId, Rect>, rect: Rect) {
         if self.visible {
             painter.rect_stroke(
-                rect,
+                rect.expand(self.offset),
                 self.corner_radius,
                 Stroke::new(self.width, self.color),
-                StrokeKind::Outside,
+                StrokeKind::Inside,
             );
         }
         if let Some(child) = self.child {
