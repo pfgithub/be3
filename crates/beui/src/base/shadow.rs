@@ -109,3 +109,22 @@ impl Element for SlotNode {
         self
     }
 }
+
+impl Document {
+    pub fn create_slot(&mut self) -> NodeId {
+        self.arena.insert(SlotNode { content: None })
+    }
+
+    pub fn create_shadow(&mut self, shadow_root: NodeId, slot: NodeId) -> NodeId {
+        self.arena.insert(ShadowNode { shadow_root, slot })
+    }
+
+    pub fn set_shadow_child(&mut self, shadow: NodeId, child: NodeId) {
+        let slot = self.arena.get_as::<ShadowNode>(shadow).slot;
+        self.arena.get_mut_as::<SlotNode>(slot).content = Some(child);
+    }
+
+    pub fn shadow_root(&self, shadow: NodeId) -> NodeId {
+        self.arena.get_as::<ShadowNode>(shadow).shadow_root
+    }
+}

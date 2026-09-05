@@ -104,3 +104,43 @@ impl Element for TextNode {
         self
     }
 }
+
+impl Document {
+    pub fn create_text(
+        &mut self,
+        content: impl Into<String>,
+        font_size: f32,
+        color: Color32,
+    ) -> NodeId {
+        self.arena.insert(TextNode {
+            content: content.into(),
+            font_size,
+            color,
+            horizontal: TextAlign::Start,
+            vertical: TextAlign::Start,
+            wrap: false,
+        })
+    }
+
+    pub fn set_text(&mut self, id: NodeId, content: impl Into<String>) {
+        self.arena.get_mut_as::<TextNode>(id).content = content.into();
+    }
+
+    pub fn text(&self, id: NodeId) -> &str {
+        &self.arena.get_as::<TextNode>(id).content
+    }
+
+    pub fn set_text_align(&mut self, text: NodeId, horizontal: TextAlign, vertical: TextAlign) {
+        let node = self.arena.get_mut_as::<TextNode>(text);
+        node.horizontal = horizontal;
+        node.vertical = vertical;
+    }
+
+    pub fn set_text_wrap(&mut self, text: NodeId, wrap: bool) {
+        self.arena.get_mut_as::<TextNode>(text).wrap = wrap;
+    }
+
+    pub fn set_text_color(&mut self, text: NodeId, color: Color32) {
+        self.arena.get_mut_as::<TextNode>(text).color = color;
+    }
+}

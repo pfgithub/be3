@@ -230,5 +230,45 @@ fn fixed_length(size: &ItemSize, intrinsic_length: f32) -> f32 {
     }
 }
 
+impl Document {
+    pub fn create_list(&mut self, direction: Direction, spacing: f32) -> NodeId {
+        self.arena.insert(ListNode {
+            direction,
+            spacing,
+            align: Align::Stretch,
+            items: Vec::new(),
+        })
+    }
+
+    pub fn set_list_align(&mut self, list: NodeId, align: Align) {
+        self.arena.get_mut_as::<ListNode>(list).align = align;
+    }
+
+    pub fn append_child(&mut self, parent: NodeId, child: NodeId, size: ItemSize) {
+        self.arena
+            .get_mut_as::<ListNode>(parent)
+            .items
+            .push(ListItem { child, size });
+    }
+
+    pub fn remove_child(&mut self, parent: NodeId, child: NodeId) {
+        self.arena
+            .get_mut_as::<ListNode>(parent)
+            .items
+            .retain(|item| item.child != child);
+    }
+
+    pub fn set_child_size(&mut self, parent: NodeId, child: NodeId, size: ItemSize) {
+        let item = self
+            .arena
+            .get_mut_as::<ListNode>(parent)
+            .items
+            .iter_mut()
+            .find(|item| item.child == child)
+            .expect("child is not in the list");
+        item.size = size;
+    }
+}
+
 #[cfg(test)]
 mod tests;

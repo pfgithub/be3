@@ -86,3 +86,28 @@ impl Element for OutlineNode {
         self
     }
 }
+
+impl Document {
+    pub fn create_outline(
+        &mut self,
+        color: Color32,
+        width: f32,
+        corner_radius: u8,
+        offset: f32,
+    ) -> NodeId {
+        self.arena
+            .insert(OutlineNode::new(color, width, corner_radius, offset))
+    }
+
+    pub fn set_outline_child(&mut self, outline: NodeId, child: NodeId) {
+        self.arena.get_mut_as::<OutlineNode>(outline).child = Some(child);
+    }
+
+    pub fn set_outline_color(&mut self, outline: NodeId, color: Color32) {
+        self.arena.get_mut_as::<OutlineNode>(outline).color = color;
+    }
+
+    pub fn set_outline_visible(&mut self, outline: NodeId, visible: bool) {
+        self.arena.get_mut_as::<OutlineNode>(outline).visible = visible;
+    }
+}

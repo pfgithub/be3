@@ -137,3 +137,24 @@ impl Element for ScrollNode {
         self
     }
 }
+
+impl Document {
+    pub fn create_scroll(&mut self) -> NodeId {
+        self.arena.insert(ScrollNode::new())
+    }
+
+    pub fn append_scroll_item(&mut self, scroll: NodeId, child: NodeId) {
+        self.arena
+            .get_mut_as::<ScrollNode>(scroll)
+            .items
+            .push(child);
+    }
+
+    pub fn set_scroll_on_change(
+        &mut self,
+        scroll: NodeId,
+        handler: impl FnMut(&mut Document, ScrollPosition) + 'static,
+    ) {
+        self.arena.get_mut_as::<ScrollNode>(scroll).on_change = Some(Box::new(handler));
+    }
+}

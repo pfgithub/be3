@@ -84,3 +84,13 @@ impl Element for PaddingNode {
         self
     }
 }
+
+impl Document {
+    pub fn create_padding(&mut self, horizontal: f32, vertical: f32) -> NodeId {
+        self.arena.insert(PaddingNode::new(horizontal, vertical))
+    }
+
+    pub fn set_padding_child(&mut self, padding: NodeId, child: NodeId) {
+        self.arena.get_mut_as::<PaddingNode>(padding).child = Some(child);
+    }
+}

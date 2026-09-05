@@ -1,32 +1,28 @@
 use std::any::Any;
 use std::collections::HashMap;
 
-use egui::{Painter, Rect, Vec2};
+use egui::{Color32, Painter, Rect, Vec2};
 
 use crate::document::Document;
-use crate::node::{ChangeHandler, ClickHandler, Element, InteractInput, NodeId};
+use crate::node::{Element, InteractInput, NodeId};
 
-pub(crate) struct FocusableNode {
+pub(crate) struct FillNode {
     pub(crate) child: Option<NodeId>,
-    pub(crate) focused: bool,
-    pub(crate) on_focus_change: Option<ChangeHandler>,
-    pub(crate) on_activate_change: Option<ChangeHandler>,
-    pub(crate) on_activate: Option<ClickHandler>,
+    pub(crate) color: Color32,
+    pub(crate) corner_radius: u8,
 }
 
-impl FocusableNode {
-    pub(crate) fn new() -> Self {
+impl FillNode {
+    pub(crate) fn new(color: Color32, corner_radius: u8) -> Self {
         Self {
             child: None,
-            focused: false,
-            on_focus_change: None,
-            on_activate_change: None,
-            on_activate: None,
+            color,
+            corner_radius,
         }
     }
 }
 
-impl Element for FocusableNode {
+impl Element for FillNode {
     fn measure(&self, doc: &Document, painter: &Painter, available: Vec2) -> Vec2 {
         match self.child {
             Some(child) => crate::layout::measure(doc, painter, child, available),
@@ -46,7 +42,8 @@ impl Element for FocusableNode {
         }
     }
 
-    fn paint(&self, doc: &Document, painter: &Painter, rects: &HashMap<NodeId, Rect>, _rect: Rect) {
+    fn paint(&self, doc: &Document, painter: &Painter, rects: &HashMap<NodeId, Rect>, rect: Rect) {
+        painter.rect_filled(rect, self.corner_radius, self.color);
         if let Some(child) = self.child {
             crate::paint::paint(doc, painter, rects, child);
         }
@@ -56,15 +53,11 @@ impl Element for FocusableNode {
         &mut self,
         _doc: &mut Document,
         _painter: &Painter,
-        input: &InteractInput,
-        id: NodeId,
-        rect: Rect,
-        focus_target: &mut Option<NodeId>,
+        _input: &InteractInput,
+        _id: NodeId,
+        _rect: Rect,
+        _focus_target: &mut Option<NodeId>,
     ) -> Vec<NodeId> {
-        let hovered = input.pointer_pos.is_some_and(|pos| rect.contains(pos));
-        if input.pressed_this_frame && hovered {
-            *focus_target = Some(id);
-        }
         self.child.into_iter().collect()
     }
 
@@ -78,5 +71,19 @@ impl Element for FocusableNode {
 
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
+    }
+}
+
+impl Document {
+    pub fn create_fill(&mut self, color: Color32, corner_radius: u8) -> NodeId {
+        self.arena.insert(FillNode::new(color, corner_radius))
+    }
+
+    pub fn set_fill_child(&mut self, fill: NodeId, child: NodeId) {
+        self.arena.get_mut_as::<FillNode>(fill).child = Some(child);
+    }
+
+    pub fn set_fill_color(&mut self, fill: NodeId, color: Color32) {
+        self.arena.get_mut_as::<FillNode>(fill).color = color;
     }
 }

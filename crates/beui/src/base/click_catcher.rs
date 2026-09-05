@@ -120,3 +120,86 @@ impl Element for ClickCatcherNode {
         self
     }
 }
+
+impl Document {
+    pub fn create_click_catcher(&mut self, cursor: CursorIcon) -> NodeId {
+        self.arena.insert(ClickCatcherNode::new(cursor))
+    }
+
+    pub fn set_click_catcher_child(&mut self, click_catcher: NodeId, child: NodeId) {
+        self.arena
+            .get_mut_as::<ClickCatcherNode>(click_catcher)
+            .child = Some(child);
+    }
+
+    pub fn set_click_catcher_on_click(
+        &mut self,
+        click_catcher: NodeId,
+        handler: impl FnMut(&mut Document) + 'static,
+    ) {
+        self.arena
+            .get_mut_as::<ClickCatcherNode>(click_catcher)
+            .on_click = Some(Box::new(handler));
+    }
+
+    pub fn set_click_catcher_on_hover_change(
+        &mut self,
+        click_catcher: NodeId,
+        handler: impl FnMut(&mut Document, bool) + 'static,
+    ) {
+        self.arena
+            .get_mut_as::<ClickCatcherNode>(click_catcher)
+            .on_hover_change = Some(Box::new(handler));
+    }
+
+    pub fn set_click_catcher_on_active_change(
+        &mut self,
+        click_catcher: NodeId,
+        handler: impl FnMut(&mut Document, bool) + 'static,
+    ) {
+        self.arena
+            .get_mut_as::<ClickCatcherNode>(click_catcher)
+            .on_active_change = Some(Box::new(handler));
+    }
+
+    pub fn set_click_catcher_key_active(&mut self, id: NodeId, key_active: bool) {
+        let mut element = self.arena.take(id);
+        let changed = element
+            .as_any_mut()
+            .downcast_mut::<ClickCatcherNode>()
+            .and_then(|click_catcher| {
+                click_catcher.key_active = key_active;
+                let active = click_catcher.is_active();
+                if active == click_catcher.active {
+                    return None;
+                }
+                click_catcher.active = active;
+                click_catcher
+                    .on_active_change
+                    .take()
+                    .map(|handler| (handler, active))
+            });
+        if let Some((mut handler, active)) = changed {
+            handler(self, active);
+            if let Some(click_catcher) = element.as_any_mut().downcast_mut::<ClickCatcherNode>() {
+                click_catcher.on_active_change = Some(handler);
+            }
+        }
+        self.arena.put_back(id, element);
+    }
+
+    pub fn click_click_catcher(&mut self, id: NodeId) {
+        let mut element = self.arena.take(id);
+        let click = element
+            .as_any_mut()
+            .downcast_mut::<ClickCatcherNode>()
+            .and_then(|click_catcher| click_catcher.on_click.take());
+        if let Some(mut handler) = click {
+            handler(self);
+            if let Some(click_catcher) = element.as_any_mut().downcast_mut::<ClickCatcherNode>() {
+                click_catcher.on_click = Some(handler);
+            }
+        }
+        self.arena.put_back(id, element);
+    }
+}

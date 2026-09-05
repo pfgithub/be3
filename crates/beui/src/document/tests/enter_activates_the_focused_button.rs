@@ -6,7 +6,9 @@ fn enter_activates_the_focused_button() {
     let (button, clicks) = counting_button(&mut document, "Click me");
     let pressed = Rc::new(Cell::new(false));
     let flag = pressed.clone();
-    document.set_button_on_active_change(button, move |_document, active| flag.set(active));
+    unstyled::set_button_on_active_change(&mut document, button, move |_document, active| {
+        flag.set(active)
+    });
     toolbar(&mut document, &[button]);
     let mut harness = Harness::new(document);
 
