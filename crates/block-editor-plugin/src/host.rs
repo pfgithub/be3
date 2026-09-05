@@ -10,10 +10,10 @@ use std::{
 };
 
 use block_plugin_api::{
-    AssetResult, AudioCommand, AudioStatus, BlockPick, ChildId, ChildLayer, ChildMode,
-    ChildPlacement, ChildRect, ChildStatus, ClipboardImage, EditorBand, EditorCapabilities,
-    EditorRegion, FetchResult, FilePick, InteractionMode, Occluder, PerformanceMeasurement,
-    PresenceEntry, ResizeMode, ViewChange, WebViewCommand, WebViewEvent,
+    AudioCommand, AudioStatus, BlockPick, ChildId, ChildLayer, ChildMode, ChildPlacement,
+    ChildRect, ChildStatus, ClipboardImage, EditorBand, EditorCapabilities, EditorRegion,
+    FetchResult, FilePick, InteractionMode, Occluder, PerformanceMeasurement, PresenceEntry,
+    ResizeMode, ViewChange, WebViewCommand, WebViewEvent,
 };
 pub use block_plugin_api::{BlockFilter, FileFilter};
 use block_ui::BlockCatalog;
@@ -353,9 +353,6 @@ pub struct EditorHost {
     web_view_events: Rc<RefCell<Vec<WebViewEvent>>>,
     cursor_grabbed: Rc<Cell<bool>>,
     cursor_grab_changed: Rc<Cell<bool>>,
-    asset_reads: Rc<RefCell<Vec<(u64, String)>>>,
-    assets: Rc<RefCell<HashMap<u64, AssetResult>>>,
-    next_asset: Rc<Cell<u64>>,
     presenting: Rc<Cell<bool>>,
     present_requests: Rc<RefCell<Vec<bool>>>,
     presence: Rc<RefCell<Vec<PresenceEntry>>>,
@@ -604,25 +601,6 @@ impl EditorHost {
         self.cursor_grab_changed
             .replace(false)
             .then(|| self.cursor_grabbed.get())
-    }
-
-    pub fn read_asset(&self, name: impl Into<String>) -> u64 {
-        let request = self.next_asset.get() + 1;
-        self.next_asset.set(request);
-        self.asset_reads.borrow_mut().push((request, name.into()));
-        request
-    }
-
-    pub fn take_asset(&self, request: u64) -> Option<AssetResult> {
-        self.assets.borrow_mut().remove(&request)
-    }
-
-    pub fn take_asset_reads(&self) -> Vec<(u64, String)> {
-        std::mem::take(&mut self.asset_reads.borrow_mut())
-    }
-
-    pub fn set_asset(&self, request: u64, result: AssetResult) {
-        self.assets.borrow_mut().insert(request, result);
     }
 
     pub fn child(&self, ui: &mut egui::Ui, block_id: Uuid, block_type: Uuid) -> ChildHandle {

@@ -6,7 +6,7 @@ use super::{DeterministicGame, DeterministicGameOperation};
 
 #[test]
 fn append_operation_records_the_authenticated_actor() {
-    let mut game = DeterministicGame::new("tic_tac_toe".to_owned(), "Tic-Tac-Toe".to_owned());
+    let mut game = DeterministicGame::new(Uuid::new_v4());
     let actor = Uuid::new_v4();
 
     DeterministicGame::apply_authored_operation(

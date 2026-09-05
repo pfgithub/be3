@@ -127,8 +127,6 @@ if $client; then
     precompile_plugin_wasm "$artifact_directory" "$target_triple"
     stage_plugin_manifests "$artifact_directory"
     build_games "$profile"
-    stage_games "$artifact_directory/games"
-    write_games_index "$artifact_directory/games.json" 'games/'
     "$internal/fetch-pdfium.sh" --triple "$target_triple" --output "$artifact_directory"
 fi
 
@@ -149,8 +147,6 @@ if [[ -n "$output" ]]; then
         for manifest in "${plugin_manifests[@]}"; do
             cp "$artifact_directory/$manifest" "$output/$manifest"
         done
-        stage_games "$output/games"
-        write_games_index "$output/games.json" 'games/'
     fi
     echo "Packaged $target_triple in $output"
 fi

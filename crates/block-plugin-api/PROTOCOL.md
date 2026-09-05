@@ -192,18 +192,6 @@ text an instance copied while drawing is sent as it is drawn and the host puts
 it on the clipboard for it; a paste comes back the other way as an ordinary
 paste event.
 
-An editor instance may ask the host to read one of the app's own files for it,
-which is how a plugin reaches what was installed beside the app rather than
-built into it: the games the deterministic game editor runs are wasm modules
-the app ships alongside its own plugins. The request names a file and is
-answered exactly once, with its bytes or with why it could not be read. The
-host resolves the name against the directory it loads its plugins from - the
-executable's own directory, the bundle root in the browser, the asset root on
-Android - and refuses a name that is not a relative path inside it, reporting
-the refusal as an ordinary failure rather than as a protocol error. A plugin has
-no file system of its own on any platform, and nothing of the user's is
-reachable this way.
-
 The host describes its registered block types once per plugin runtime, before
 the first editor instance is opened, so an editor can name and illustrate
 blocks it only holds a reference to. Each description carries the block type,
@@ -349,7 +337,10 @@ request carries the name of what is being chosen, the block types that may be
 chosen, empty for any, and whether the picker should open on the templates the
 host offers, and is answered exactly once, with the block the user chose or
 created, the picker the user closed, or why the block could not be made.
-Requests are identified per instance and may be outstanding together.
+Requests are identified per instance and may be outstanding together. A
+creation dialog asks the same way, which is how an editor whose block cannot be
+made until it references another one gets that block before its own exists; the
+host opens the picker over the dialog it is already showing.
 
 An editor instance may ask the host to present it: to give it the whole window
 and show nothing else of the app, which is what a slideshow or a video played

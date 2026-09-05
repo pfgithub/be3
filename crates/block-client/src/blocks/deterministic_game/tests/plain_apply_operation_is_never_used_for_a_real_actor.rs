@@ -6,7 +6,7 @@ use super::{DeterministicGame, DeterministicGameOperation};
 
 #[test]
 fn plain_apply_operation_is_never_used_for_a_real_actor() {
-    let mut game = DeterministicGame::new("tic_tac_toe".to_owned(), "Tic-Tac-Toe".to_owned());
+    let mut game = DeterministicGame::new(Uuid::new_v4());
 
     DeterministicGame::apply_operation(
         &mut game,

@@ -112,9 +112,9 @@ load_games() {
 games_directory=''
 
 # Compiles every game to its own WebAssembly module in one cargo call and
-# leaves them where cargo put them, in games_directory. The modules are
-# interpreted wherever the app runs, so they are built the same way for every
-# target.
+# leaves them where cargo put them, in games_directory. Nothing ships them: a
+# module reaches the app as a game module block the user imports the file into,
+# so the build only has to produce a file there is something to import.
 build_games() {
     local profile="$1"
     local arguments=(--lib --target wasm32-unknown-unknown)
@@ -140,29 +140,6 @@ build_games() {
             echo "cargo did not produce $games_directory/$game.wasm" >&2
             exit 1
         fi
-    done
-}
-
-# The app reads games.json beside itself, whose entries are paths relative to
-# the index. Every build stages the modules beside the app it built, so the
-# index says the same thing wherever it is read and a plugin asking the host
-# for one of them names a path inside the app's own directory.
-write_games_index() {
-    local file="$1" prefix="$2"
-    local entries=() game
-    for game in "${games[@]}"; do
-        entries+=("$prefix$game.wasm")
-    done
-    write_index "$file" "${entries[@]}"
-}
-
-stage_games() {
-    local directory="$1"
-    rm -rf "$directory"
-    mkdir -p "$directory"
-    local game
-    for game in "${games[@]}"; do
-        cp "$games_directory/$game.wasm" "$directory/$game.wasm"
     done
 }
 

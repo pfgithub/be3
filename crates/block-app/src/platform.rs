@@ -1,6 +1,5 @@
 use std::sync::mpsc::Receiver;
 
-pub(crate) mod assets;
 mod file_picker;
 pub(crate) mod http;
 #[cfg(not(target_arch = "wasm32"))]

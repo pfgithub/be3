@@ -60,8 +60,6 @@ mkdir -p "$output_directory"
 # The games are compiled for a target of their own, before the WASI toolchain
 # below is exported over the environment the rest of the build runs in.
 build_games "$profile"
-stage_games "$output_directory/games"
-write_games_index "$output_directory/games.json" 'games/'
 
 # The plugins built below export the same toolchain for a cargo call of their
 # own, so where the sysroot comes from and what it is linked with lives in one

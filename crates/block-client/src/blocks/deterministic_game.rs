@@ -3,19 +3,9 @@ use game_api::GameAction;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-                                                                           
-                                                                           
-                                                                   
-                                                                         
-   
-                                                                         
-                                                                         
-                                                                            
-                                                           
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 pub struct DeterministicGame {
-    game: String,
-    display_name: String,
+    module: Uuid,
     actions: Vec<GameAction>,
 }
 
@@ -26,20 +16,15 @@ pub enum DeterministicGameOperation {
 }
 
 impl DeterministicGame {
-    pub fn new(game: String, display_name: String) -> Self {
+    pub fn new(module: Uuid) -> Self {
         Self {
-            game,
-            display_name,
+            module,
             actions: Vec::new(),
         }
     }
 
-    pub fn game(&self) -> &str {
-        &self.game
-    }
-
-    pub fn display_name(&self) -> &str {
-        &self.display_name
+    pub fn module(&self) -> Uuid {
+        self.module
     }
 
     pub fn actions(&self) -> &[GameAction] {
@@ -66,11 +51,8 @@ impl Block for DeterministicGame {
         }
     }
 
-    fn implicit_name(&self) -> Option<String> {
-        if self.display_name.is_empty() {
-            return None;
-        }
-        Some(self.display_name.clone())
+    fn references(&self) -> Vec<Uuid> {
+        vec![self.module]
     }
 }
 

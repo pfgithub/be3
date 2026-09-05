@@ -347,15 +347,6 @@ impl Screens {
                     session.fetched(*request_id, result.clone());
                 }
             }
-            Message::Editor(EditorMessage::AssetRead {
-                instance,
-                request_id,
-                result,
-            }) => {
-                if let Some(session) = self.sessions.get(instance) {
-                    session.asset_read(*request_id, result.clone());
-                }
-            }
             Message::Editor(EditorMessage::WebViewEvent { instance, event }) => {
                 if let Some(session) = self.sessions.get(instance) {
                     session.web_view_event(event.clone());

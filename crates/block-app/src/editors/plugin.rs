@@ -124,6 +124,7 @@ pub(super) struct PluginCreation {
     context: Option<egui::Context>,
     state: CreationState,
     committed: bool,
+    block_pick: Option<PendingBlockPick>,
 }
 
 impl PluginCreation {
@@ -134,6 +135,7 @@ impl PluginCreation {
             context: None,
             state: CreationState::Starting,
             committed: false,
+            block_pick: None,
         }
     }
 
@@ -176,6 +178,15 @@ impl PendingCreation for PluginCreation {
         self.context = Some(ui.ctx().clone());
         if self.plugin.creation == CreationMode::Dialog {
             self.dialog_ui(ui, editors);
+            serve_block_pick(
+                &self.plugin.identity.id,
+                self.instance,
+                &mut self.block_pick,
+                ui,
+                editors,
+                Vec::new(),
+                block::BlockParent::Root,
+            );
             let ready = crate::plugin_host::creation_ready(&self.plugin.identity.id, self.instance);
             if ready {
                 self.state = CreationState::Ready;
@@ -250,6 +261,49 @@ pub(super) struct PluginEditor {
 struct PendingBlockPick {
     request_id: u64,
     picker: BlockPicker,
+}
+
+fn serve_block_pick(
+    plugin_id: &str,
+    instance: EditorInstanceId,
+    pending: &mut Option<PendingBlockPick>,
+    ui: &mut egui::Ui,
+    editors: &mut EditorAccess<'_>,
+    excluded: Vec<Uuid>,
+    parent: block::BlockParent,
+) {
+    if pending.is_none() {
+        if let Some(request) = crate::plugin_host::take_block_pick(plugin_id, instance) {
+            let mut picker = BlockPicker::default();
+            if request.templates {
+                picker.open_templates_for_types(excluded, request.block_types);
+            } else {
+                picker.open_for_types(excluded, request.block_types);
+            }
+            *pending = Some(PendingBlockPick {
+                request_id: request.request_id,
+                picker,
+            });
+        }
+    }
+    let Some(waiting) = pending.as_mut() else {
+        return;
+    };
+    let picked = waiting.picker.handle(ui.ctx(), editors, parent);
+    let pick = match picked {
+        Some(result) => Some(BlockPick::Chosen {
+            block_id: result.id.into_bytes(),
+            block_type: result.block_type.into_bytes(),
+        }),
+        None if waiting.picker.is_open() => None,
+        None => Some(BlockPick::Cancelled),
+    };
+    let Some(pick) = pick else {
+        return;
+    };
+    let request_id = waiting.request_id;
+    *pending = None;
+    crate::plugin_host::block_picked(plugin_id, instance, request_id, pick);
 }
 
 impl PluginEditor {
@@ -599,40 +653,15 @@ impl PluginEditor {
     }
 
     fn block_pick_ui(&mut self, ui: &mut egui::Ui, editors: &mut EditorAccess<'_>) {
-        let plugin_id = &self.plugin.identity.id;
-        if self.block_pick.is_none() {
-            if let Some(request) = crate::plugin_host::take_block_pick(plugin_id, self.instance) {
-                let mut picker = BlockPicker::default();
-                if request.templates {
-                    picker.open_templates_for_types([self.block.id()], request.block_types);
-                } else {
-                    picker.open_for_types([self.block.id()], request.block_types);
-                }
-                self.block_pick = Some(PendingBlockPick {
-                    request_id: request.request_id,
-                    picker,
-                });
-            }
-        }
-        let Some(pending) = &mut self.block_pick else {
-            return;
-        };
-        let parent = block::BlockParent::Uuid(self.block.id());
-        let picked = pending.picker.handle(ui.ctx(), editors, parent);
-        let pick = match picked {
-            Some(result) => Some(BlockPick::Chosen {
-                block_id: result.id.into_bytes(),
-                block_type: result.block_type.into_bytes(),
-            }),
-            None if pending.picker.is_open() => None,
-            None => Some(BlockPick::Cancelled),
-        };
-        let Some(pick) = pick else {
-            return;
-        };
-        let request_id = pending.request_id;
-        self.block_pick = None;
-        crate::plugin_host::block_picked(plugin_id, self.instance, request_id, pick);
+        serve_block_pick(
+            &self.plugin.identity.id,
+            self.instance,
+            &mut self.block_pick,
+            ui,
+            editors,
+            vec![self.block.id()],
+            block::BlockParent::Uuid(self.block.id()),
+        );
     }
 
     fn take_view_changes(&mut self, rect: egui::Rect, viewport: &mut DirectEditorViewport) {

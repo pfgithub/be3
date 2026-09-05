@@ -5,7 +5,7 @@ use super::{DeterministicGame, DeterministicGameOperation};
 
 #[test]
 fn serialization_round_trips() {
-    let mut game = DeterministicGame::new("tic_tac_toe".to_owned(), "Tic-Tac-Toe".to_owned());
+    let mut game = DeterministicGame::new(Uuid::new_v4());
     DeterministicGame::apply_authored_operation(
         &mut game,
         &DeterministicGameOperation::Append { action: vec![0] },

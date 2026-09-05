@@ -1,0 +1,16 @@
+{
+  "id": "be3.game-module",
+  "name": "Game Module",
+  "version": "0.1.0",
+  "block_type": "67616d65-2d6d-6f64-756c-652d626c0001",
+  "display_name": "Game Module",
+  "icon": "\ue87b",
+  "creation": "Dialog",
+  "regions": [
+    "Frame"
+  ],
+  "chrome": [
+    "RightSidebar"
+  ],
+  "entry_point": "game_module.wasm"
+}

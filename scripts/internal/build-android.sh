@@ -107,8 +107,6 @@ precompile_plugin_wasm "$assets" aarch64-linux-android
 write_plugin_index "$assets"
 
 build_games debug
-stage_games "$assets/games"
-write_games_index "$assets/games.json" 'games/'
 
 rm -rf "$native_libraries"
 mkdir -p "$native_libraries" "$(dirname "$apk")"

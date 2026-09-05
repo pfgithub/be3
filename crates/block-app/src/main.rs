@@ -128,7 +128,6 @@ pub async fn run_web(canvas_id: String) -> Result<(), wasm_bindgen::JsValue> {
 #[cfg(target_os = "android")]
 #[unsafe(no_mangle)]
 fn android_main(app: winit::platform::android::activity::AndroidApp) {
-    platform::assets::install(&app);
     editors::plugin::discovery::load(&app);
     let storage_root = app.internal_data_path();
     let mut options = native_options();

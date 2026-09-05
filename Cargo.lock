@@ -2452,7 +2452,6 @@ dependencies = [
  "block-ui-test",
  "game-api",
  "game-host",
- "serde_json",
  "uuid",
 ]
 
@@ -3559,6 +3558,17 @@ dependencies = [
  "game-api",
  "uuid",
  "wasmi",
+]
+
+[[package]]
+name = "game_module"
+version = "0.1.0"
+dependencies = [
+ "block-client",
+ "block-editor-plugin",
+ "block-ui-test",
+ "game-host",
+ "uuid",
 ]
 
 [[package]]

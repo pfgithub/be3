@@ -1,11 +1,11 @@
 use block_client::BlockClient;
 use block_plugin_api::{
-    ArtifactDescription, AssetResult, BlockPick, ChildId, ChildPlacement, ChildPlacements,
-    ChildRect, ChildStatus, CreationOutcome, CursorIcon, EditorBand, EditorInstanceId,
-    EditorMessage, EditorRegion, FetchResult, FilePick, FrameChrome, FrameReport, FrameSpec,
-    ImeArea, ImeInput, InputEvent, Message, Occluder, PointerButton, PresenceEntry, RegionSize,
-    ScreenPlacement, ScreenRequest, ViewChange, ViewportMetrics, WebViewEvent, WheelUnit,
-    MAX_CHILDREN, MAX_COLLECTION_ITEMS,
+    ArtifactDescription, BlockPick, ChildId, ChildPlacement, ChildPlacements, ChildRect,
+    ChildStatus, CreationOutcome, CursorIcon, EditorBand, EditorInstanceId, EditorMessage,
+    EditorRegion, FetchResult, FilePick, FrameChrome, FrameReport, FrameSpec, ImeArea, ImeInput,
+    InputEvent, Message, Occluder, PointerButton, PresenceEntry, RegionSize, ScreenPlacement,
+    ScreenRequest, ViewChange, ViewportMetrics, WebViewEvent, WheelUnit, MAX_CHILDREN,
+    MAX_COLLECTION_ITEMS,
 };
 use block_ui::BlockCatalog;
 use eframe::egui;
@@ -500,13 +500,6 @@ impl EguiSession {
                 url,
             }));
         }
-        for (request_id, name) in self.host.take_asset_reads() {
-            messages.push(Message::Editor(EditorMessage::ReadAsset {
-                instance,
-                request_id,
-                name,
-            }));
-        }
         for (region, rect) in self.host.take_web_view_placements() {
             messages.push(Message::Editor(EditorMessage::WebView {
                 instance,
@@ -629,10 +622,6 @@ impl EguiSession {
 
     pub(crate) fn fetched(&self, request_id: u64, result: FetchResult) {
         self.host.set_fetched(request_id, result);
-    }
-
-    pub(crate) fn asset_read(&self, request_id: u64, result: AssetResult) {
-        self.host.set_asset(request_id, result);
     }
 
     pub(crate) fn web_view_event(&self, event: WebViewEvent) {

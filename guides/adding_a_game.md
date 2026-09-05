@@ -1,11 +1,11 @@
 # Adding a game
 
 A deterministic game is a crate of its own that compiles to a single
-WebAssembly module. The app never links a game: it finds the modules staged
-beside it, runs them through the `wasmi` interpreter in
-`crates/tabletop_games/host`, and asks each one what a player currently sees.
-That is the same on desktop, Android and the browser, so a game is written
-and built once.
+WebAssembly module. The app never links a game: a module is imported into a
+game module block, and the game block that references it runs the module
+through the `wasmi` interpreter in `crates/tabletop_games/host`, asking it what
+a player currently sees. That is the same on desktop, Android and the browser,
+so a game is written and built once.
 
 Everything about games lives under `crates/tabletop_games`, split by which
 side of the WebAssembly boundary it runs on:
@@ -32,9 +32,9 @@ side of the WebAssembly boundary it runs on:
   `fn main() { game_api::build::wasm(); }`. This compiles the crate to
   wasm32-unknown-unknown and points `GAME_WASM` at the module for the tests.
 - `crates/tabletop_games/rules/foo/src/lib.rs` — the game, ending in
-  `game_api::game!("Foo", foo);`. The first argument is the display name the
-  app shows and stores on the blocks made from it; the second is the game
-  function.
+  `game_api::game!("Foo", foo);`. The first argument is the name the module
+  gives itself, which is what the game module block's editor shows; the second
+  is the game function.
 - `crates/tabletop_games/rules/foo/rulebook.md` — the rules in English,
   written the way a rulebook explains a game: who plays, what the pieces or
   cards are, how a turn goes, how it ends. Write this one first, because the
@@ -124,14 +124,15 @@ so what is tested is the artifact that ships. Pure helpers (a deck, a win
 check) are still tested directly. A guest panic has nowhere to print, so it
 reaches the test as a trap rather than a message.
 
-## 4. Nothing else
+## 4. Getting the module into the app
 
-`./scripts/build` finds every crate under `crates/tabletop_games/rules` for
-each target, builds them all in one cargo call, and writes a `games.json`
-beside the app whose entries are paths relative to the index itself. A build
-that has to bundle the modules — the browser, an APK, a packaged directory —
-copies them into `games/` and points the index there; a build that runs out of
-`target/` points it straight at what cargo compiled, so nothing is moved. The
-app compiles what the index names at startup. The block stores the id of the module it plays and the name
-that module gave itself, so a client without the module still names the
-block, and a game that is not installed is reported in its place.
+`./scripts/build` finds every crate under `crates/tabletop_games/rules`, builds
+them all in one cargo call, and leaves the modules where cargo put them, in
+`target/wasm32-unknown-unknown/<profile>/`. Nothing stages them beside the app:
+a module reaches a workspace as a block. Add a Game Module block, choose the
+`.wasm` file cargo produced with the system file picker, and the editor loads it
+to check it really is a game module and names it. A Game block then references
+one of those: creating one opens the block picker filtered to game modules, so
+it plays a module the workspace already holds - or one imported from the picker
+there and then - and the module travels with the workspace rather than with the
+app.
