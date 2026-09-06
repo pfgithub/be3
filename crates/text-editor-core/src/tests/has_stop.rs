@@ -1,4 +1,4 @@
-use super::super::core::render_stops;
+use super::super::core::{render_stops, CursorStops};
 use super::*;
 
 #[test]
@@ -57,12 +57,19 @@ fn has_stop() {
         ),
     ];
     for (stop, soft_tab_width, expected) in cases {
-        assert_eq!(render_stops(expected, *stop, *soft_tab_width), *expected);
+        assert_eq!(
+            render_stops(expected, *stop, CursorStops::new(*soft_tab_width)),
+            *expected
+        );
     }
 
     let indented = b"|m|a|i|n|\n|    |i|f| | | | | | |(| | | | | | |c|o|n|d| | | | | | |)|{|\n|    |    |e|p|i|c|!|;|\n|    |e|n|d|\n|e|n|d|";
     assert_eq!(
-        render_stops(indented, CursorLeftRightStop::UnicodeGraphemeCluster, 4),
+        render_stops(
+            indented,
+            CursorLeftRightStop::UnicodeGraphemeCluster,
+            CursorStops::new(4)
+        ),
         indented
     );
 }

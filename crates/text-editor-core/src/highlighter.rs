@@ -1,9 +1,9 @@
-use block_client::{
-    blocks::text::{TextDocument, TextLanguage},
-    BlockHandle,
-};
+use std::sync::Arc;
+
 use tree_sitter::{InputEdit, Parser, Point, Tree};
 use tree_sitter_md::{MarkdownParser, MarkdownTree};
+
+use crate::document::{Document, DocumentView, TextLanguage};
 
 mod markdown;
 mod rust;
@@ -193,7 +193,7 @@ impl ParserBackend {
 }
 
 pub struct Highlighter {
-    document: BlockHandle<TextDocument>,
+    document: Arc<dyn Document>,
     backend: ParserBackend,
     parsed_revision: Option<u64>,
     parsed_bytes: Vec<u8>,
@@ -201,7 +201,7 @@ pub struct Highlighter {
 }
 
 impl Highlighter {
-    pub fn new(document: BlockHandle<TextDocument>, language: Language) -> Self {
+    pub fn new(document: Arc<dyn Document>, language: Language) -> Self {
         let backend = match language {
             Language::Markdown => ParserBackend::Markdown {
                 parser: MarkdownParser::default(),
@@ -228,7 +228,8 @@ impl Highlighter {
         if self.parsed_revision == Some(revision) && has_tree {
             return Some(());
         }
-        let document = self.document.read()?;
+        let read = self.document.read()?;
+        let document = DocumentView::new(&*read);
         let bytes = document.bytes();
         let edit = if self.parsed_revision.is_some() {
             let prefix = self
@@ -286,7 +287,8 @@ impl Highlighter {
                 markdown_tables: Vec::new(),
             };
         }
-        let document = self.document.read().expect("parsed document disappeared");
+        let read = self.document.read().expect("parsed document disappeared");
+        let document = DocumentView::new(&*read);
         let bytes = document.bytes();
         match self.language {
             Language::Markdown => {
@@ -341,7 +343,7 @@ impl Highlighter {
         let bytes = self
             .document
             .read()
-            .map(|document| document.bytes().to_vec())
+            .map(|read| read.slice(0..read.len()).into_owned())
             .unwrap_or_default();
         let query_end = if start == end {
             start.saturating_add(1).min(document_len)

@@ -1,22 +1,18 @@
-use std::{cmp::Ordering, mem::size_of, ops::Range};
+use std::{cmp::Ordering, ops::Range, sync::Arc};
 
-use block::Block;
-use block_client::{
-    block_ref::BlockRef,
-    blocks::text::{TextDocument, TextIndentation, TextLanguage},
-    parse_block_urls, BlockHandle, HistoryMetadata, BLOCK_URL_MAX_BYTES,
-};
 use serde::{Deserialize, Serialize};
 use similar::{capture_diff_slices, Algorithm, DiffTag};
 use unicode_segmentation::UnicodeSegmentation;
-use uuid::Uuid;
 
-use crate::{Highlighter, Language, SyntaxHighlight};
+use crate::{
+    document::{Anchor, Document, DocumentRead, DocumentView, TextIndentation, TextLanguage},
+    Highlighter, Language, SyntaxHighlight,
+};
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub struct Position {
-    left: Option<Uuid>,
-    right: Option<Uuid>,
+    left: Option<Anchor>,
+    right: Option<Anchor>,
     fallback: usize,
     end: bool,
 }
@@ -29,29 +25,29 @@ impl Position {
         end: true,
     };
 
-    fn at(document: &TextDocument, index: usize) -> Self {
+    fn at(document: &dyn DocumentRead, index: usize) -> Self {
         if index >= document.len() {
             return Self::END;
         }
         Self {
             left: index
                 .checked_sub(1)
-                .and_then(|previous| document.item_id(previous)),
-            right: document.item_id(index),
+                .and_then(|previous| document.anchor(previous)),
+            right: document.anchor(index),
             fallback: index,
             end: false,
         }
     }
 
-    pub(crate) fn resolve(self, document: &TextDocument) -> usize {
+    pub(crate) fn resolve(self, document: &dyn DocumentRead) -> usize {
         if self.end {
             return document.len();
         }
         self.right
-            .and_then(|id| document.item_index(id))
+            .and_then(|anchor| document.anchor_index(anchor))
             .or_else(|| {
                 self.left
-                    .and_then(|id| document.item_index(id))
+                    .and_then(|anchor| document.anchor_index(anchor))
                     .map(|index| index + 1)
             })
             .unwrap_or_else(|| self.fallback.min(document.len()))
@@ -186,15 +182,34 @@ pub enum SyntaxNodeDirection {
     Child,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug)]
 pub struct EditorConfig {
     pub count_soft_tab_as_grapheme_cluster: bool,
+
+    pub inside_atomic_unit: fn(&[u8], usize) -> bool,
 }
 
 impl Default for EditorConfig {
     fn default() -> Self {
         Self {
             count_soft_tab_as_grapheme_cluster: true,
+            inside_atomic_unit: |_, _| false,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct CursorStops {
+    soft_tab_width: usize,
+    inside_atomic_unit: fn(&[u8], usize) -> bool,
+}
+
+impl CursorStops {
+    #[cfg(test)]
+    pub(crate) fn new(soft_tab_width: usize) -> Self {
+        Self {
+            soft_tab_width,
+            inside_atomic_unit: |_, _| false,
         }
     }
 }
@@ -245,9 +260,9 @@ pub enum EditorCommand<'a> {
         case_sensitive: bool,
         replacement: &'a [u8],
     },
-    ReplaceBlockReference {
-        old: Uuid,
-        new: Uuid,
+    ReplaceRanges {
+        ranges: &'a [Range<usize>],
+        replacement: &'a [u8],
     },
     DuplicateLine(UDDirection),
     DuplicateCursor(LRDirection),
@@ -344,7 +359,7 @@ struct ResolvedSelection {
 }
 
 pub struct Core {
-    document: BlockHandle<TextDocument>,
+    document: Arc<dyn Document>,
     cursor_positions: Vec<CursorPosition>,
     pub config: EditorConfig,
     clipboard_cache: Option<ClipboardCache>,
@@ -357,7 +372,7 @@ pub struct Core {
 }
 
 impl Core {
-    pub fn new(document: BlockHandle<TextDocument>) -> Self {
+    pub fn new(document: Arc<dyn Document>) -> Self {
         Self {
             document,
             cursor_positions: Vec::new(),
@@ -370,8 +385,13 @@ impl Core {
         }
     }
 
-    pub fn document(&self) -> &BlockHandle<TextDocument> {
+    pub fn document(&self) -> &Arc<dyn Document> {
         &self.document
+    }
+
+    pub fn external_edit(&mut self) {
+        self.last_undo_classification = UndoClassification::AlwaysSplit;
+        self.document.finish_history_group();
     }
 
     pub fn cursor_positions(&self) -> &[CursorPosition] {
@@ -381,14 +401,12 @@ impl Core {
     pub fn position(&self, byte_index: usize) -> Position {
         self.document
             .read()
-            .map(|document| Position::at(&document, byte_index))
+            .map(|read| Position::at(&*read, byte_index))
             .unwrap_or(Position::END)
     }
 
     pub fn position_index(&self, position: Position) -> Option<usize> {
-        self.document
-            .read()
-            .map(|document| position.resolve(&document))
+        self.document.read().map(|read| position.resolve(&*read))
     }
 
     pub fn selection_range(&self, cursor: &CursorPosition) -> Option<Range<usize>> {
@@ -400,14 +418,15 @@ impl Core {
     pub fn find_matches(&self, query: &str, case_sensitive: bool) -> Vec<Range<usize>> {
         self.document
             .read()
-            .map(|document| scan_matches(document.bytes(), query, case_sensitive))
+            .map(|read| scan_matches(DocumentView::new(&*read).bytes(), query, case_sensitive))
             .unwrap_or_default()
     }
 
     pub fn find_status(&self, query: &str, case_sensitive: bool) -> FindStatus {
-        let Some(document) = self.document.read() else {
+        let Some(read) = self.document.read() else {
             return FindStatus::default();
         };
+        let document = DocumentView::new(&*read);
         let matches = scan_matches(document.bytes(), query, case_sensitive);
         let current = self.cursor_positions.first().and_then(|cursor| {
             let anchor = cursor.pos.anchor.resolve(&document);
@@ -423,9 +442,10 @@ impl Core {
 
     fn find(&mut self, query: &str, case_sensitive: bool, direction: FindDirection) {
         let target = {
-            let Some(document) = self.document.read() else {
+            let Some(read) = self.document.read() else {
                 return;
             };
+            let document = DocumentView::new(&*read);
             let matches = scan_matches(document.bytes(), query, case_sensitive);
             if matches.is_empty() {
                 return;
@@ -458,9 +478,10 @@ impl Core {
 
     fn replace_match(&mut self, query: &str, case_sensitive: bool, replacement: &[u8]) {
         let history_cursors = self.cursor_positions.clone();
-        let Some(document) = self.document.read() else {
+        let Some(read) = self.document.read() else {
             return;
         };
+        let document = DocumentView::new(&*read);
         let matches = scan_matches(document.bytes(), query, case_sensitive);
         let Some(range) = self.cursor_positions.first().and_then(|cursor| {
             let anchor = cursor.pos.anchor.resolve(&document);
@@ -474,6 +495,7 @@ impl Core {
         };
         let position = Position::at(&document, range.start);
         drop(document);
+        drop(read);
         let positions = self.apply_replacements(
             vec![(position, range.end - range.start, replacement.to_vec())],
             UndoClassification::AlwaysSplit,
@@ -487,9 +509,10 @@ impl Core {
 
     fn replace_all_matches(&mut self, query: &str, case_sensitive: bool, replacement: &[u8]) {
         let history_cursors = self.cursor_positions.clone();
-        let Some(document) = self.document.read() else {
+        let Some(read) = self.document.read() else {
             return;
         };
+        let document = DocumentView::new(&*read);
         let matches = scan_matches(document.bytes(), query, case_sensitive);
         if matches.is_empty() {
             return;
@@ -505,6 +528,7 @@ impl Core {
             })
             .collect();
         drop(document);
+        drop(read);
         let positions = self.apply_replacements(
             replacements,
             UndoClassification::AlwaysSplit,
@@ -515,25 +539,24 @@ impl Core {
         }
     }
 
-    fn replace_block_reference(&mut self, old: Uuid, new: Uuid) {
+    fn replace_ranges(&mut self, ranges: &[Range<usize>], replacement: &[u8]) {
         let history_cursors = self.cursor_positions.clone();
-        let Some(document) = self.document.read() else {
+        let Some(read) = self.document.read() else {
             return;
         };
-        let old_length = old.to_string().len();
-        let replacement = new.to_string().into_bytes();
-        let replacements = parse_block_urls(document.bytes())
-            .into_iter()
-            .filter(|url| url.reference == BlockRef::Direct(old))
-            .map(|url| {
+        let document = DocumentView::new(&*read);
+        let replacements = ranges
+            .iter()
+            .map(|range| {
                 (
-                    Position::at(&document, url.range.end - old_length),
-                    old_length,
-                    replacement.clone(),
+                    Position::at(&document, range.start),
+                    range.len(),
+                    replacement.to_vec(),
                 )
             })
             .collect::<Vec<_>>();
         drop(document);
+        drop(read);
         if !replacements.is_empty() {
             let positions = self.apply_replacements(
                 replacements,
@@ -547,9 +570,10 @@ impl Core {
     }
 
     pub fn cursor_stop(&self, byte_index: usize, stop: CursorLeftRightStop) -> Position {
-        let Some(document) = self.document.read() else {
+        let Some(read) = self.document.read() else {
             return Position::END;
         };
+        let document = DocumentView::new(&*read);
         Position::at(
             &document,
             to_boundary(
@@ -559,7 +583,7 @@ impl Core {
                 stop,
                 BoundaryMode::Select,
                 true,
-                self.soft_tab_width(),
+                self.cursor_stops(),
             ),
         )
     }
@@ -572,21 +596,20 @@ impl Core {
     pub fn language(&self) -> TextLanguage {
         self.document
             .read()
-            .map_or_else(TextLanguage::default, |document| document.language())
+            .map_or_else(TextLanguage::default, |read| read.language())
     }
 
     pub fn indentation(&self) -> TextIndentation {
         self.document
             .read()
-            .map_or_else(TextIndentation::default, |document| document.indentation())
+            .map_or_else(TextIndentation::default, |read| read.indentation())
     }
 
     pub(crate) fn set_language(&mut self, language: TextLanguage) {
         if self.language() == language {
             return;
         }
-        self.document
-            .operate(TextDocument::set_language_operation(language));
+        self.document.set_language(language);
         self.sync_highlighter();
     }
 
@@ -594,8 +617,7 @@ impl Core {
         if self.indentation() == indentation {
             return;
         }
-        self.document
-            .operate(TextDocument::set_indentation_operation(indentation));
+        self.document.set_indentation(indentation);
     }
 
     fn sync_highlighter(&mut self) {
@@ -605,7 +627,7 @@ impl Core {
         }
         self.highlighter_language = Some(language);
         self.highlighter = Language::for_document(language)
-            .map(|language| Highlighter::new(self.document.clone(), language));
+            .map(|language| Highlighter::new(Arc::clone(&self.document), language));
     }
 
     pub fn highlight(&mut self) -> SyntaxHighlight {
@@ -614,15 +636,16 @@ impl Core {
             .as_mut()
             .map(Highlighter::highlight)
             .unwrap_or_else(|| {
-                let len = self.document.read().map_or(0, |document| document.len());
+                let len = self.document.read().map_or(0, |read| read.len());
                 SyntaxHighlight::plaintext(len)
             })
     }
 
     pub fn get_line_start(&self, position: Position) -> Position {
-        let Some(document) = self.document.read() else {
+        let Some(read) = self.document.read() else {
             return Position::END;
         };
+        let document = DocumentView::new(&*read);
         Position::at(
             &document,
             line_start(document.bytes(), position.resolve(&document)),
@@ -630,9 +653,10 @@ impl Core {
     }
 
     pub fn get_prev_line_start(&self, position: Position) -> Position {
-        let Some(document) = self.document.read() else {
+        let Some(read) = self.document.read() else {
             return Position::END;
         };
+        let document = DocumentView::new(&*read);
         let current = line_start(document.bytes(), position.resolve(&document));
         let previous = if current == 0 {
             0
@@ -643,9 +667,10 @@ impl Core {
     }
 
     pub fn get_next_line_start(&self, position: Position) -> Position {
-        let Some(document) = self.document.read() else {
+        let Some(read) = self.document.read() else {
             return Position::END;
         };
+        let document = DocumentView::new(&*read);
         Position::at(
             &document,
             next_line_start(document.bytes(), position.resolve(&document)),
@@ -653,9 +678,10 @@ impl Core {
     }
 
     pub fn get_this_line_end(&self, position: Position) -> Position {
-        let Some(document) = self.document.read() else {
+        let Some(read) = self.document.read() else {
             return Position::END;
         };
+        let document = DocumentView::new(&*read);
         Position::at(
             &document,
             line_end(document.bytes(), position.resolve(&document)),
@@ -663,13 +689,14 @@ impl Core {
     }
 
     pub fn collapsible_sections(&self) -> Vec<CollapsibleSection> {
-        let Some(document) = self.document.read() else {
+        let Some(read) = self.document.read() else {
             return Vec::new();
         };
+        let document = DocumentView::new(&*read);
         self.collapsible_sections_in(&document)
     }
 
-    fn collapsible_sections_in(&self, document: &TextDocument) -> Vec<CollapsibleSection> {
+    fn collapsible_sections_in(&self, document: &DocumentView<'_>) -> Vec<CollapsibleSection> {
         let bytes = document.bytes();
         let language = document.language();
         let mut sections = Vec::new();
@@ -702,10 +729,11 @@ impl Core {
     }
 
     pub fn normalize_cursors(&mut self) {
-        let Some(document) = self.document.read() else {
+        let Some(read) = self.document.read() else {
             self.cursor_positions.clear();
             return;
         };
+        let document = DocumentView::new(&*read);
         let mut resolved = self
             .cursor_positions
             .iter()
@@ -772,9 +800,10 @@ impl Core {
                 case_sensitive,
                 replacement,
             } => self.replace_all_matches(text, case_sensitive, replacement),
-            EditorCommand::ReplaceBlockReference { old, new } => {
-                self.replace_block_reference(old, new)
-            }
+            EditorCommand::ReplaceRanges {
+                ranges,
+                replacement,
+            } => self.replace_ranges(ranges, replacement),
             EditorCommand::SelectAll => {
                 let start = self.position(0);
                 self.select(Selection::range(start, Position::END));
@@ -833,9 +862,10 @@ impl Core {
             }
         }
         let history_cursors = self.cursor_positions.clone();
-        let Some(document) = self.document.read() else {
+        let Some(read) = self.document.read() else {
             return;
         };
+        let document = DocumentView::new(&*read);
         let replacements = self
             .cursor_positions
             .iter()
@@ -849,6 +879,7 @@ impl Core {
             })
             .collect::<Vec<_>>();
         drop(document);
+        drop(read);
         let positions = self.apply_replacements(replacements, classification, history_cursors);
         for (cursor, position) in self.cursor_positions.iter_mut().zip(positions) {
             *cursor = CursorPosition::at(position);
@@ -861,10 +892,11 @@ impl Core {
         stop: CursorLeftRightStop,
         mode: MoveMode,
     ) {
-        let Some(document) = self.document.read() else {
+        let Some(read) = self.document.read() else {
             return;
         };
-        let soft_tab_width = self.soft_tab_width();
+        let document = DocumentView::new(&*read);
+        let stops = self.cursor_stops();
         let sections = self.collapsible_sections_in(&document);
         let mut opened = Vec::new();
         for cursor in &mut self.cursor_positions {
@@ -894,7 +926,7 @@ impl Core {
                 stop,
                 BoundaryMode::Direction,
                 false,
-                soft_tab_width,
+                stops,
             );
             *cursor = match mode {
                 MoveMode::Move => CursorPosition::at(Position::at(&document, moved)),
@@ -909,9 +941,10 @@ impl Core {
 
     fn delete(&mut self, direction: LRDirection, stop: CursorLeftRightStop) {
         let history_cursors = self.cursor_positions.clone();
-        let Some(document) = self.document.read() else {
+        let Some(read) = self.document.read() else {
             return;
         };
+        let document = DocumentView::new(&*read);
         let mut classification = if matches!(
             stop,
             CursorLeftRightStop::Byte
@@ -936,7 +969,7 @@ impl Core {
                     stop,
                     BoundaryMode::Direction,
                     false,
-                    self.soft_tab_width(),
+                    self.cursor_stops(),
                 );
                 range.left = moved.min(focus);
                 range.right = moved.max(focus);
@@ -948,6 +981,7 @@ impl Core {
             replacements.push((position, range.right - range.left, Vec::new()));
         }
         drop(document);
+        drop(read);
         let positions = self.apply_replacements(replacements, classification, history_cursors);
         for (cursor, position) in self.cursor_positions.iter_mut().zip(positions) {
             *cursor = CursorPosition::at(position);
@@ -964,9 +998,10 @@ impl Core {
         if metric != CursorHorizontalPositionMetric::Byte {
             return;
         }
-        let Some(document) = self.document.read() else {
+        let Some(read) = self.document.read() else {
             return;
         };
+        let document = DocumentView::new(&*read);
         let sections = self.collapsible_sections_in(&document);
         let original_len = self.cursor_positions.len();
         for index in 0..original_len {
@@ -1004,7 +1039,7 @@ impl Core {
                     stop,
                     BoundaryMode::Select,
                     true,
-                    self.soft_tab_width(),
+                    self.cursor_stops(),
                 );
                 let right = to_boundary(
                     document.bytes(),
@@ -1013,7 +1048,7 @@ impl Core {
                     stop,
                     BoundaryMode::Select,
                     true,
-                    self.soft_tab_width(),
+                    self.cursor_stops(),
                 );
                 let left_column = left - line_start(document.bytes(), left);
                 let right_column = right - line_start(document.bytes(), right);
@@ -1054,9 +1089,10 @@ impl Core {
 
     fn newline(&mut self) {
         let history_cursors = self.cursor_positions.clone();
-        let Some(document) = self.document.read() else {
+        let Some(read) = self.document.read() else {
             return;
         };
+        let document = DocumentView::new(&*read);
         let mut replacements = Vec::new();
         for cursor in &self.cursor_positions {
             let range = resolve_selection(&document, cursor.pos);
@@ -1103,6 +1139,7 @@ impl Core {
             replacements.push((position, range.right - range.left, insertion));
         }
         drop(document);
+        drop(read);
         let positions = self.apply_replacements(
             replacements,
             UndoClassification::AlwaysSplit,
@@ -1137,9 +1174,10 @@ impl Core {
 
     fn wrap_markdown_selection(&mut self, before: &[u8], after: &[u8], placeholder: &[u8]) {
         let history_cursors = self.cursor_positions.clone();
-        let Some(document) = self.document.read() else {
+        let Some(read) = self.document.read() else {
             return;
         };
+        let document = DocumentView::new(&*read);
         let bytes = document.bytes();
         let mut selection_lengths = Vec::new();
         let replacements = self
@@ -1192,14 +1230,16 @@ impl Core {
             })
             .collect();
         drop(document);
+        drop(read);
         self.finish_wrap_markdown_selection(replacements, selection_lengths, history_cursors);
     }
 
     fn wrap_inline_code_selection(&mut self) {
         let history_cursors = self.cursor_positions.clone();
-        let Some(document) = self.document.read() else {
+        let Some(read) = self.document.read() else {
             return;
         };
+        let document = DocumentView::new(&*read);
         let bytes = document.bytes();
         let mut selection_lengths = Vec::new();
         let replacements = self
@@ -1247,6 +1287,7 @@ impl Core {
             })
             .collect();
         drop(document);
+        drop(read);
         self.finish_wrap_markdown_selection(replacements, selection_lengths, history_cursors);
     }
 
@@ -1261,9 +1302,10 @@ impl Core {
             UndoClassification::AlwaysSplit,
             history_cursors.clone(),
         );
-        let Some(document) = self.document.read() else {
+        let Some(read) = self.document.read() else {
             return;
         };
+        let document = DocumentView::new(&*read);
         for (((cursor, end), (contents_len, trailing_len)), original) in self
             .cursor_positions
             .iter_mut()
@@ -1287,9 +1329,10 @@ impl Core {
 
     fn prefix_markdown_lines(&mut self, kind: MarkdownLinePrefix) {
         let history_cursors = self.cursor_positions.clone();
-        let Some(document) = self.document.read() else {
+        let Some(read) = self.document.read() else {
             return;
         };
+        let document = DocumentView::new(&*read);
         let mut starts = Vec::new();
         for cursor in &self.cursor_positions {
             let range = resolve_selection(&document, cursor.pos);
@@ -1334,6 +1377,7 @@ impl Core {
             })
             .collect();
         drop(document);
+        drop(read);
         self.apply_replacements(
             replacements,
             UndoClassification::AlwaysSplit,
@@ -1343,9 +1387,10 @@ impl Core {
 
     fn toggle_markdown_checkbox(&mut self, position: Position) {
         let history_cursors = self.cursor_positions.clone();
-        let Some(document) = self.document.read() else {
+        let Some(read) = self.document.read() else {
             return;
         };
+        let document = DocumentView::new(&*read);
         let index = position.resolve(&document);
         let start = line_start(document.bytes(), index);
         let Some(marker) = markdown_checkbox_marker(document.bytes(), start) else {
@@ -1354,6 +1399,7 @@ impl Core {
         let state = if marker.checked { b' ' } else { b'x' };
         let state_position = Position::at(&document, marker.marker.start + 3);
         drop(document);
+        drop(read);
         self.apply_replacements(
             vec![(state_position, 1, vec![state])],
             UndoClassification::AlwaysSplit,
@@ -1362,9 +1408,10 @@ impl Core {
     }
 
     fn insert_line(&mut self, direction: UDDirection) {
-        let Some(document) = self.document.read() else {
+        let Some(read) = self.document.read() else {
             return;
         };
+        let document = DocumentView::new(&*read);
         for cursor in &mut self.cursor_positions {
             let focus = cursor.pos.focus.resolve(&document);
             let index = match direction {
@@ -1374,6 +1421,7 @@ impl Core {
             *cursor = CursorPosition::at(Position::at(&document, index));
         }
         drop(document);
+        drop(read);
         self.newline();
         if direction == UDDirection::Up {
             self.move_left_right(
@@ -1386,9 +1434,10 @@ impl Core {
 
     fn indent_selection(&mut self, direction: LRDirection) {
         let history_cursors = self.cursor_positions.clone();
-        let Some(document) = self.document.read() else {
+        let Some(read) = self.document.read() else {
             return;
         };
+        let document = DocumentView::new(&*read);
         let mut starts = Vec::new();
         for cursor in &self.cursor_positions {
             let range = resolve_selection(&document, cursor.pos);
@@ -1428,6 +1477,7 @@ impl Core {
             })
             .collect();
         drop(document);
+        drop(read);
         self.apply_replacements(
             replacements,
             UndoClassification::AlwaysSplit,
@@ -1437,9 +1487,10 @@ impl Core {
 
     fn duplicate_line(&mut self, direction: UDDirection) {
         let history_cursors = self.cursor_positions.clone();
-        let Some(document) = self.document.read() else {
+        let Some(read) = self.document.read() else {
             return;
         };
+        let document = DocumentView::new(&*read);
         let mut replacements = Vec::new();
         let mut up_adjustments = Vec::new();
         for cursor in &self.cursor_positions {
@@ -1474,15 +1525,17 @@ impl Core {
             ));
         }
         drop(document);
+        drop(read);
         let result_positions = self.apply_replacements(
             replacements,
             UndoClassification::AlwaysSplit,
             history_cursors,
         );
         if direction == UDDirection::Up {
-            let Some(document) = self.document.read() else {
+            let Some(read) = self.document.read() else {
                 return;
             };
+            let document = DocumentView::new(&*read);
             for ((cursor, after), (adjust_anchor, adjust_focus, inserted_len)) in self
                 .cursor_positions
                 .iter_mut()
@@ -1504,9 +1557,10 @@ impl Core {
     }
 
     fn duplicate_cursor(&mut self, direction: LRDirection) {
-        let Some(document) = self.document.read() else {
+        let Some(read) = self.document.read() else {
             return;
         };
+        let document = DocumentView::new(&*read);
         let Some(last) = self.cursor_positions.last().copied() else {
             return;
         };
@@ -1536,9 +1590,10 @@ impl Core {
 
     fn select_syntax_node(&mut self, direction: SyntaxNodeDirection) {
         self.sync_highlighter();
-        let Some(document) = self.document.read() else {
+        let Some(read) = self.document.read() else {
             return;
         };
+        let document = DocumentView::new(&*read);
         let Some(highlighter) = self.highlighter.as_mut() else {
             return;
         };
@@ -1580,7 +1635,7 @@ impl Core {
         }
     }
 
-    fn touched_collapsible_line_starts(&self, document: &TextDocument) -> Vec<usize> {
+    fn touched_collapsible_line_starts(&self, document: &DocumentView<'_>) -> Vec<usize> {
         let bytes = document.bytes();
         let language = document.language();
         let mut starts = Vec::new();
@@ -1604,9 +1659,10 @@ impl Core {
     }
 
     fn collapse(&mut self) {
-        let Some(document) = self.document.read() else {
+        let Some(read) = self.document.read() else {
             return;
         };
+        let document = DocumentView::new(&*read);
         let additions = self
             .touched_collapsible_line_starts(&document)
             .into_iter()
@@ -1622,18 +1678,20 @@ impl Core {
     }
 
     fn uncollapse(&mut self) {
-        let Some(document) = self.document.read() else {
+        let Some(read) = self.document.read() else {
             return;
         };
+        let document = DocumentView::new(&*read);
         let starts = self.touched_collapsible_line_starts(&document);
         self.collapse_state
             .retain(|position| !starts.contains(&position.resolve(&document)));
     }
 
     fn toggle_collapse_at(&mut self, position: Position) {
-        let Some(document) = self.document.read() else {
+        let Some(read) = self.document.read() else {
             return;
         };
+        let document = DocumentView::new(&*read);
         let start = line_start(document.bytes(), position.resolve(&document));
         let Some(content_end) =
             collapsible_section_end(document.bytes(), document.language(), start)
@@ -1705,9 +1763,10 @@ impl Core {
             self.cursor_positions.push(CursorPosition::at(position));
         }
         self.cursor_positions.truncate(1);
-        let Some(document) = self.document.read() else {
+        let Some(read) = self.document.read() else {
             return;
         };
+        let document = DocumentView::new(&*read);
         let Some(drag) = self.cursor_positions[0].drag_info else {
             return;
         };
@@ -1745,7 +1804,7 @@ impl Core {
             drag.selection_mode.stop,
             BoundaryMode::Select,
             true,
-            self.soft_tab_width(),
+            self.cursor_stops(),
         );
         let focus_left = to_boundary(
             document.bytes(),
@@ -1754,7 +1813,7 @@ impl Core {
             drag.selection_mode.stop,
             BoundaryMode::Select,
             true,
-            self.soft_tab_width(),
+            self.cursor_stops(),
         );
         let selection = if drag.selection_mode.select {
             let anchor_right = to_boundary(
@@ -1764,7 +1823,7 @@ impl Core {
                 drag.selection_mode.stop,
                 BoundaryMode::Select,
                 false,
-                self.soft_tab_width(),
+                self.cursor_stops(),
             );
             let focus_right = to_boundary(
                 document.bytes(),
@@ -1773,7 +1832,7 @@ impl Core {
                 drag.selection_mode.stop,
                 BoundaryMode::Select,
                 false,
-                self.soft_tab_width(),
+                self.cursor_stops(),
             );
             let minimum = anchor_left
                 .min(anchor_right)
@@ -1811,9 +1870,10 @@ impl Core {
     pub fn copy_utf8(&mut self, mode: CopyMode) -> String {
         self.normalize_cursors();
         let history_cursors = self.cursor_positions.clone();
-        let Some(document) = self.document.read() else {
+        let Some(read) = self.document.read() else {
             return String::new();
         };
+        let document = DocumentView::new(&*read);
         let mut stored = Vec::new();
         let mut rendered = Vec::new();
         let mut paste_in_new_line = true;
@@ -1844,6 +1904,7 @@ impl Core {
             }
         }
         drop(document);
+        drop(read);
         if mode == CopyMode::Cut {
             let positions = self.apply_replacements(
                 replacements,
@@ -1874,9 +1935,10 @@ impl Core {
             self.clipboard_cache = None;
         }
         let history_cursors = self.cursor_positions.clone();
-        let Some(document) = self.document.read() else {
+        let Some(read) = self.document.read() else {
             return;
         };
+        let document = DocumentView::new(&*read);
         let chunks = cached
             .as_ref()
             .map(|cache| cache.contents.clone())
@@ -1912,6 +1974,7 @@ impl Core {
             }
         }
         drop(document);
+        drop(read);
         let positions = self.apply_replacements(
             replacements,
             UndoClassification::AlwaysSplit,
@@ -1931,9 +1994,10 @@ impl Core {
 
     fn replace_whole_file(&mut self, replacement: &[u8]) {
         let history_cursors = self.cursor_positions.clone();
-        let Some(document) = self.document.read() else {
+        let Some(read) = self.document.read() else {
             return;
         };
+        let document = DocumentView::new(&*read);
         let operations = capture_diff_slices(Algorithm::Myers, document.bytes(), replacement);
         let replacements = operations
             .into_iter()
@@ -1949,6 +2013,7 @@ impl Core {
             })
             .collect();
         drop(document);
+        drop(read);
         self.apply_replacements(
             replacements,
             UndoClassification::AlwaysSplit,
@@ -1958,19 +2023,15 @@ impl Core {
 
     fn undo(&mut self) {
         self.last_undo_classification = UndoClassification::AlwaysSplit;
-        if let Some(metadata) = self.document.undo_with_history_metadata() {
-            if let Some(cursors) = metadata.downcast::<Vec<CursorPosition>>() {
-                self.cursor_positions.clone_from(&cursors);
-            }
+        if let Some(cursors) = self.document.undo() {
+            self.cursor_positions = cursors;
         }
     }
 
     fn redo(&mut self) {
         self.last_undo_classification = UndoClassification::AlwaysSplit;
-        if let Some(metadata) = self.document.redo_with_history_metadata() {
-            if let Some(cursors) = metadata.downcast::<Vec<CursorPosition>>() {
-                self.cursor_positions.clone_from(&cursors);
-            }
+        if let Some(cursors) = self.document.redo() {
+            self.cursor_positions = cursors;
         }
     }
 
@@ -1984,38 +2045,16 @@ impl Core {
             return Vec::new();
         }
         self.prepare_history_group(classification);
-        let metadata_bytes = history_cursors.len() * size_of::<CursorPosition>();
-        self.document.edit_crdt_grouped_with_history_metadata(
-            Some(HistoryMetadata::new(history_cursors, metadata_bytes)),
-            |transaction| {
-                let mut result_positions = Vec::new();
-                let mut document = transaction.current().clone();
-                let mut operations = Vec::new();
-                for (position, delete_len, insert) in replacements {
-                    let index = position.resolve(&document);
-                    for _ in 0..delete_len.min(document.len().saturating_sub(index)) {
-                        let Ok(operation) = document.remove_operation(index) else {
-                            break;
-                        };
-                        TextDocument::apply_operation(&mut document, &operation);
-                        operations.push(operation);
-                    }
-                    let insert_len = insert.len();
-                    for (offset, byte) in insert.into_iter().enumerate() {
-                        let Ok(operation) = document.insert_operation(index + offset, byte) else {
-                            break;
-                        };
-                        TextDocument::apply_operation(&mut document, &operation);
-                        operations.push(operation);
-                    }
-                    result_positions.push(Position::at(&document, index + insert_len));
-                }
-                if !operations.is_empty() {
-                    transaction.apply(TextDocument::group_edit_operations(operations));
-                }
-                result_positions
-            },
-        )
+        let mut result_positions = Vec::new();
+        self.document.edit(history_cursors, &mut |transaction| {
+            result_positions.clear();
+            for (position, delete_len, insert) in &replacements {
+                let index = position.resolve(transaction.document());
+                transaction.replace(index, *delete_len, insert);
+                result_positions.push(Position::at(transaction.document(), index + insert.len()));
+            }
+        });
+        result_positions
     }
 
     fn prepare_history_group(&mut self, classification: UndoClassification) {
@@ -2039,6 +2078,13 @@ impl Core {
             0
         }
     }
+
+    fn cursor_stops(&self) -> CursorStops {
+        CursorStops {
+            soft_tab_width: self.soft_tab_width(),
+            inside_atomic_unit: self.config.inside_atomic_unit,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -2055,7 +2101,7 @@ enum BoundaryMode {
     Select,
 }
 
-fn resolve_selection(document: &TextDocument, selection: Selection) -> ResolvedSelection {
+fn resolve_selection(document: &dyn DocumentRead, selection: Selection) -> ResolvedSelection {
     let anchor = selection.anchor.resolve(document);
     let focus = selection.focus.resolve(document);
     ResolvedSelection {
@@ -2372,7 +2418,7 @@ fn to_boundary(
     stop: CursorLeftRightStop,
     mode: BoundaryMode,
     may_stay: bool,
-    soft_tab_width: usize,
+    stops: CursorStops,
 ) -> usize {
     if matches!(
         stop,
@@ -2381,7 +2427,7 @@ fn to_boundary(
         return source.min(bytes.len());
     }
     let mut index = source.min(bytes.len());
-    if !may_stay || !boundary_matches(bytes, index, direction, stop, mode, soft_tab_width) {
+    if !may_stay || !boundary_matches(bytes, index, direction, stop, mode, stops) {
         match direction {
             LRDirection::Left if index > 0 => index -= 1,
             LRDirection::Right if index < bytes.len() => index += 1,
@@ -2392,7 +2438,7 @@ fn to_boundary(
         if index == 0 || index == bytes.len() {
             return index;
         }
-        if boundary_matches(bytes, index, direction, stop, mode, soft_tab_width) {
+        if boundary_matches(bytes, index, direction, stop, mode, stops) {
             return index;
         }
         match direction {
@@ -2409,9 +2455,9 @@ fn boundary_matches(
     direction: LRDirection,
     stop: CursorLeftRightStop,
     mode: BoundaryMode,
-    soft_tab_width: usize,
+    stops: CursorStops,
 ) -> bool {
-    let Some(marker) = has_stop(bytes, index, stop, soft_tab_width) else {
+    let Some(marker) = has_stop(bytes, index, stop, stops) else {
         return false;
     };
     match mode {
@@ -2437,20 +2483,15 @@ fn has_stop(
     bytes: &[u8],
     index: usize,
     stop: CursorLeftRightStop,
-    soft_tab_width: usize,
+    stops: CursorStops,
 ) -> Option<BetweenCharsStop> {
     if index == 0 || index >= bytes.len() {
         return Some(BetweenCharsStop::Both);
     }
-    let url_length = BLOCK_URL_MAX_BYTES;
-    let search_start = index.saturating_sub(url_length);
-    let search_end = (index + url_length).min(bytes.len());
-    if parse_block_urls(&bytes[search_start..search_end])
-        .iter()
-        .any(|url| url.range.start + search_start < index && index < url.range.end + search_start)
-    {
+    if (stops.inside_atomic_unit)(bytes, index) {
         return None;
     }
+    let soft_tab_width = stops.soft_tab_width;
     let left = bytes[index - 1];
     let right = bytes[index];
     match stop {
@@ -2499,7 +2540,7 @@ fn has_stop(
 pub(crate) fn render_stops(
     source_with_markers: &[u8],
     stop: CursorLeftRightStop,
-    soft_tab_width: usize,
+    stops: CursorStops,
 ) -> Vec<u8> {
     let bytes = source_with_markers
         .iter()
@@ -2511,7 +2552,7 @@ pub(crate) fn render_stops(
         let marker = if index == 0 || index == bytes.len() {
             Some(BetweenCharsStop::Both)
         } else {
-            has_stop(&bytes, index, stop, soft_tab_width)
+            has_stop(&bytes, index, stop, stops)
         };
         if let Some(marker) = marker {
             result.push(match marker {

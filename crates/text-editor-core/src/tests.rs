@@ -1,12 +1,8 @@
-use block_client::{
-    blocks::text::{TextDocument, TextIndentation, TextLanguage},
-    BlockClient,
-};
-use uuid::Uuid;
+use std::sync::Arc;
 
 use super::*;
 
-mod block_urls_are_single_cursor_units;
+mod atomic_units_are_single_cursor_units;
 mod collapse_and_uncollapse_affect_touched_lines;
 mod collapsed_section_reveals_temporarily_around_the_cursor;
 mod collapsible_sections_detects_indentation_blocks;
@@ -39,11 +35,12 @@ mod markdown_tables;
 mod raw_bytes;
 mod replace_all_matches_does_nothing_when_there_are_no_matches;
 mod replace_all_matches_replaces_every_match;
-mod replace_block_reference_replaces_every_matching_url;
 mod replace_match_does_nothing_when_selection_is_not_on_a_match;
 mod replace_match_replaces_current_and_advances_to_next_match;
+mod replace_ranges_replaces_every_range;
 mod right_arrow_opens_a_collapsed_line;
 mod rust_syn_hl;
+mod slices_are_stitched_together_from_chunks;
 mod tabs_are_used_for_automatic_indentation;
 mod toggle_collapse_at_is_independent_of_the_cursor;
 mod toggle_collapse_at_leaves_a_cursor_outside_the_section_untouched;
@@ -53,7 +50,8 @@ mod zig_syn_hl;
 
 fn rendered_highlight(tester: &mut EditorTester, offset: usize) -> String {
     let highlight = tester.editor.highlight();
-    let document = tester.editor.document().read().unwrap();
+    let read = tester.editor.document().read().unwrap();
+    let document = DocumentView::new(&*read);
     let mut result = String::new();
     let mut previous = SynHlColorScope::Invalid;
     for index in offset..document.len() {
@@ -71,7 +69,6 @@ fn rendered_highlight(tester: &mut EditorTester, offset: usize) -> String {
 }
 
 struct EditorTester {
-    _client: BlockClient,
     editor: Core,
 }
 
@@ -81,14 +78,14 @@ impl EditorTester {
     }
 
     fn with_language(initial: impl AsRef<[u8]>, language: TextLanguage) -> Self {
-        let client = BlockClient::new(Uuid::new_v4(), Uuid::new_v4());
-        let block = client.create_block(TextDocument::from_bytes(initial));
-        let mut editor = Core::new(block);
+        let mut editor = Core::new(Arc::new(TextBuffer::new(initial)));
         editor.set_language(language);
-        Self {
-            _client: client,
-            editor,
-        }
+        Self { editor }
+    }
+
+    fn bytes(&self) -> Vec<u8> {
+        let read = self.editor.document().read().unwrap();
+        DocumentView::new(&*read).bytes().to_vec()
     }
 
     fn pos(&self, byte: usize) -> Position {
@@ -107,7 +104,8 @@ impl EditorTester {
     }
 
     fn expect_content(&self, expected: impl AsRef<[u8]>) {
-        let document = self.editor.document().read().unwrap();
+        let read = self.editor.document().read().unwrap();
+        let document = DocumentView::new(&*read);
         let mut markers = Vec::new();
         for cursor in self.editor.cursor_positions() {
             let anchor = cursor.pos.anchor.resolve(&document);

@@ -12,7 +12,7 @@ use block_client::{
     block_ref::BlockRef,
     block_ref_url,
     blocks::image::Image,
-    blocks::text::{TextDocument, TextIndentation, TextLanguage},
+    blocks::text::TextDocument,
     blocks::version_control_worktree::VersionControlWorktreeMembership,
     parse_block_urls,
     presence::{PresenceColor, UserActive},
@@ -44,12 +44,14 @@ use text_editor_core::{
     markdown_checkbox_marker, CollapsibleSection, CopyMode, Core, CursorHorizontalPositionMetric,
     CursorLeftRightStop, CursorPosition, DragSelectionMode, EditorCommand, FindDirection,
     LRDirection, MarkdownCommand, MoveMode, Position, SynHlColorScope, SyntaxHighlight,
-    SyntaxNodeDirection, TextCursor, UDDirection, VerticalMoveMode,
+    SyntaxNodeDirection, TextIndentation, TextLanguage, UDDirection, VerticalMoveMode,
 };
 use uuid::Uuid;
 
+use crate::document::{inside_block_url, BlockDocument};
 use crate::font::{self, BytePosition, DocumentLayout, LineLayout, ResolvedEmbed, TextRenderer};
 use crate::hex;
+use crate::presence::TextCursor;
 use crate::timings::{FrameProfile, PaintTimings};
 
 const PADDING: Vec2 = Vec2::new(12.0, 8.0);
@@ -96,6 +98,7 @@ pub(crate) struct TextEditor {
     client: Arc<BlockClient>,
     performance: PerformanceReporter,
     pub(crate) block: BlockHandle<TextDocument>,
+    document: Arc<BlockDocument>,
     workspace_id: Uuid,
     pub(crate) core: Core,
     renderer: Result<TextRenderer, String>,
@@ -243,7 +246,9 @@ struct CachedLayout {
 impl TextEditor {
     fn new(block: BlockHandle<TextDocument>, client: Arc<BlockClient>, host: EditorHost) -> Self {
         let performance = host.performance(format!("Text editor ({})", block.id()));
-        let mut core = Core::new(block.clone());
+        let document = Arc::new(BlockDocument::new(block.clone()));
+        let mut core = Core::new(Arc::clone(&document) as Arc<dyn text_editor_core::Document>);
+        core.config.inside_atomic_unit = inside_block_url;
         let start = core.position(0);
         core.execute_command(EditorCommand::SetSelection {
             anchor: start,
@@ -256,6 +261,7 @@ impl TextEditor {
             client,
             performance,
             block,
+            document,
             core,
             renderer: TextRenderer::new(),
             selecting: false,
@@ -1797,8 +1803,11 @@ fn hidden_ranges_from_sections(sections: &[CollapsibleSection]) -> Vec<Range<usi
 
 impl TextEditor {
     fn replace_child(&mut self, old: Uuid, new: Uuid) -> bool {
-        self.core
-            .execute_command(EditorCommand::ReplaceBlockReference { old, new });
+        let ranges = self.document.reference_ranges(old);
+        self.core.execute_command(EditorCommand::ReplaceRanges {
+            ranges: &ranges,
+            replacement: new.to_string().as_bytes(),
+        });
         true
     }
 
@@ -1872,6 +1881,9 @@ impl TextEditor {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui) {
+        if self.document.take_external_edit() {
+            self.core.external_edit();
+        }
         self.publish_cursor_presence();
         if self.hex_view {
             self.hex_ui(ui);

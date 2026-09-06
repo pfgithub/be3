@@ -9225,8 +9225,6 @@ dependencies = [
 name = "text-editor-core"
 version = "0.1.0"
 dependencies = [
- "block 0.1.0",
- "block-client",
  "serde",
  "serde_json",
  "similar",
@@ -9248,6 +9246,7 @@ dependencies = [
  "block-ui-test",
  "freetype",
  "harfbuzz_rs",
+ "serde",
  "text-editor-core",
  "unicode-script",
  "uuid",

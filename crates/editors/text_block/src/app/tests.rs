@@ -20,7 +20,8 @@ mod the_intrinsic_size_follows_the_width_it_was_given;
 fn editor(text: &str) -> (EditorTest<'static, TextApp>, BlockHandle<TextDocument>) {
     let client = Arc::new(BlockClient::new(ACCOUNT_ID, WORKSPACE_ID));
     let block = client.create_block(TextDocument::new());
-    let mut core = text_editor_core::Core::new(block.clone());
+    let mut core =
+        text_editor_core::Core::new(Arc::new(crate::document::BlockDocument::new(block.clone())));
     let start = core.position(0);
     core.execute_command(text_editor_core::EditorCommand::SetSelection {
         anchor: start,

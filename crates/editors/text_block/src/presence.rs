@@ -2,7 +2,7 @@ use block_client::presence::PresenceKind;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::Position;
+use text_editor_core::Position;
 
 const TEXT_CURSOR: Uuid = Uuid::from_u128(0x7465_7874_5f63_7572_736f_725f_5f5f_5f5f);
 

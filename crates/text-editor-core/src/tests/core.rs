@@ -647,8 +647,14 @@ fn copy_paste_undo_tail(tester: &mut EditorTester) {
     tester.execute(EditorCommand::Undo);
     tester.expect_content(b"pub fn main() !void { return |5; }");
 
-    while tester.editor.document().can_undo() {
+    let mut previous = tester.bytes();
+    loop {
         tester.execute(EditorCommand::Undo);
+        let current = tester.bytes();
+        if current == previous {
+            break;
+        }
+        previous = current;
     }
     tester.expect_content(b"|hello!");
 }
