@@ -10,5 +10,6 @@ pub fn bordered(document: &mut Document, child: NodeId, corner_radius: u8) -> No
 }
 
 pub fn separator(document: &mut Document) -> NodeId {
-    document.create_fill(BORDER, 0)
+    let fill = document.create_fill(BORDER, 0);
+    document.create_shadow("separator", fill, Vec::new())
 }

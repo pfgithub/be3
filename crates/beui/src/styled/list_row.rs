@@ -14,8 +14,11 @@ const PADDING_VERTICAL: f32 = 4.0;
 pub fn list_row(document: &mut Document, child: NodeId) -> NodeId {
     let row = unstyled::pressable(document);
 
+    let slot = document.create_slot("content");
+    document.set_slot_child(slot, child);
+
     let padding = document.create_padding(PADDING_HORIZONTAL, PADDING_VERTICAL);
-    document.set_padding_child(padding, child);
+    document.set_padding_child(padding, slot);
 
     let fill = document.create_fill(Color32::TRANSPARENT, RADIUS);
     document.set_fill_child(fill, padding);
@@ -37,7 +40,16 @@ pub fn list_row(document: &mut Document, child: NodeId) -> NodeId {
         document.set_fill_color(fill, background(hovered, active));
     });
 
-    row
+    document.create_shadow("list-row", row, vec![slot])
+}
+
+pub fn set_list_row_on_click(
+    document: &mut Document,
+    list_row: NodeId,
+    handler: impl FnMut(&mut Document) + 'static,
+) {
+    let row = document.shadow_root(list_row);
+    unstyled::set_pressable_on_click(document, row, handler);
 }
 
 fn background(hovered: bool, active: bool) -> Color32 {

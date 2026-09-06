@@ -7,12 +7,15 @@ use crate::painter::Painter;
 use crate::document::Document;
 use crate::node::{ChangeHandler, ClickHandler, Element, InteractInput, NodeId};
 
+pub(crate) type StepHandler = Box<dyn FnMut(&mut Document, f32)>;
+
 pub(crate) struct FocusableNode {
     pub(crate) child: Option<NodeId>,
     pub(crate) focused: bool,
     pub(crate) on_focus_change: Option<ChangeHandler>,
     pub(crate) on_activate_change: Option<ChangeHandler>,
     pub(crate) on_activate: Option<ClickHandler>,
+    pub(crate) on_step: Option<StepHandler>,
 }
 
 impl FocusableNode {
@@ -23,6 +26,7 @@ impl FocusableNode {
             on_focus_change: None,
             on_activate_change: None,
             on_activate: None,
+            on_step: None,
         }
     }
 }
@@ -127,6 +131,32 @@ impl Document {
         self.arena
             .get_mut_as::<FocusableNode>(focusable)
             .on_activate_change = Some(Box::new(handler));
+    }
+
+    pub fn set_focusable_on_step(
+        &mut self,
+        focusable: NodeId,
+        handler: impl FnMut(&mut Document, f32) + 'static,
+    ) {
+        self.arena.get_mut_as::<FocusableNode>(focusable).on_step = Some(Box::new(handler));
+    }
+
+    pub fn step_focused(&mut self, delta: f32) {
+        let Some(focused) = self.focused else {
+            return;
+        };
+        let mut element = self.arena.take(focused);
+        let step = element
+            .as_any_mut()
+            .downcast_mut::<FocusableNode>()
+            .and_then(|focusable| focusable.on_step.take());
+        if let Some(mut handler) = step {
+            handler(self, delta);
+            if let Some(focusable) = element.as_any_mut().downcast_mut::<FocusableNode>() {
+                focusable.on_step = Some(handler);
+            }
+        }
+        self.arena.put_back(focused, element);
     }
 
     pub fn focus_focusable(&mut self, focusable: NodeId) {

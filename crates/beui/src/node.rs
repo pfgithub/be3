@@ -11,6 +11,7 @@ pub struct NodeId(u32);
 
 pub(crate) struct InteractInput {
     pub(crate) pointer_pos: Option<Pos2>,
+    pub(crate) pointer_down: bool,
     pub(crate) pressed_this_frame: bool,
     pub(crate) released_this_frame: bool,
     pub(crate) scroll_delta: f32,
@@ -18,6 +19,41 @@ pub(crate) struct InteractInput {
 
 pub(crate) type ChangeHandler = Box<dyn FnMut(&mut Document, bool)>;
 pub(crate) type ClickHandler = Box<dyn FnMut(&mut Document)>;
+pub(crate) type Listeners<T> = Vec<Box<dyn FnMut(&mut Document, T)>>;
+
+pub(crate) fn notify<T: Element, V: Copy>(
+    doc: &mut Document,
+    id: NodeId,
+    value: V,
+    listeners: fn(&mut T) -> &mut Listeners<V>,
+) {
+    let mut element = doc.arena.take(id);
+    let taken = element
+        .as_any_mut()
+        .downcast_mut::<T>()
+        .map(|node| std::mem::take(listeners(node)));
+    let Some(mut taken) = taken else {
+        doc.arena.put_back(id, element);
+        return;
+    };
+    for listener in &mut taken {
+        listener(doc, value);
+    }
+    if let Some(node) = element.as_any_mut().downcast_mut::<T>() {
+        let added = std::mem::replace(listeners(node), taken);
+        listeners(node).extend(added);
+    }
+    doc.arena.put_back(id, element);
+}
+
+pub(crate) fn call_listeners<V: Copy>(doc: &mut Document, listeners: &mut Listeners<V>, value: V) {
+    let mut taken = std::mem::take(listeners);
+    for listener in &mut taken {
+        listener(doc, value);
+    }
+    let added = std::mem::replace(listeners, taken);
+    listeners.extend(added);
+}
 
 pub(crate) trait Element: Any {
     fn measure(&self, doc: &Document, painter: &Painter, available: Vec2) -> Vec2;

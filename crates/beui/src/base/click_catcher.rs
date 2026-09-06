@@ -138,6 +138,10 @@ impl Document {
             .child = Some(child);
     }
 
+    pub fn click_catcher_child(&self, click_catcher: NodeId) -> Option<NodeId> {
+        self.arena.get_as::<ClickCatcherNode>(click_catcher).child
+    }
+
     pub fn set_click_catcher_on_click(
         &mut self,
         click_catcher: NodeId,

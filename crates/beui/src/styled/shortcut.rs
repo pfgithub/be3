@@ -14,5 +14,5 @@ pub fn shortcut(document: &mut Document, keys: &str, description: &str) -> NodeI
     let line = unstyled::centered_row(document, SPACING);
     document.append_child(line, keys, ItemSize::Intrinsic);
     document.append_child(line, description, ItemSize::Percent(100.0));
-    line
+    document.create_shadow("shortcut", line, Vec::new())
 }

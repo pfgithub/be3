@@ -1,12 +1,19 @@
 use super::*;
 
 mod a_virtual_scroll_only_builds_the_items_in_view;
+mod arrow_keys_step_the_focused_slider;
+mod clicking_a_checkbox_toggles_it;
 mod clicking_a_row_collapses_its_children;
 mod clicking_a_row_selects_the_node_it_lists;
+mod clicking_a_tab_selects_the_panel_it_names;
+mod clicking_an_accordion_header_hides_its_content;
 mod clicking_the_padding_around_a_button_label_activates_it;
 mod ctrl_shift_i_opens_and_closes_the_inspector;
+mod dragging_a_slider_moves_its_value;
 mod dragging_the_inspector_edge_resizes_the_panel;
 mod enter_activates_the_focused_button;
+mod enter_toggles_the_focused_checkbox;
+mod flipping_a_switch_can_replace_the_items_of_a_scroll;
 mod hovering_a_row_highlights_the_node_it_lists;
 mod picking_a_node_leaves_the_document_alone;
 mod picking_a_node_reveals_it_in_the_tree;
@@ -14,6 +21,7 @@ mod scrolling_a_virtual_scroll_replaces_the_items_in_view;
 mod shift_tab_moves_focus_to_the_previous_button;
 mod tab_moves_focus_to_the_next_button;
 mod the_inspector_follows_nodes_added_to_the_document;
+mod the_inspector_hides_the_internals_of_a_styled_component;
 mod the_inspector_lists_the_document_tree;
 mod the_inspector_separates_component_internals_from_slots;
 mod the_scroll_position_is_reported_to_its_listener;
@@ -28,6 +36,7 @@ use crate::input::{Event, Key, Modifiers, PointerButton, RawInput};
 
 use crate::base::list::{Direction, ItemSize};
 use crate::inspector::Inspector;
+use crate::styled;
 use crate::unstyled;
 
 const VIEWPORT: Vec2 = Vec2::new(400.0, 300.0);
@@ -124,6 +133,20 @@ impl Harness {
                 ..Modifiers::NONE
             },
         );
+    }
+
+    pub(crate) fn document(&self) -> &Document {
+        &self.document
+    }
+
+    pub(crate) fn rect(&self, id: NodeId) -> Rect {
+        self.document
+            .node_rect(id)
+            .expect("the node was not laid out")
+    }
+
+    pub(crate) fn center(&self, id: NodeId) -> Pos2 {
+        self.rect(id).center()
     }
 
     pub(crate) fn inspector(&self) -> &Inspector {

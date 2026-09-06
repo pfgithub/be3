@@ -84,5 +84,19 @@ pub fn button(document: &mut Document, label: &str, variant: ButtonVariant) -> N
         document.set_outline_visible(ring, focused);
     });
 
-    button
+    document.create_shadow("button", button, Vec::new())
+}
+
+pub fn set_button_on_click(
+    document: &mut Document,
+    button: NodeId,
+    handler: impl FnMut(&mut Document) + 'static,
+) {
+    let inner = document.shadow_root(button);
+    unstyled::set_button_on_click(document, inner, handler);
+}
+
+pub fn focus_button(document: &mut Document, button: NodeId) {
+    let inner = document.shadow_root(button);
+    unstyled::focus_button(document, inner);
 }

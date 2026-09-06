@@ -14,5 +14,6 @@ pub fn chip(document: &mut Document, label: &str) -> NodeId {
     document.set_padding_child(padding, label);
     let fill = document.create_fill(SURFACE_RAISED, CHIP_RADIUS);
     document.set_fill_child(fill, padding);
-    bordered(document, fill, CHIP_RADIUS)
+    let bordered = bordered(document, fill, CHIP_RADIUS);
+    document.create_shadow("chip", bordered, Vec::new())
 }

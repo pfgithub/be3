@@ -17,6 +17,7 @@ pub(crate) fn interact(
 ) {
     let input = InteractInput {
         pointer_pos: ctx.input(|input| input.pointer.interact_pos()),
+        pointer_down: ctx.input(|input| input.pointer.primary_down),
         pressed_this_frame: ctx.input(|input| input.pointer.primary_pressed()),
         released_this_frame: ctx.input(|input| input.pointer.primary_released()),
         scroll_delta: ctx.input(|input| input.scroll_delta.y),
@@ -48,6 +49,8 @@ pub(crate) fn interact(
                 }
             }
             Key::Enter | Key::Space => doc.set_focus_pressed(pressed),
+            Key::ArrowLeft | Key::ArrowDown if pressed => doc.step_focused(-1.0),
+            Key::ArrowRight | Key::ArrowUp if pressed => doc.step_focused(1.0),
             _ => {}
         }
     }

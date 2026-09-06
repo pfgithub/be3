@@ -18,11 +18,16 @@ const HEADER_PADDING: f32 = 20.0;
 const BODY_PADDING: f32 = 20.0;
 const ICON_BUTTON_WIDTH: f32 = 44.0;
 const ROW_COUNT: usize = 10_000;
-const ROW_HEIGHT: f32 = 32.0;
+const ROW_HEIGHT: f32 = 34.0;
+const COMPACT_ROW_HEIGHT: f32 = 25.0;
+const ROW_PADDING_HORIZONTAL: f32 = 12.0;
+const ROW_PADDING_VERTICAL: f32 = 9.0;
+const COMPACT_ROW_PADDING_VERTICAL: f32 = 4.0;
 
 struct Rows {
     status: NodeId,
     selected: Cell<Option<usize>>,
+    timings: Cell<bool>,
     visuals: RefCell<HashMap<usize, Weak<RowVisual>>>,
 }
 
@@ -31,6 +36,7 @@ impl Rows {
         Self {
             status,
             selected: Cell::new(None),
+            timings: Cell::new(true),
             visuals: RefCell::new(HashMap::new()),
         }
     }
@@ -45,6 +51,14 @@ impl Rows {
         self.visuals.borrow().get(&index)?.upgrade()
     }
 
+    fn live(&self) -> Vec<Rc<RowVisual>> {
+        self.visuals
+            .borrow()
+            .values()
+            .filter_map(Weak::upgrade)
+            .collect()
+    }
+
     fn select(&self, document: &mut Document, index: usize) {
         let previous = self.selected.replace(Some(index));
         if let Some(visual) = previous.and_then(|previous| self.visual(previous)) {
@@ -55,12 +69,20 @@ impl Rows {
         }
         document.set_text(self.status, format!("Row {index} selected"));
     }
+
+    fn show_timings(&self, document: &mut Document, shown: bool) {
+        self.timings.set(shown);
+        for visual in self.live() {
+            visual.apply(document);
+        }
+    }
 }
 
 struct RowVisual {
     index: usize,
     fill: NodeId,
     value: NodeId,
+    timing: NodeId,
     hovered: Cell<bool>,
     rows: Rc<Rows>,
 }
@@ -79,19 +101,27 @@ impl RowVisual {
         document.set_fill_color(self.fill, fill);
         let value = if self.selected() { ACCENT } else { TEXT_MUTED };
         document.set_text_color(self.value, value);
+        document.set_visible(self.timing, self.rows.timings.get());
     }
 }
 
-fn scroll_row(document: &mut Document, index: usize, rows: &Rc<Rows>) -> NodeId {
+fn scroll_row(document: &mut Document, index: usize, rows: &Rc<Rows>, compact: bool) -> NodeId {
     let label = styled::body(document, format!("Row {index}"));
     let value = styled::caption(document, format!("{} ms", 7 + index * 3 % 91));
     document.set_text_align(value, TextAlign::End, TextAlign::Center);
+    let timing = document.create_visibility(rows.timings.get());
+    document.set_visibility_child(timing, value);
 
     let line = unstyled::centered_row(document, 12.0);
     document.append_child(line, label, ItemSize::Percent(100.0));
-    document.append_child(line, value, ItemSize::Intrinsic);
+    document.append_child(line, timing, ItemSize::Intrinsic);
 
-    let padding = document.create_padding(12.0, 9.0);
+    let vertical = if compact {
+        COMPACT_ROW_PADDING_VERTICAL
+    } else {
+        ROW_PADDING_VERTICAL
+    };
+    let padding = document.create_padding(ROW_PADDING_HORIZONTAL, vertical);
     document.set_padding_child(padding, line);
 
     let fill = document.create_fill(Color32::TRANSPARENT, RADIUS);
@@ -104,6 +134,7 @@ fn scroll_row(document: &mut Document, index: usize, rows: &Rc<Rows>) -> NodeId 
         index,
         fill,
         value,
+        timing,
         hovered: Cell::new(false),
         rows: rows.clone(),
     });
@@ -122,6 +153,18 @@ fn scroll_row(document: &mut Document, index: usize, rows: &Rc<Rows>) -> NodeId 
     });
 
     catcher
+}
+
+fn install_rows(document: &mut Document, scroll: NodeId, rows: &Rc<Rows>, compact: bool) {
+    let height = if compact {
+        COMPACT_ROW_HEIGHT
+    } else {
+        ROW_HEIGHT
+    };
+    let rows = rows.clone();
+    document.set_scroll_virtual_items(scroll, ROW_COUNT, height, move |document, index| {
+        scroll_row(document, index, &rows, compact)
+    });
 }
 
 struct DemoApp {
@@ -164,19 +207,19 @@ fn build_header(document: &mut Document, counter: &Rc<Cell<i32>>, counter_value:
     let increment = styled::button(document, "+", ButtonVariant::Primary);
 
     let reset_counter = counter.clone();
-    unstyled::set_button_on_click(document, reset, move |document| {
+    styled::set_button_on_click(document, reset, move |document| {
         reset_counter.set(0);
         document.set_text(counter_value, "0");
     });
 
     let decrement_counter = counter.clone();
-    unstyled::set_button_on_click(document, decrement, move |document| {
+    styled::set_button_on_click(document, decrement, move |document| {
         decrement_counter.set(decrement_counter.get() - 1);
         document.set_text(counter_value, decrement_counter.get().to_string());
     });
 
     let increment_counter = counter.clone();
-    unstyled::set_button_on_click(document, increment, move |document| {
+    styled::set_button_on_click(document, increment, move |document| {
         increment_counter.set(increment_counter.get() + 1);
         document.set_text(counter_value, increment_counter.get().to_string());
     });
@@ -209,34 +252,37 @@ fn build_body(document: &mut Document, counter_value: NodeId) -> NodeId {
 }
 
 fn build_sidebar(document: &mut Document) -> NodeId {
-    let heading = styled::heading(document, "About");
     let about = styled::paragraph(
         document,
         "beui keeps a retained tree of nodes. Base nodes carry behaviour only, unstyled \
          components compose them, and the styled components paint them.",
     );
+    let about_section = styled::accordion(document, "About", about, true);
 
     let line = styled::separator(document);
 
-    let keyboard = styled::heading(document, "Keyboard");
-    let tab = styled::shortcut(document, "Tab", "move focus to the next button");
+    let tab = styled::shortcut(document, "Tab", "move focus to the next control");
     let shift_tab = styled::shortcut(document, "Shift+Tab", "move focus back");
-    let enter = styled::shortcut(document, "Enter", "activate the focused button");
+    let enter = styled::shortcut(document, "Enter", "activate the focused control");
+    let arrows = styled::shortcut(document, "Arrows", "adjust the focused slider");
     let wheel = styled::shortcut(document, "Wheel", "scroll the row list");
     let inspect = styled::shortcut(document, "Ctrl+Shift+I", "open the inspector");
     let pick = styled::shortcut(document, "Ctrl+Shift+C", "pick a node to inspect");
 
+    let keys = unstyled::column(document, 12.0);
+    document.append_child(keys, tab, ItemSize::Intrinsic);
+    document.append_child(keys, shift_tab, ItemSize::Intrinsic);
+    document.append_child(keys, enter, ItemSize::Intrinsic);
+    document.append_child(keys, arrows, ItemSize::Intrinsic);
+    document.append_child(keys, wheel, ItemSize::Intrinsic);
+    document.append_child(keys, inspect, ItemSize::Intrinsic);
+    document.append_child(keys, pick, ItemSize::Intrinsic);
+    let keyboard_section = styled::accordion(document, "Keyboard", keys, true);
+
     let content = unstyled::column(document, 12.0);
-    document.append_child(content, heading, ItemSize::Intrinsic);
-    document.append_child(content, about, ItemSize::Intrinsic);
+    document.append_child(content, about_section, ItemSize::Intrinsic);
     document.append_child(content, line, ItemSize::Fixed(SEPARATOR_HEIGHT));
-    document.append_child(content, keyboard, ItemSize::Intrinsic);
-    document.append_child(content, tab, ItemSize::Intrinsic);
-    document.append_child(content, shift_tab, ItemSize::Intrinsic);
-    document.append_child(content, enter, ItemSize::Intrinsic);
-    document.append_child(content, wheel, ItemSize::Intrinsic);
-    document.append_child(content, inspect, ItemSize::Intrinsic);
-    document.append_child(content, pick, ItemSize::Intrinsic);
+    document.append_child(content, keyboard_section, ItemSize::Intrinsic);
 
     styled::card(document, content)
 }
@@ -264,9 +310,7 @@ fn build_main(document: &mut Document, counter_value: NodeId) -> NodeId {
 
     let scroll = document.create_scroll();
     let rows = Rc::new(Rows::new(status));
-    document.set_scroll_virtual_items(scroll, ROW_COUNT, ROW_HEIGHT, move |document, index| {
-        scroll_row(document, index, &rows)
-    });
+    install_rows(document, scroll, &rows, false);
     let bar = styled::scrollbar(document, scroll);
 
     let area = unstyled::row(document, 10.0);
@@ -279,10 +323,88 @@ fn build_main(document: &mut Document, counter_value: NodeId) -> NodeId {
     document.append_child(list_column, area, ItemSize::Percent(100.0));
     let list_card = styled::card(document, list_column);
 
+    let controls_card = build_controls(document, scroll, &rows);
+
     let main = unstyled::column(document, 20.0);
     document.append_child(main, counter_card, ItemSize::Intrinsic);
+    document.append_child(main, controls_card, ItemSize::Intrinsic);
     document.append_child(main, list_card, ItemSize::Percent(100.0));
     main
+}
+
+fn build_controls(document: &mut Document, scroll: NodeId, rows: &Rc<Rows>) -> NodeId {
+    let list_panel = build_list_controls(document, scroll, rows);
+    let list_visibility = document.create_visibility(true);
+    document.set_visibility_child(list_visibility, list_panel);
+
+    let load_panel = build_load_controls(document);
+    let load_visibility = document.create_visibility(false);
+    document.set_visibility_child(load_visibility, load_panel);
+
+    let panels = unstyled::column(document, 0.0);
+    document.append_child(panels, list_visibility, ItemSize::Intrinsic);
+    document.append_child(panels, load_visibility, ItemSize::Intrinsic);
+
+    let tabs = styled::tabs(document, &["List", "Load"], 0);
+    styled::add_tabs_on_change(document, tabs, move |document, selected| {
+        document.set_visible(list_visibility, selected == 0);
+        document.set_visible(load_visibility, selected == 1);
+    });
+
+    let column = unstyled::column(document, 16.0);
+    document.append_child(column, tabs, ItemSize::Intrinsic);
+    document.append_child(column, panels, ItemSize::Intrinsic);
+    styled::card(document, column)
+}
+
+fn build_list_controls(document: &mut Document, scroll: NodeId, rows: &Rc<Rows>) -> NodeId {
+    let timings = styled::checkbox(document, "Show timings", true);
+    let timing_rows = rows.clone();
+    styled::add_checkbox_on_change(document, timings, move |document, checked| {
+        timing_rows.show_timings(document, checked);
+    });
+
+    let compact = styled::switch(document, false);
+    let compact_label = styled::body(document, "Compact rows");
+    let compact_line = unstyled::centered_row(document, 12.0);
+    document.append_child(compact_line, compact, ItemSize::Intrinsic);
+    document.append_child(compact_line, compact_label, ItemSize::Percent(100.0));
+
+    let compact_rows = rows.clone();
+    styled::add_switch_on_change(document, compact, move |document, on| {
+        install_rows(document, scroll, &compact_rows, on);
+    });
+
+    let column = unstyled::column(document, 12.0);
+    document.append_child(column, timings, ItemSize::Intrinsic);
+    document.append_child(column, compact_line, ItemSize::Intrinsic);
+    column
+}
+
+fn build_load_controls(document: &mut Document) -> NodeId {
+    let label = styled::caption(document, "Simulated load");
+    let readout = styled::caption(document, percent_label(0.4));
+    document.set_text_align(readout, TextAlign::End, TextAlign::Center);
+    let header = unstyled::centered_row(document, 12.0);
+    document.append_child(header, label, ItemSize::Intrinsic);
+    document.append_child(header, readout, ItemSize::Percent(100.0));
+
+    let bar = styled::progress(document, 0.4);
+    let slider = styled::slider(document, 0.4);
+    styled::add_slider_on_change(document, slider, move |document, value| {
+        styled::set_progress_value(document, bar, value);
+        document.set_text(readout, percent_label(value));
+    });
+
+    let column = unstyled::column(document, 12.0);
+    document.append_child(column, header, ItemSize::Intrinsic);
+    document.append_child(column, slider, ItemSize::Intrinsic);
+    document.append_child(column, bar, ItemSize::Intrinsic);
+    column
+}
+
+fn percent_label(value: f32) -> String {
+    format!("{}%", (value * 100.0).round())
 }
 
 impl beui::App for DemoApp {

@@ -46,5 +46,5 @@ pub fn scrollbar(document: &mut Document, scroll: NodeId) -> NodeId {
         document.set_fill_color(thumb, color);
     });
 
-    background
+    document.create_shadow("scrollbar", background, Vec::new())
 }

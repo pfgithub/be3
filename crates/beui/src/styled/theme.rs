@@ -12,6 +12,8 @@ pub const ACCENT_ACTIVE: Color32 = Color32::from_rgb(58, 106, 212);
 pub const ACCENT_SOFT: Color32 = Color32::from_rgb(33, 48, 84);
 pub const ON_ACCENT: Color32 = Color32::from_rgb(247, 250, 255);
 pub const SCROLL_THUMB: Color32 = Color32::from_rgb(60, 71, 92);
+pub const TRACK: Color32 = Color32::from_rgb(48, 57, 73);
+pub const KNOB: Color32 = Color32::from_rgb(226, 232, 244);
 
 pub const FONT_SMALL: f32 = 12.0;
 pub const FONT_BODY: f32 = 14.0;

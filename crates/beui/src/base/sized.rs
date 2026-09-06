@@ -1,0 +1,125 @@
+use std::any::Any;
+use std::collections::HashMap;
+
+use crate::geometry::{vec2, Rect, Vec2};
+use crate::painter::Painter;
+
+use crate::document::Document;
+use crate::node::{Element, InteractInput, NodeId};
+
+pub(crate) struct SizedNode {
+    pub(crate) child: Option<NodeId>,
+    pub(crate) width: Option<f32>,
+    pub(crate) height: Option<f32>,
+}
+
+impl SizedNode {
+    pub(crate) fn new(width: Option<f32>, height: Option<f32>) -> Self {
+        Self {
+            child: None,
+            width,
+            height,
+        }
+    }
+}
+
+impl Element for SizedNode {
+    fn measure(&self, doc: &Document, painter: &Painter, available: Vec2) -> Vec2 {
+        let inner = match self.child {
+            Some(child) => {
+                let available = vec2(
+                    self.width.unwrap_or(available.x),
+                    self.height.unwrap_or(available.y),
+                );
+                crate::layout::measure(doc, painter, child, available)
+            }
+            None => Vec2::ZERO,
+        };
+        vec2(
+            self.width.unwrap_or(inner.x),
+            self.height.unwrap_or(inner.y),
+        )
+    }
+
+    fn layout(
+        &self,
+        doc: &Document,
+        painter: &Painter,
+        rect: Rect,
+        out: &mut HashMap<NodeId, Rect>,
+    ) {
+        if let Some(child) = self.child {
+            let size = vec2(
+                self.width.unwrap_or(rect.width()),
+                self.height.unwrap_or(rect.height()),
+            );
+            crate::layout::layout(
+                doc,
+                painter,
+                child,
+                Rect::from_min_size(rect.min, size),
+                out,
+            );
+        }
+    }
+
+    fn paint(&self, doc: &Document, painter: &Painter, rects: &HashMap<NodeId, Rect>, _rect: Rect) {
+        if let Some(child) = self.child {
+            crate::paint::paint(doc, painter, rects, child);
+        }
+    }
+
+    fn interact(
+        &mut self,
+        _doc: &mut Document,
+        _painter: &Painter,
+        _input: &InteractInput,
+        _id: NodeId,
+        _rect: Rect,
+        _focus_target: &mut Option<NodeId>,
+    ) -> Vec<NodeId> {
+        self.child.into_iter().collect()
+    }
+
+    fn children(&self) -> Vec<NodeId> {
+        self.child.into_iter().collect()
+    }
+
+    fn kind(&self) -> &'static str {
+        "sized"
+    }
+
+    fn detail(&self) -> Option<String> {
+        let axis = |length: Option<f32>| match length {
+            Some(length) => length.round().to_string(),
+            None => "auto".to_owned(),
+        };
+        Some(format!("{} x {}", axis(self.width), axis(self.height)))
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
+
+impl Document {
+    pub fn create_sized(&mut self, width: Option<f32>, height: Option<f32>) -> NodeId {
+        self.arena.insert(SizedNode::new(width, height))
+    }
+
+    pub fn set_sized_child(&mut self, sized: NodeId, child: NodeId) {
+        self.arena.get_mut_as::<SizedNode>(sized).child = Some(child);
+    }
+
+    pub fn set_sized_width(&mut self, sized: NodeId, width: Option<f32>) {
+        self.arena.get_mut_as::<SizedNode>(sized).width = width;
+    }
+
+    pub fn set_sized_height(&mut self, sized: NodeId, height: Option<f32>) {
+        self.arena.get_mut_as::<SizedNode>(sized).height = height;
+    }
+}
