@@ -24,6 +24,6 @@ pub use document::Document;
 pub use font::{FontFamily, FontId, Galley};
 pub use geometry::{pos2, vec2, Pos2, Rect, Vec2};
 pub use input::{CursorIcon, Event, InputState, Key, Modifiers, PointerButton, RawInput};
-pub use node::NodeId;
+pub use node::{ClickHandler, Handler, NodeId};
 pub use painter::Painter;
 pub use renderer::{clear_color, Renderer};

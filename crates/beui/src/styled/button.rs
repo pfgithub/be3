@@ -1,6 +1,3 @@
-use std::cell::Cell;
-use std::rc::Rc;
-
 use crate::color::Color32;
 
 use crate::base::TextAlign;
@@ -45,6 +42,7 @@ impl ButtonVariant {
 
 pub fn button(document: &mut Document, label: &str, variant: ButtonVariant) -> NodeId {
     let button = unstyled::button(document);
+    let name = label.to_owned();
 
     let label = document.create_text(label, FONT_BODY, variant.label());
     document.set_text_align(label, TextAlign::Center, TextAlign::Center);
@@ -64,19 +62,13 @@ pub fn button(document: &mut Document, label: &str, variant: ButtonVariant) -> N
 
     unstyled::set_button_child(document, button, ring);
 
-    let state = Rc::new(Cell::new((false, false)));
-
-    let hover_state = state.clone();
     unstyled::set_button_on_hover_change(document, button, move |document, hovered| {
-        let (_, active) = hover_state.get();
-        hover_state.set((hovered, active));
+        let active = unstyled::button_active(document, button);
         document.set_fill_color(fill, variant.fill(hovered, active));
     });
 
-    let active_state = state;
     unstyled::set_button_on_active_change(document, button, move |document, active| {
-        let (hovered, _) = active_state.get();
-        active_state.set((hovered, active));
+        let hovered = unstyled::button_hovered(document, button);
         document.set_fill_color(fill, variant.fill(hovered, active));
     });
 
@@ -84,7 +76,9 @@ pub fn button(document: &mut Document, label: &str, variant: ButtonVariant) -> N
         document.set_outline_visible(ring, focused);
     });
 
-    document.create_shadow("button", button, Vec::new())
+    let styled = document.create_shadow("button", button, Vec::new());
+    document.set_component_detail(styled, name);
+    styled
 }
 
 pub fn set_button_on_click(

@@ -1,11 +1,8 @@
-use std::cell::Cell;
-use std::rc::Rc;
-
 use crate::color::Color32;
 
 use crate::base::ItemSize;
 use crate::document::Document;
-use crate::node::NodeId;
+use crate::node::{Handler, NodeId};
 use crate::styled::theme::{ACCENT, ACCENT_HOVER, BORDER, KNOB, RADIUS, SURFACE_RAISED};
 use crate::unstyled;
 
@@ -17,6 +14,10 @@ const TRACK_RADIUS: u8 = 12;
 const KNOB_RADIUS: u8 = 9;
 const FOCUS_RING_WIDTH: f32 = 2.0;
 const FOCUS_RING_OFFSET: f32 = 4.0;
+
+struct State {
+    on_change: Option<Handler<bool>>,
+}
 
 pub fn switch(document: &mut Document, on: bool) -> NodeId {
     let toggle = unstyled::toggle(document, on);
@@ -45,21 +46,21 @@ pub fn switch(document: &mut Document, on: bool) -> NodeId {
     document.set_outline_child(ring, sized);
     unstyled::set_toggle_child(document, toggle, ring);
 
-    let state = Rc::new(Cell::new((on, false)));
+    let switch = document.create_shadow("switch", toggle, Vec::new());
+    document.set_component_detail(switch, detail(on));
+    document.set_component_state(switch, State { on_change: None });
 
-    let on_state = state.clone();
-    unstyled::add_toggle_on_change(document, toggle, move |document, on| {
-        let (_, hovered) = on_state.get();
-        on_state.set((on, hovered));
+    unstyled::set_toggle_on_change(document, toggle, move |document, on| {
+        let hovered = unstyled::toggle_hovered(document, toggle);
         document.set_child_size(line, before, before_size(on));
         document.set_child_size(line, after, after_size(on));
         document.set_fill_color(track, track_fill(on, hovered));
+        document.set_component_detail(switch, detail(on));
+        document.call_component_handler(switch, on, |state: &mut State| &mut state.on_change);
     });
 
-    let hover_state = state;
     unstyled::set_toggle_on_hover_change(document, toggle, move |document, hovered| {
-        let (on, _) = hover_state.get();
-        hover_state.set((on, hovered));
+        let on = unstyled::toggle_checked(document, toggle);
         document.set_fill_color(track, track_fill(on, hovered));
     });
 
@@ -67,7 +68,7 @@ pub fn switch(document: &mut Document, on: bool) -> NodeId {
         document.set_outline_visible(ring, focused);
     });
 
-    document.create_shadow("switch", toggle, Vec::new())
+    switch
 }
 
 pub fn switch_on(document: &Document, switch: NodeId) -> bool {
@@ -79,13 +80,20 @@ pub fn set_switch_on(document: &mut Document, switch: NodeId, on: bool) {
     unstyled::set_toggle_checked(document, toggle, on);
 }
 
-pub fn add_switch_on_change(
+pub fn set_switch_on_change(
     document: &mut Document,
     switch: NodeId,
     handler: impl FnMut(&mut Document, bool) + 'static,
 ) {
-    let toggle = document.shadow_root(switch);
-    unstyled::add_toggle_on_change(document, toggle, handler);
+    document.component_state_mut::<State>(switch).on_change = Some(Box::new(handler));
+}
+
+fn detail(on: bool) -> &'static str {
+    if on {
+        "on"
+    } else {
+        "off"
+    }
 }
 
 fn before_size(on: bool) -> ItemSize {

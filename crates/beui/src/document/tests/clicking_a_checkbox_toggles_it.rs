@@ -6,7 +6,7 @@ fn clicking_a_checkbox_toggles_it() {
     let checkbox = styled::checkbox(&mut document, "Show timings", false);
     let changes = Rc::new(RefCell::new(Vec::new()));
     let sink = changes.clone();
-    styled::add_checkbox_on_change(&mut document, checkbox, move |_document, checked| {
+    styled::set_checkbox_on_change(&mut document, checkbox, move |_document, checked| {
         sink.borrow_mut().push(checked);
     });
     toolbar(&mut document, &[checkbox]);

@@ -14,7 +14,7 @@ fn flipping_a_switch_can_replace_the_items_of_a_scroll() {
     let first = built.clone();
     install_scroll_items(&mut document, scroll, VIRTUAL_ITEM_HEIGHT, &first);
     let rebuilt = built.clone();
-    styled::add_switch_on_change(&mut document, switch, move |document, on| {
+    styled::set_switch_on_change(&mut document, switch, move |document, on| {
         let height = if on {
             VIRTUAL_ITEM_HEIGHT / 2.0
         } else {

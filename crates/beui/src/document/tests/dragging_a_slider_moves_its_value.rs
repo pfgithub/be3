@@ -6,7 +6,7 @@ fn dragging_a_slider_moves_its_value() {
     let slider = styled::slider(&mut document, 0.0);
     let reported = Rc::new(Cell::new(0.0));
     let sink = reported.clone();
-    styled::add_slider_on_change(&mut document, slider, move |_document, value| {
+    styled::set_slider_on_change(&mut document, slider, move |_document, value| {
         sink.set(value)
     });
     toolbar(&mut document, &[slider]);

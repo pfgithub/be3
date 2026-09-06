@@ -2,7 +2,7 @@ use crate::color::Color32;
 
 use crate::base::{ItemSize, TextAlign};
 use crate::document::Document;
-use crate::node::NodeId;
+use crate::node::{Handler, NodeId};
 use crate::styled::theme::{
     ACCENT, ACCENT_SOFT, FONT_BODY, RADIUS, SURFACE_RAISED, TEXT, TEXT_MUTED,
 };
@@ -19,10 +19,24 @@ struct Tab {
     label: NodeId,
 }
 
+struct State {
+    tabs: Vec<Tab>,
+    selected: usize,
+    on_change: Option<Handler<usize>>,
+}
+
 pub fn tabs(document: &mut Document, labels: &[&str], selected: usize) -> NodeId {
-    let holder = document.create_value(selected as f32);
     let line = unstyled::row(document, SPACING);
-    let mut tabs = Vec::new();
+    let tabs = document.create_shadow("tabs", line, Vec::new());
+    document.set_component_detail(tabs, labels.get(selected).copied().unwrap_or_default());
+    document.set_component_state(
+        tabs,
+        State {
+            tabs: Vec::new(),
+            selected,
+            on_change: None,
+        },
+    );
 
     for (index, title) in labels.iter().enumerate() {
         let active = index == selected;
@@ -42,10 +56,10 @@ pub fn tabs(document: &mut Document, labels: &[&str], selected: usize) -> NodeId
         unstyled::set_button_child(document, button, ring);
 
         unstyled::set_button_on_click(document, button, move |document| {
-            document.set_value(holder, index as f32);
+            set_tabs_selected(document, tabs, index);
         });
         unstyled::set_button_on_hover_change(document, button, move |document, hovered| {
-            let active = selected_index(document.value(holder)) == index;
+            let active = tabs_selected(document, tabs) == index;
             document.set_fill_color(fill, tab_fill(active, hovered));
         });
         unstyled::set_button_on_focus_change(document, button, move |document, focused| {
@@ -53,44 +67,45 @@ pub fn tabs(document: &mut Document, labels: &[&str], selected: usize) -> NodeId
         });
 
         document.append_child(line, button, ItemSize::Intrinsic);
-        tabs.push(Tab { fill, label });
+        document
+            .component_state_mut::<State>(tabs)
+            .tabs
+            .push(Tab { fill, label });
     }
 
-    document.set_value_child(holder, line);
-    document.add_value_on_change(holder, move |document, value| {
-        let selected = selected_index(value);
-        for (index, tab) in tabs.iter().enumerate() {
-            let active = index == selected;
-            document.set_fill_color(tab.fill, tab_fill(active, false));
-            document.set_text_color(tab.label, tab_text(active));
-        }
-    });
-
-    document.create_shadow("tabs", holder, Vec::new())
+    tabs
 }
 
 pub fn tabs_selected(document: &Document, tabs: NodeId) -> usize {
-    selected_index(document.value(document.shadow_root(tabs)))
+    document.component_state::<State>(tabs).selected
 }
 
 pub fn set_tabs_selected(document: &mut Document, tabs: NodeId, selected: usize) {
-    let holder = document.shadow_root(tabs);
-    document.set_value(holder, selected as f32);
+    let state = document.component_state_mut::<State>(tabs);
+    if state.selected == selected {
+        return;
+    }
+    state.selected = selected;
+    let parts: Vec<(NodeId, NodeId)> = state.tabs.iter().map(|tab| (tab.fill, tab.label)).collect();
+    let mut chosen = String::new();
+    for (index, (fill, label)) in parts.into_iter().enumerate() {
+        let active = index == selected;
+        document.set_fill_color(fill, tab_fill(active, false));
+        document.set_text_color(label, tab_text(active));
+        if active {
+            chosen = document.text(label).to_owned();
+        }
+    }
+    document.set_component_detail(tabs, chosen);
+    document.call_component_handler(tabs, selected, |state: &mut State| &mut state.on_change);
 }
 
-pub fn add_tabs_on_change(
+pub fn set_tabs_on_change(
     document: &mut Document,
     tabs: NodeId,
-    mut handler: impl FnMut(&mut Document, usize) + 'static,
+    handler: impl FnMut(&mut Document, usize) + 'static,
 ) {
-    let holder = document.shadow_root(tabs);
-    document.add_value_on_change(holder, move |document, value| {
-        handler(document, selected_index(value));
-    });
-}
-
-fn selected_index(value: f32) -> usize {
-    value.max(0.0) as usize
+    document.component_state_mut::<State>(tabs).on_change = Some(Box::new(handler));
 }
 
 fn tab_fill(active: bool, hovered: bool) -> Color32 {

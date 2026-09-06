@@ -1,12 +1,12 @@
 use std::any::Any;
 use std::collections::HashMap;
 
-use crate::geometry::{Rect, Vec2};
+use crate::geometry::{Pos2, Rect, Vec2};
 use crate::input::CursorIcon;
 use crate::painter::Painter;
 
 use crate::document::Document;
-use crate::node::{ChangeHandler, ClickHandler, Element, InteractInput, NodeId};
+use crate::node::{ChangeHandler, ClickHandler, Element, Handler, InteractInput, NodeId};
 
 pub(crate) struct ClickCatcherNode {
     pub(crate) child: Option<NodeId>,
@@ -15,9 +15,11 @@ pub(crate) struct ClickCatcherNode {
     pub(crate) key_active: bool,
     pub(crate) hovered: bool,
     pub(crate) active: bool,
+    pub(crate) dragged: Option<Vec2>,
     pub(crate) on_click: Option<ClickHandler>,
     pub(crate) on_hover_change: Option<ChangeHandler>,
     pub(crate) on_active_change: Option<ChangeHandler>,
+    pub(crate) on_drag: Option<Handler<Vec2>>,
 }
 
 impl ClickCatcherNode {
@@ -29,15 +31,31 @@ impl ClickCatcherNode {
             key_active: false,
             hovered: false,
             active: false,
+            dragged: None,
             on_click: None,
             on_hover_change: None,
             on_active_change: None,
+            on_drag: None,
         }
     }
 
     pub(crate) fn is_active(&self) -> bool {
         self.armed || self.key_active
     }
+}
+
+fn fraction(rect: Rect, pos: Pos2) -> Vec2 {
+    let axis = |offset: f32, length: f32| {
+        if length > 0.0 {
+            (offset / length).clamp(0.0, 1.0)
+        } else {
+            0.0
+        }
+    };
+    Vec2::new(
+        axis(pos.x - rect.left(), rect.width()),
+        axis(pos.y - rect.top(), rect.height()),
+    )
 }
 
 impl Element for ClickCatcherNode {
@@ -79,7 +97,6 @@ impl Element for ClickCatcherNode {
         if hovered && input.pressed_this_frame {
             self.armed = true;
         }
-
         if input.released_this_frame {
             if hovered && self.armed {
                 if let Some(mut handler) = self.on_click.take() {
@@ -88,6 +105,7 @@ impl Element for ClickCatcherNode {
                 }
             }
             self.armed = false;
+            self.dragged = None;
         }
         if hovered || self.is_active() {
             painter.ctx().set_cursor_icon(self.cursor);
@@ -107,6 +125,18 @@ impl Element for ClickCatcherNode {
                 self.on_active_change = Some(handler);
             }
         }
+        if self.armed && input.pointer_down {
+            if let Some(dragged) = input.pointer_pos.map(|pos| fraction(rect, pos)) {
+                if self.dragged != Some(dragged) {
+                    self.dragged = Some(dragged);
+                    if let Some(mut handler) = self.on_drag.take() {
+                        handler(doc, dragged);
+                        self.on_drag = Some(handler);
+                    }
+                }
+            }
+        }
+
         self.child.into_iter().collect()
     }
 
@@ -138,10 +168,6 @@ impl Document {
             .child = Some(child);
     }
 
-    pub fn click_catcher_child(&self, click_catcher: NodeId) -> Option<NodeId> {
-        self.arena.get_as::<ClickCatcherNode>(click_catcher).child
-    }
-
     pub fn set_click_catcher_on_click(
         &mut self,
         click_catcher: NodeId,
@@ -160,6 +186,16 @@ impl Document {
         self.arena
             .get_mut_as::<ClickCatcherNode>(click_catcher)
             .on_hover_change = Some(Box::new(handler));
+    }
+
+    pub fn set_click_catcher_on_drag(
+        &mut self,
+        click_catcher: NodeId,
+        handler: impl FnMut(&mut Document, Vec2) + 'static,
+    ) {
+        self.arena
+            .get_mut_as::<ClickCatcherNode>(click_catcher)
+            .on_drag = Some(Box::new(handler));
     }
 
     pub fn set_click_catcher_on_active_change(

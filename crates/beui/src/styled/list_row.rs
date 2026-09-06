@@ -1,6 +1,3 @@
-use std::cell::Cell;
-use std::rc::Rc;
-
 use crate::color::Color32;
 
 use crate::document::Document;
@@ -24,19 +21,13 @@ pub fn list_row(document: &mut Document, child: NodeId) -> NodeId {
     document.set_fill_child(fill, padding);
     unstyled::set_pressable_child(document, row, fill);
 
-    let state = Rc::new(Cell::new((false, false)));
-
-    let hover_state = state.clone();
     unstyled::set_pressable_on_hover_change(document, row, move |document, hovered| {
-        let (_, active) = hover_state.get();
-        hover_state.set((hovered, active));
+        let active = unstyled::pressable_active(document, row);
         document.set_fill_color(fill, background(hovered, active));
     });
 
-    let active_state = state;
     unstyled::set_pressable_on_active_change(document, row, move |document, active| {
-        let (hovered, _) = active_state.get();
-        active_state.set((hovered, active));
+        let hovered = unstyled::pressable_hovered(document, row);
         document.set_fill_color(fill, background(hovered, active));
     });
 

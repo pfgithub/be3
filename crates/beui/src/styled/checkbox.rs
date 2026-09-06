@@ -1,11 +1,8 @@
-use std::cell::Cell;
-use std::rc::Rc;
-
 use crate::color::Color32;
 
 use crate::base::ItemSize;
 use crate::document::Document;
-use crate::node::NodeId;
+use crate::node::{Handler, NodeId};
 use crate::styled::text::body;
 use crate::styled::theme::{
     ACCENT, ACCENT_HOVER, BORDER, BORDER_WIDTH, CHIP_RADIUS, ON_ACCENT, RADIUS, SURFACE_RAISED,
@@ -18,6 +15,10 @@ const MARK_RADIUS: u8 = 2;
 const SPACING: f32 = 10.0;
 const FOCUS_RING_WIDTH: f32 = 2.0;
 const FOCUS_RING_OFFSET: f32 = 4.0;
+
+struct State {
+    on_change: Option<Handler<bool>>,
+}
 
 pub fn checkbox(document: &mut Document, label: &str, checked: bool) -> NodeId {
     let toggle = unstyled::toggle(document, checked);
@@ -54,21 +55,22 @@ pub fn checkbox(document: &mut Document, label: &str, checked: bool) -> NodeId {
     document.set_outline_child(ring, line);
     unstyled::set_toggle_child(document, toggle, ring);
 
-    let state = Rc::new(Cell::new((checked, false)));
+    let checkbox = document.create_shadow("checkbox", toggle, Vec::new());
+    document.set_component_detail(checkbox, detail(checked));
+    document.set_component_state(checkbox, State { on_change: None });
 
-    let checked_state = state.clone();
-    unstyled::add_toggle_on_change(document, toggle, move |document, checked| {
-        let (_, hovered) = checked_state.get();
-        checked_state.set((checked, hovered));
+    unstyled::set_toggle_on_change(document, toggle, move |document, checked| {
+        let hovered = unstyled::toggle_hovered(document, toggle);
         document.set_visible(mark_visibility, checked);
         document.set_fill_color(fill, box_fill(checked, hovered));
         document.set_outline_visible(border, !checked);
+        document.set_component_detail(checkbox, detail(checked));
+        document
+            .call_component_handler(checkbox, checked, |state: &mut State| &mut state.on_change);
     });
 
-    let hover_state = state;
     unstyled::set_toggle_on_hover_change(document, toggle, move |document, hovered| {
-        let (checked, _) = hover_state.get();
-        hover_state.set((checked, hovered));
+        let checked = unstyled::toggle_checked(document, toggle);
         document.set_fill_color(fill, box_fill(checked, hovered));
     });
 
@@ -76,7 +78,7 @@ pub fn checkbox(document: &mut Document, label: &str, checked: bool) -> NodeId {
         document.set_outline_visible(ring, focused);
     });
 
-    document.create_shadow("checkbox", toggle, Vec::new())
+    checkbox
 }
 
 pub fn checkbox_checked(document: &Document, checkbox: NodeId) -> bool {
@@ -88,13 +90,20 @@ pub fn set_checkbox_checked(document: &mut Document, checkbox: NodeId, checked: 
     unstyled::set_toggle_checked(document, toggle, checked);
 }
 
-pub fn add_checkbox_on_change(
+pub fn set_checkbox_on_change(
     document: &mut Document,
     checkbox: NodeId,
     handler: impl FnMut(&mut Document, bool) + 'static,
 ) {
-    let toggle = document.shadow_root(checkbox);
-    unstyled::add_toggle_on_change(document, toggle, handler);
+    document.component_state_mut::<State>(checkbox).on_change = Some(Box::new(handler));
+}
+
+fn detail(checked: bool) -> &'static str {
+    if checked {
+        "checked"
+    } else {
+        "unchecked"
+    }
 }
 
 fn box_fill(checked: bool, hovered: bool) -> Color32 {

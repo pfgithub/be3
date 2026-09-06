@@ -5,12 +5,11 @@ use crate::geometry::{Rect, Vec2};
 use crate::painter::Painter;
 
 use crate::document::Document;
-use crate::node::{notify, Element, InteractInput, Listeners, NodeId};
+use crate::node::{Element, InteractInput, NodeId};
 
 pub(crate) struct VisibilityNode {
     pub(crate) child: Option<NodeId>,
     pub(crate) visible: bool,
-    pub(crate) on_change: Listeners<bool>,
 }
 
 impl VisibilityNode {
@@ -18,7 +17,6 @@ impl VisibilityNode {
         Self {
             child: None,
             visible,
-            on_change: Vec::new(),
         }
     }
 
@@ -100,24 +98,6 @@ impl Document {
     }
 
     pub fn set_visible(&mut self, visibility: NodeId, visible: bool) {
-        let node = self.arena.get_mut_as::<VisibilityNode>(visibility);
-        if node.visible == visible {
-            return;
-        }
-        node.visible = visible;
-        notify(self, visibility, visible, |node: &mut VisibilityNode| {
-            &mut node.on_change
-        });
-    }
-
-    pub fn add_visibility_on_change(
-        &mut self,
-        visibility: NodeId,
-        handler: impl FnMut(&mut Document, bool) + 'static,
-    ) {
-        self.arena
-            .get_mut_as::<VisibilityNode>(visibility)
-            .on_change
-            .push(Box::new(handler));
+        self.arena.get_mut_as::<VisibilityNode>(visibility).visible = visible;
     }
 }

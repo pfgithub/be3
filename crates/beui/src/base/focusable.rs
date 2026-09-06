@@ -99,10 +99,6 @@ impl Document {
         self.arena.get_mut_as::<FocusableNode>(focusable).child = Some(child);
     }
 
-    pub fn focusable_child(&self, focusable: NodeId) -> Option<NodeId> {
-        self.arena.get_as::<FocusableNode>(focusable).child
-    }
-
     pub fn set_focusable_on_focus_change(
         &mut self,
         focusable: NodeId,

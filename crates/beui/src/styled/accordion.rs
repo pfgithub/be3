@@ -2,7 +2,7 @@ use crate::color::Color32;
 
 use crate::base::{ItemSize, TextAlign};
 use crate::document::Document;
-use crate::node::NodeId;
+use crate::node::{Handler, NodeId};
 use crate::styled::text::{code, heading};
 use crate::styled::theme::{RADIUS, SURFACE_RAISED, TEXT_MUTED};
 use crate::unstyled;
@@ -12,7 +12,12 @@ const MARKER_WIDTH: f32 = 12.0;
 const PADDING_HORIZONTAL: f32 = 6.0;
 const PADDING_VERTICAL: f32 = 4.0;
 
+struct State {
+    on_toggle: Option<Handler<bool>>,
+}
+
 pub fn accordion(document: &mut Document, title: &str, child: NodeId, open: bool) -> NodeId {
+    let name = title.to_owned();
     let disclosure = unstyled::disclosure(document, SPACING, open);
 
     let marker = code(document, glyph(open));
@@ -38,14 +43,19 @@ pub fn accordion(document: &mut Document, title: &str, child: NodeId, open: bool
     document.set_slot_child(slot, child);
     unstyled::set_disclosure_content(document, disclosure, slot);
 
-    unstyled::add_disclosure_on_toggle(document, disclosure, move |document, open| {
+    let accordion = document.create_shadow("accordion", disclosure, vec![slot]);
+    document.set_component_detail(accordion, name);
+    document.set_component_state(accordion, State { on_toggle: None });
+
+    unstyled::set_disclosure_on_toggle(document, disclosure, move |document, open| {
         document.set_text(marker, glyph(open));
+        document.call_component_handler(accordion, open, |state: &mut State| &mut state.on_toggle);
     });
     unstyled::set_disclosure_on_hover_change(document, disclosure, move |document, hovered| {
         document.set_fill_color(header, header_fill(hovered));
     });
 
-    document.create_shadow("accordion", disclosure, vec![slot])
+    accordion
 }
 
 pub fn accordion_open(document: &Document, accordion: NodeId) -> bool {
@@ -57,13 +67,12 @@ pub fn set_accordion_open(document: &mut Document, accordion: NodeId, open: bool
     unstyled::set_disclosure_open(document, disclosure, open);
 }
 
-pub fn add_accordion_on_toggle(
+pub fn set_accordion_on_toggle(
     document: &mut Document,
     accordion: NodeId,
     handler: impl FnMut(&mut Document, bool) + 'static,
 ) {
-    let disclosure = document.shadow_root(accordion);
-    unstyled::add_disclosure_on_toggle(document, disclosure, handler);
+    document.component_state_mut::<State>(accordion).on_toggle = Some(Box::new(handler));
 }
 
 fn glyph(open: bool) -> &'static str {

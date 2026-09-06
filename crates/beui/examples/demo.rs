@@ -346,7 +346,7 @@ fn build_controls(document: &mut Document, scroll: NodeId, rows: &Rc<Rows>) -> N
     document.append_child(panels, load_visibility, ItemSize::Intrinsic);
 
     let tabs = styled::tabs(document, &["List", "Load"], 0);
-    styled::add_tabs_on_change(document, tabs, move |document, selected| {
+    styled::set_tabs_on_change(document, tabs, move |document, selected| {
         document.set_visible(list_visibility, selected == 0);
         document.set_visible(load_visibility, selected == 1);
     });
@@ -360,7 +360,7 @@ fn build_controls(document: &mut Document, scroll: NodeId, rows: &Rc<Rows>) -> N
 fn build_list_controls(document: &mut Document, scroll: NodeId, rows: &Rc<Rows>) -> NodeId {
     let timings = styled::checkbox(document, "Show timings", true);
     let timing_rows = rows.clone();
-    styled::add_checkbox_on_change(document, timings, move |document, checked| {
+    styled::set_checkbox_on_change(document, timings, move |document, checked| {
         timing_rows.show_timings(document, checked);
     });
 
@@ -371,7 +371,7 @@ fn build_list_controls(document: &mut Document, scroll: NodeId, rows: &Rc<Rows>)
     document.append_child(compact_line, compact_label, ItemSize::Percent(100.0));
 
     let compact_rows = rows.clone();
-    styled::add_switch_on_change(document, compact, move |document, on| {
+    styled::set_switch_on_change(document, compact, move |document, on| {
         install_rows(document, scroll, &compact_rows, on);
     });
 
@@ -391,7 +391,7 @@ fn build_load_controls(document: &mut Document) -> NodeId {
 
     let bar = styled::progress(document, 0.4);
     let slider = styled::slider(document, 0.4);
-    styled::add_slider_on_change(document, slider, move |document, value| {
+    styled::set_slider_on_change(document, slider, move |document, value| {
         styled::set_progress_value(document, bar, value);
         document.set_text(readout, percent_label(value));
     });
