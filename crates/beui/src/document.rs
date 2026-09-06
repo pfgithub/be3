@@ -4,7 +4,7 @@ use crate::context::Context;
 use crate::geometry::{pos2, Rect};
 use crate::input::{Event, Key};
 
-use crate::inspector::{Inspector, PANEL_WIDTH};
+use crate::inspector::Inspector;
 use crate::interact;
 use crate::layout;
 use crate::node::{Arena, NodeId};
@@ -57,6 +57,10 @@ impl Document {
         self.rects.get(&id).copied()
     }
 
+    pub fn contains(&self, id: NodeId) -> bool {
+        self.arena.contains(id)
+    }
+
     pub fn remove_node(&mut self, id: NodeId) {
         let children = self.arena.get(id).children();
         for child in children {
@@ -75,26 +79,40 @@ impl Document {
     }
 
     pub fn show(&mut self, ctx: &Context, rect: Rect) {
-        if self.inspectable && inspector_toggled(ctx) {
-            self.inspector = match self.inspector {
-                Some(_) => None,
-                None => Some(Box::new(Inspector::new())),
-            };
+        if self.inspectable {
+            if chord_pressed(ctx, Key::I) {
+                self.inspector = match self.inspector {
+                    Some(_) => None,
+                    None => Some(Box::new(Inspector::new())),
+                };
+            }
+            if chord_pressed(ctx, Key::C) {
+                self.inspector
+                    .get_or_insert_with(|| Box::new(Inspector::new()))
+                    .toggle_picking();
+            }
         }
 
-        let (content, panel) = match self.inspector {
-            Some(_) => split(rect),
+        let (content, panel) = match &mut self.inspector {
+            Some(inspector) => {
+                inspector.grab(ctx, rect);
+                split(rect, inspector.panel_width(rect))
+            }
             None => (rect, Rect::NOTHING),
         };
-        self.show_content(ctx, content);
+        let intercepted = self
+            .inspector
+            .as_ref()
+            .is_some_and(|inspector| inspector.intercepts());
+        self.show_content(ctx, content, !intercepted);
 
         if let Some(mut inspector) = self.inspector.take() {
-            inspector.show(self, ctx, panel);
+            inspector.show(self, ctx, content, panel);
             self.inspector = Some(inspector);
         }
     }
 
-    fn show_content(&mut self, ctx: &Context, rect: Rect) {
+    fn show_content(&mut self, ctx: &Context, rect: Rect, interactive: bool) {
         let Some(root) = self.root else {
             self.rects.clear();
             return;
@@ -103,7 +121,9 @@ impl Document {
         let mut rects = HashMap::new();
         layout::layout(self, &painter, root, rect, &mut rects);
 
-        interact::interact(self, ctx, &painter, &rects, root);
+        if interactive {
+            interact::interact(self, ctx, &painter, &rects, root);
+        }
 
         let Some(root) = self.root else {
             self.rects.clear();
@@ -116,8 +136,7 @@ impl Document {
     }
 }
 
-fn split(rect: Rect) -> (Rect, Rect) {
-    let width = PANEL_WIDTH.min(rect.width() / 2.0);
+fn split(rect: Rect, width: f32) -> (Rect, Rect) {
     let edge = rect.right() - width;
     (
         Rect::from_min_max(rect.min, pos2(edge, rect.bottom())),
@@ -125,17 +144,17 @@ fn split(rect: Rect) -> (Rect, Rect) {
     )
 }
 
-fn inspector_toggled(ctx: &Context) -> bool {
+fn chord_pressed(ctx: &Context, chord: Key) -> bool {
     ctx.input(|input| {
         input.events.iter().any(|event| {
             matches!(
                 event,
                 Event::Key {
-                    key: Key::I,
+                    key,
                     pressed: true,
                     modifiers,
                     ..
-                } if modifiers.ctrl && modifiers.shift
+                } if *key == chord && modifiers.ctrl && modifiers.shift
             )
         })
     })

@@ -224,6 +224,7 @@ fn build_sidebar(document: &mut Document) -> NodeId {
     let enter = styled::shortcut(document, "Enter", "activate the focused button");
     let wheel = styled::shortcut(document, "Wheel", "scroll the row list");
     let inspect = styled::shortcut(document, "Ctrl+Shift+I", "open the inspector");
+    let pick = styled::shortcut(document, "Ctrl+Shift+C", "pick a node to inspect");
 
     let content = unstyled::column(document, 12.0);
     document.append_child(content, heading, ItemSize::Intrinsic);
@@ -235,6 +236,7 @@ fn build_sidebar(document: &mut Document) -> NodeId {
     document.append_child(content, enter, ItemSize::Intrinsic);
     document.append_child(content, wheel, ItemSize::Intrinsic);
     document.append_child(content, inspect, ItemSize::Intrinsic);
+    document.append_child(content, pick, ItemSize::Intrinsic);
 
     styled::card(document, content)
 }

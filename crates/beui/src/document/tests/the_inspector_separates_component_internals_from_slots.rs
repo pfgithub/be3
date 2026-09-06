@@ -20,7 +20,7 @@ fn the_inspector_separates_component_internals_from_slots() {
         ]
     );
 
-    let shadow_row = harness.row_center(2);
+    let shadow_row = harness.marker_center(2);
     harness.click(shadow_row);
     harness.frame(Vec::new());
 
@@ -36,9 +36,9 @@ fn the_inspector_separates_component_internals_from_slots() {
         ]
     );
 
-    harness.click(harness.row_center(3));
+    harness.click(harness.marker_center(3));
     harness.frame(Vec::new());
-    harness.click(harness.row_center(4));
+    harness.click(harness.marker_center(4));
     harness.frame(Vec::new());
 
     assert_eq!(

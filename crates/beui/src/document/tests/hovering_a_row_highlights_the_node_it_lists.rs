@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn clicking_a_row_collapses_its_children() {
+fn hovering_a_row_highlights_the_node_it_lists() {
     let mut document = Document::new();
     let text = document.create_text("Hello", 14.0, Color32::WHITE);
     let padding = document.create_padding(4.0, 4.0);
@@ -12,14 +12,11 @@ fn clicking_a_row_collapses_its_children() {
     let mut harness = Harness::new(document);
 
     harness.toggle_inspector();
-    let padding_row = harness.marker_center(1);
-    harness.click(padding_row);
-    harness.frame(Vec::new());
+    harness.frame(vec![Event::PointerMoved(harness.row_center(2))]);
 
-    assert_eq!(harness.tree(), ["column", "  padding"]);
+    assert_eq!(harness.inspector().state.hovered.get(), Some(text));
 
-    harness.click(padding_row);
-    harness.frame(Vec::new());
+    harness.frame(vec![Event::PointerMoved(pos2(4.0, 4.0))]);
 
-    assert_eq!(harness.tree(), ["column", "  padding", "    text"]);
+    assert_eq!(harness.inspector().state.hovered.get(), None);
 }

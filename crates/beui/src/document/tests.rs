@@ -2,9 +2,14 @@ use super::*;
 
 mod a_virtual_scroll_only_builds_the_items_in_view;
 mod clicking_a_row_collapses_its_children;
+mod clicking_a_row_selects_the_node_it_lists;
 mod clicking_the_padding_around_a_button_label_activates_it;
 mod ctrl_shift_i_opens_and_closes_the_inspector;
+mod dragging_the_inspector_edge_resizes_the_panel;
 mod enter_activates_the_focused_button;
+mod hovering_a_row_highlights_the_node_it_lists;
+mod picking_a_node_leaves_the_document_alone;
+mod picking_a_node_reveals_it_in_the_tree;
 mod scrolling_a_virtual_scroll_replaces_the_items_in_view;
 mod shift_tab_moves_focus_to_the_previous_button;
 mod tab_moves_focus_to_the_next_button;
@@ -26,12 +31,14 @@ use crate::inspector::Inspector;
 use crate::unstyled;
 
 const VIEWPORT: Vec2 = Vec2::new(400.0, 300.0);
+const WIDE_VIEWPORT: Vec2 = Vec2::new(1000.0, 600.0);
 const VIRTUAL_ITEM_COUNT: usize = 10_000;
 const VIRTUAL_ITEM_HEIGHT: f32 = 20.0;
 
 pub(crate) struct Harness {
     context: Context,
     document: Document,
+    viewport: Vec2,
 }
 
 impl Harness {
@@ -39,14 +46,26 @@ impl Harness {
         Self {
             context: Context::new(),
             document,
+            viewport: VIEWPORT,
+        }
+    }
+
+    pub(crate) fn sized(document: Document, viewport: Vec2) -> Self {
+        Self {
+            viewport,
+            ..Self::new(document)
         }
     }
 
     pub(crate) fn frame(&mut self, events: Vec<Event>) {
-        let Self { context, document } = self;
+        let Self {
+            context,
+            document,
+            viewport,
+        } = self;
         let input = RawInput { events };
         let _ = context.run(input, |context| {
-            document.show(context, Rect::from_min_size(Pos2::ZERO, VIEWPORT));
+            document.show(context, Rect::from_min_size(Pos2::ZERO, *viewport));
         });
     }
 
@@ -66,14 +85,39 @@ impl Harness {
         }]);
     }
 
+    pub(crate) fn drag(&mut self, from: Pos2, to: Pos2) {
+        self.frame(vec![Event::PointerMoved(from)]);
+        self.frame(vec![Event::PointerButton {
+            pos: from,
+            button: PointerButton::Primary,
+            pressed: true,
+            modifiers: Modifiers::NONE,
+        }]);
+        self.frame(vec![Event::PointerMoved(to)]);
+        self.frame(vec![Event::PointerButton {
+            pos: to,
+            button: PointerButton::Primary,
+            pressed: false,
+            modifiers: Modifiers::NONE,
+        }]);
+    }
+
     pub(crate) fn key(&mut self, key: Key, modifiers: Modifiers) {
         self.frame(vec![key_event(key, true, modifiers)]);
         self.frame(vec![key_event(key, false, modifiers)]);
     }
 
     pub(crate) fn toggle_inspector(&mut self) {
+        self.chord(Key::I);
+    }
+
+    pub(crate) fn toggle_picking(&mut self) {
+        self.chord(Key::C);
+    }
+
+    fn chord(&mut self, key: Key) {
         self.key(
-            Key::I,
+            key,
             Modifiers {
                 ctrl: true,
                 shift: true,
@@ -98,10 +142,17 @@ impl Harness {
     }
 
     pub(crate) fn row_center(&self, index: usize) -> Pos2 {
-        let inspector = self.inspector();
-        inspector
+        self.node_center(self.inspector().rows[index].row)
+    }
+
+    pub(crate) fn marker_center(&self, index: usize) -> Pos2 {
+        self.node_center(self.inspector().rows[index].marker)
+    }
+
+    fn node_center(&self, id: NodeId) -> Pos2 {
+        self.inspector()
             .document
-            .node_rect(inspector.rows[index].row)
+            .node_rect(id)
             .expect("the row was not laid out")
             .center()
     }

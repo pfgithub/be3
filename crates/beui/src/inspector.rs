@@ -1,146 +1,230 @@
+mod overlay;
+mod panel;
+mod tree;
+
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 
 use crate::context::Context;
-use crate::geometry::Rect;
+use crate::geometry::{pos2, Rect};
+use crate::input::{CursorIcon, Event, Key as InputKey};
 
-use crate::base::{ItemSize, TextAlign};
 use crate::document::Document;
 use crate::node::NodeId;
-use crate::styled;
-use crate::styled::theme::{SCROLLBAR_WIDTH, SEPARATOR_HEIGHT, SURFACE, TEXT_MUTED};
-use crate::unstyled;
+use crate::styled::theme::ACCENT;
 
-pub(crate) const PANEL_WIDTH: f32 = 320.0;
+use panel::{Panel, Summary};
+use tree::{Entry, Key};
 
-const HEADER_PADDING: f32 = 12.0;
-const HEADER_SPACING: f32 = 8.0;
-const BODY_PADDING: f32 = 8.0;
-const BODY_SPACING: f32 = 6.0;
-const ROW_SPACING: f32 = 6.0;
-const INDENT: f32 = 12.0;
-const MARKER_WIDTH: f32 = 8.0;
-const AUTO_EXPAND_DEPTH: usize = 3;
-const DETAIL_LIMIT: usize = 24;
+pub(crate) use panel::Row;
 
-type Expansion = Rc<RefCell<HashMap<Key, bool>>>;
+const DEFAULT_WIDTH: f32 = 320.0;
+const MINIMUM_WIDTH: f32 = 200.0;
+const GRIP_WIDTH: f32 = 4.0;
+const GRIP_PAINT_WIDTH: f32 = 2.0;
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-enum Key {
-    Node(NodeId),
-    Internals(NodeId),
-    Placeholder(NodeId),
+pub(crate) struct State {
+    expansion: RefCell<HashMap<Key, bool>>,
+    pub(crate) hovered: Cell<Option<NodeId>>,
+    pub(crate) selected: Cell<Option<NodeId>>,
+    pub(crate) picking: Cell<bool>,
+    reveal: Cell<Option<NodeId>>,
+    revision: Cell<u64>,
 }
 
-impl Key {
-    fn node(self) -> NodeId {
-        match self {
-            Key::Node(id) | Key::Internals(id) | Key::Placeholder(id) => id,
+impl State {
+    fn new() -> Self {
+        Self {
+            expansion: RefCell::new(HashMap::new()),
+            hovered: Cell::new(None),
+            selected: Cell::new(None),
+            picking: Cell::new(false),
+            reveal: Cell::new(None),
+            revision: Cell::new(0),
         }
     }
-}
 
-pub(crate) struct Entry {
-    key: Key,
-    pub(crate) depth: usize,
-    pub(crate) kind: &'static str,
-    expandable: bool,
-    expanded: bool,
-    detail: String,
-    size: String,
-}
-
-impl Entry {
-    fn same_shape(&self, other: &Entry) -> bool {
-        self.key == other.key
-            && self.depth == other.depth
-            && self.kind == other.kind
-            && self.expandable == other.expandable
-            && self.expanded == other.expanded
+    fn expanded(&self, key: Key, default: bool) -> bool {
+        self.expansion
+            .borrow()
+            .get(&key)
+            .copied()
+            .unwrap_or(default)
     }
-}
 
-pub(crate) struct Row {
-    pub(crate) row: NodeId,
-    detail: NodeId,
-    size: NodeId,
-}
+    fn set_expanded(&self, key: Key, expanded: bool) {
+        self.expansion.borrow_mut().insert(key, expanded);
+        self.touch();
+    }
 
-struct Panel {
-    document: Document,
-    scroll: NodeId,
-    count: NodeId,
-    rows: Vec<Row>,
+    fn hover(&self, id: NodeId, hovered: bool) {
+        match hovered {
+            true => self.hovered.set(Some(id)),
+            false if self.hovered.get() == Some(id) => self.hovered.set(None),
+            false => {}
+        }
+    }
+
+    fn select(&self, id: NodeId) {
+        self.selected.set(Some(id));
+        self.reveal.set(Some(id));
+        self.touch();
+    }
+
+    fn toggle_picking(&self) {
+        self.picking.set(!self.picking.get());
+        self.touch();
+    }
+
+    fn touch(&self) {
+        self.revision.set(self.revision.get() + 1);
+    }
 }
 
 pub(crate) struct Inspector {
     pub(crate) document: Document,
     pub(crate) entries: Vec<Entry>,
     pub(crate) rows: Vec<Row>,
+    pub(crate) state: Rc<State>,
     scroll: NodeId,
     count: NodeId,
-    total: usize,
+    toggle: NodeId,
+    toggle_label: NodeId,
+    selection: NodeId,
+    bounds: NodeId,
+    summary: Summary,
     offset: f32,
-    expansion: Expansion,
-    revision: Rc<Cell<u64>>,
+    pub(crate) width: f32,
+    grabbed: Option<f32>,
+    grip: bool,
     seen: u64,
 }
 
 impl Inspector {
     pub(crate) fn new() -> Self {
-        let expansion: Expansion = Rc::new(RefCell::new(HashMap::new()));
-        let revision = Rc::new(Cell::new(0));
-        let panel = build(&[], 0, &expansion, &revision, 0.0);
+        let state = Rc::new(State::new());
+        let summary = Summary {
+            total: 0,
+            picking: false,
+            selection: nothing_selected(),
+            bounds: String::new(),
+        };
+        let panel = panel::build(&[], &summary, &state, 0.0);
         Self {
             document: panel.document,
             entries: Vec::new(),
             rows: panel.rows,
+            state,
             scroll: panel.scroll,
             count: panel.count,
-            total: 0,
+            toggle: panel.toggle,
+            toggle_label: panel.toggle_label,
+            selection: panel.selection,
+            bounds: panel.bounds,
+            summary,
             offset: 0.0,
-            expansion,
-            revision,
+            width: DEFAULT_WIDTH,
+            grabbed: None,
+            grip: false,
             seen: 0,
         }
     }
 
-    pub(crate) fn show(&mut self, target: &Document, ctx: &Context, rect: Rect) {
+    pub(crate) fn panel_width(&self, rect: Rect) -> f32 {
+        self.width.min(rect.width() / 2.0).max(0.0)
+    }
+
+    pub(crate) fn intercepts(&self) -> bool {
+        self.state.picking.get() || self.grabbed.is_some()
+    }
+
+    pub(crate) fn toggle_picking(&self) {
+        self.state.toggle_picking();
+    }
+
+    pub(crate) fn grab(&mut self, ctx: &Context, rect: Rect) {
+        let edge = rect.right() - self.panel_width(rect);
+        let grip = Rect::from_min_max(
+            pos2(edge - GRIP_WIDTH, rect.top()),
+            pos2(edge + GRIP_WIDTH, rect.bottom()),
+        );
+        if ctx.input(|input| input.pointer.primary_released()) {
+            self.grabbed = None;
+        }
+        let Some(pointer) = ctx.input(|input| input.pointer.interact_pos()) else {
+            self.grip = false;
+            return;
+        };
+        if ctx.input(|input| input.pointer.primary_pressed()) && grip.contains(pointer) {
+            self.grabbed = Some(pointer.x - edge);
+        }
+        if let Some(grabbed) = self.grabbed {
+            let maximum = (rect.width() / 2.0).max(MINIMUM_WIDTH);
+            self.width = (rect.right() - pointer.x + grabbed).clamp(MINIMUM_WIDTH, maximum);
+        }
+        self.grip = self.grabbed.is_some() || grip.contains(pointer);
+    }
+
+    pub(crate) fn show(&mut self, target: &Document, ctx: &Context, content: Rect, panel: Rect) {
+        self.forget_removed(target);
         self.sync(target);
-        self.document.show(ctx, rect);
+        self.document.show(ctx, panel);
         self.offset = self.document.scroll_offset(self.scroll);
-        if self.revision.get() != self.seen {
-            self.seen = self.revision.get();
+        self.pick(target, ctx, content);
+        self.reveal();
+        self.paint(target, ctx, content, panel);
+        if self.state.revision.get() != self.seen {
+            self.seen = self.state.revision.get();
             ctx.request_repaint();
         }
     }
 
+    fn forget_removed(&mut self, target: &Document) {
+        for cell in [&self.state.hovered, &self.state.selected] {
+            if cell.get().is_some_and(|id| !target.contains(id)) {
+                cell.set(None);
+            }
+        }
+    }
+
     fn sync(&mut self, target: &Document) {
-        let entries = collect(target, &self.expansion.borrow());
-        let total = target.root().map_or(0, |root| count(target, root));
+        let entries = tree::collect(target, &self.state);
+        let summary = self.summary(target);
         if self.reshaped(&entries) {
-            let panel = build(
-                &entries,
-                total,
-                &self.expansion,
-                &self.revision,
-                self.offset,
-            );
-            self.document = panel.document;
-            self.scroll = panel.scroll;
-            self.count = panel.count;
-            self.rows = panel.rows;
+            let panel = panel::build(&entries, &summary, &self.state, self.offset);
+            self.adopt(panel);
             self.entries = entries;
-            self.total = total;
+            self.summary = summary;
             return;
         }
 
         self.update(entries);
-        if total != self.total {
-            self.total = total;
-            self.document.set_text(self.count, total_label(total));
+        self.apply(summary);
+    }
+
+    fn summary(&self, target: &Document) -> Summary {
+        let selected = self.state.selected.get();
+        Summary {
+            total: target.root().map_or(0, |root| tree::count(target, root)),
+            picking: self.state.picking.get(),
+            selection: selected.map_or_else(nothing_selected, |id| tree::label(target, id)),
+            bounds: selected
+                .and_then(|id| target.node_rect(id))
+                .map(bounds_label)
+                .unwrap_or_default(),
         }
+    }
+
+    fn adopt(&mut self, panel: Panel) {
+        self.document = panel.document;
+        self.scroll = panel.scroll;
+        self.count = panel.count;
+        self.toggle = panel.toggle;
+        self.toggle_label = panel.toggle_label;
+        self.selection = panel.selection;
+        self.bounds = panel.bounds;
+        self.rows = panel.rows;
     }
 
     fn reshaped(&self, entries: &[Entry]) -> bool {
@@ -161,240 +245,152 @@ impl Inspector {
             if entry.size != previous.size {
                 self.document.set_text(row.size, entry.size.clone());
             }
+            if entry.selected != previous.selected {
+                self.document
+                    .set_outline_visible(row.outline, entry.selected);
+            }
             *previous = entry;
         }
     }
-}
 
-fn collect(target: &Document, expansion: &HashMap<Key, bool>) -> Vec<Entry> {
-    let mut entries = Vec::new();
-    if let Some(root) = target.root() {
-        visit(target, expansion, Key::Node(root), 0, &mut entries);
+    fn apply(&mut self, summary: Summary) {
+        if summary.total != self.summary.total {
+            self.document
+                .set_text(self.count, panel::total_label(summary.total));
+        }
+        if summary.picking != self.summary.picking {
+            self.document
+                .set_fill_color(self.toggle, panel::toggle_fill(summary.picking));
+            self.document
+                .set_text_color(self.toggle_label, panel::toggle_text(summary.picking));
+        }
+        if summary.selection != self.summary.selection {
+            self.document
+                .set_text(self.selection, summary.selection.clone());
+        }
+        if summary.bounds != self.summary.bounds {
+            self.document.set_text(self.bounds, summary.bounds.clone());
+        }
+        self.summary = summary;
     }
-    entries
-}
 
-fn visit(
-    target: &Document,
-    expansion: &HashMap<Key, bool>,
-    key: Key,
-    depth: usize,
-    entries: &mut Vec<Entry>,
-) {
-    let children = children(target, key);
-    let expandable = !children.is_empty();
-    let expanded = expandable && is_expanded(expansion, key, depth);
-    entries.push(Entry {
-        key,
-        depth,
-        kind: kind(target, key),
-        expandable,
-        expanded,
-        detail: detail(target, key),
-        size: size(target, key.node()),
-    });
-    if expanded {
-        for child in children {
-            visit(target, expansion, child, depth + 1, entries);
+    fn pick(&mut self, target: &Document, ctx: &Context, content: Rect) {
+        if !self.state.picking.get() {
+            return;
+        }
+        if ctx.input(|input| input.events.iter().any(cancelled)) {
+            self.state.picking.set(false);
+            self.state.touch();
+            return;
+        }
+
+        self.state.hovered.set(None);
+        let pointer = ctx.input(|input| input.pointer.interact_pos());
+        let Some(pointer) = pointer.filter(|pointer| content.contains(*pointer)) else {
+            return;
+        };
+        ctx.set_cursor_icon(CursorIcon::Crosshair);
+        let Some(id) = overlay::hit(target, pointer) else {
+            return;
+        };
+        self.state.hovered.set(Some(id));
+        if ctx.input(|input| input.pointer.primary_pressed()) {
+            self.state.picking.set(false);
+            self.state.hovered.set(None);
+            self.choose(target, id);
+        }
+    }
+
+    fn choose(&mut self, target: &Document, id: NodeId) {
+        let path = tree::path(target, id);
+        if let Some((_, ancestors)) = path.split_last() {
+            for key in ancestors {
+                self.state.set_expanded(*key, true);
+            }
+        }
+        self.state.select(id);
+    }
+
+    fn reveal(&mut self) {
+        let Some(id) = self.state.reveal.get() else {
+            return;
+        };
+        let Some(index) = self
+            .entries
+            .iter()
+            .position(|entry| entry.key == Key::Node(id))
+        else {
+            return;
+        };
+        let Some(view) = self.document.node_rect(self.scroll) else {
+            return;
+        };
+        let Some((visible, rect)) = self
+            .rows
+            .iter()
+            .enumerate()
+            .find_map(|(at, row)| Some((at, self.document.node_rect(row.row)?)))
+        else {
+            return;
+        };
+
+        self.state.reveal.set(None);
+        let height = rect.height();
+        let top = rect.top() + (index as f32 - visible as f32) * height;
+        let delta = if top < view.top() {
+            top - view.top()
+        } else if top + height > view.bottom() {
+            top + height - view.bottom()
+        } else {
+            return;
+        };
+        self.offset += delta;
+        self.document.set_scroll_offset(self.scroll, self.offset);
+        self.state.touch();
+    }
+
+    fn paint(&self, target: &Document, ctx: &Context, content: Rect, panel: Rect) {
+        let painter = ctx.painter().with_clip_rect(content);
+        let hovered = self.state.hovered.get();
+        let selected = self.state.selected.get();
+        if let Some(id) = selected.filter(|id| Some(*id) != hovered) {
+            overlay::highlight(&painter, target, id, false);
+        }
+        if let Some(id) = hovered {
+            overlay::highlight(&painter, target, id, true);
+        }
+        if self.grip {
+            let grip = Rect::from_min_max(
+                panel.min,
+                pos2(panel.left() + GRIP_PAINT_WIDTH, panel.bottom()),
+            );
+            ctx.painter().rect_filled(grip, 0.0, ACCENT);
+            ctx.set_cursor_icon(CursorIcon::ResizeHorizontal);
         }
     }
 }
 
-fn children(target: &Document, key: Key) -> Vec<Key> {
-    match key {
-        Key::Placeholder(_) => Vec::new(),
-        Key::Internals(shadow) => vec![child_key(target, target.shadow_root(shadow))],
-        Key::Node(id) if target.as_shadow(id).is_some() => std::iter::once(Key::Internals(id))
-            .chain(target.shadow_slots(id).into_iter().map(Key::Node))
-            .collect(),
-        Key::Node(id) => target
-            .children(id)
-            .into_iter()
-            .map(|child| child_key(target, child))
-            .collect(),
-    }
+fn cancelled(event: &Event) -> bool {
+    matches!(
+        event,
+        Event::Key {
+            key: InputKey::Escape,
+            pressed: true,
+            ..
+        }
+    )
 }
 
-fn child_key(target: &Document, id: NodeId) -> Key {
-    match target.as_slot(id) {
-        Some(_) => Key::Placeholder(id),
-        None => Key::Node(id),
-    }
+fn nothing_selected() -> String {
+    "nothing selected".to_owned()
 }
 
-fn kind(target: &Document, key: Key) -> &'static str {
-    match key {
-        Key::Node(id) => target.node_kind(id),
-        Key::Internals(_) => "shadow",
-        Key::Placeholder(_) => "slot",
-    }
-}
-
-fn is_expanded(expansion: &HashMap<Key, bool>, key: Key, depth: usize) -> bool {
-    let internals = matches!(key, Key::Internals(_));
-    expansion
-        .get(&key)
-        .copied()
-        .unwrap_or(!internals && depth < AUTO_EXPAND_DEPTH)
-}
-
-fn count(target: &Document, id: NodeId) -> usize {
-    1 + target
-        .children(id)
-        .into_iter()
-        .map(|child| count(target, child))
-        .sum::<usize>()
-}
-
-fn detail(target: &Document, key: Key) -> String {
-    let detail = match key {
-        Key::Node(id) => target.node_detail(id),
-        Key::Internals(_) => None,
-        Key::Placeholder(id) => Some(target.node_kind(id).to_owned()),
-    };
-    let Some(detail) = detail else {
-        return String::new();
-    };
-    let detail = detail.replace(['\n', '\t'], " ");
-    if detail.chars().count() <= DETAIL_LIMIT {
-        return detail;
-    }
-    let kept: String = detail.chars().take(DETAIL_LIMIT).collect();
-    format!("{kept}...")
-}
-
-fn size(target: &Document, id: NodeId) -> String {
-    match target.node_rect(id) {
-        Some(rect) => format!("{} x {}", rect.width().round(), rect.height().round()),
-        None => String::new(),
-    }
-}
-
-fn build(
-    entries: &[Entry],
-    total: usize,
-    expansion: &Expansion,
-    revision: &Rc<Cell<u64>>,
-    offset: f32,
-) -> Panel {
-    let mut document = Document::new();
-    document.inspectable = false;
-
-    let count = header_count(&mut document, total);
-    let header = header(&mut document, count);
-
-    let scroll = document.create_scroll();
-    let mut rows = Vec::new();
-    for entry in entries {
-        let row = row(&mut document, entry, expansion, revision);
-        document.append_scroll_item(scroll, row.row);
-        rows.push(row);
-    }
-    document.set_scroll_offset(scroll, offset);
-    let body = body(&mut document, scroll);
-
-    let column = unstyled::column(&mut document, 0.0);
-    document.append_child(column, header, ItemSize::Intrinsic);
-    let line = styled::separator(&mut document);
-    document.append_child(column, line, ItemSize::Fixed(SEPARATOR_HEIGHT));
-    document.append_child(column, body, ItemSize::Percent(100.0));
-
-    let surface = document.create_fill(SURFACE, 0);
-    document.set_fill_child(surface, column);
-
-    let edge = styled::separator(&mut document);
-    let panel = unstyled::row(&mut document, 0.0);
-    document.append_child(panel, edge, ItemSize::Fixed(SEPARATOR_HEIGHT));
-    document.append_child(panel, surface, ItemSize::Percent(100.0));
-    document.set_root(panel);
-
-    Panel {
-        document,
-        scroll,
-        count,
-        rows,
-    }
-}
-
-fn header_count(document: &mut Document, total: usize) -> NodeId {
-    let count = styled::caption(document, total_label(total));
-    document.set_text_align(count, TextAlign::End, TextAlign::Center);
-    count
-}
-
-fn total_label(total: usize) -> String {
-    match total {
-        1 => "1 node".to_owned(),
-        total => format!("{total} nodes"),
-    }
-}
-
-fn header(document: &mut Document, count: NodeId) -> NodeId {
-    let title = styled::heading(document, "Inspector");
-    let line = unstyled::centered_row(document, HEADER_SPACING);
-    document.append_child(line, title, ItemSize::Intrinsic);
-    document.append_child(line, count, ItemSize::Percent(100.0));
-    let padding = document.create_padding(HEADER_PADDING, HEADER_PADDING);
-    document.set_padding_child(padding, line);
-    padding
-}
-
-fn body(document: &mut Document, scroll: NodeId) -> NodeId {
-    let bar = styled::scrollbar(document, scroll);
-    let area = unstyled::row(document, BODY_SPACING);
-    document.append_child(area, scroll, ItemSize::Percent(100.0));
-    document.append_child(area, bar, ItemSize::Fixed(SCROLLBAR_WIDTH));
-    let padding = document.create_padding(BODY_PADDING, BODY_PADDING);
-    document.set_padding_child(padding, area);
-    padding
-}
-
-fn row(
-    document: &mut Document,
-    entry: &Entry,
-    expansion: &Expansion,
-    revision: &Rc<Cell<u64>>,
-) -> Row {
-    let indent = unstyled::spacer(document);
-
-    let marker = styled::code(document, marker(entry));
-    document.set_text_color(marker, TEXT_MUTED);
-
-    let kind = styled::code(document, entry.kind);
-
-    let detail = styled::code(document, entry.detail.clone());
-    document.set_text_color(detail, TEXT_MUTED);
-
-    let size = styled::code(document, entry.size.clone());
-    document.set_text_color(size, TEXT_MUTED);
-    document.set_text_align(size, TextAlign::End, TextAlign::Center);
-
-    let line = unstyled::centered_row(document, ROW_SPACING);
-    document.append_child(line, indent, ItemSize::Fixed(entry.depth as f32 * INDENT));
-    document.append_child(line, marker, ItemSize::Fixed(MARKER_WIDTH));
-    document.append_child(line, kind, ItemSize::Intrinsic);
-    document.append_child(line, detail, ItemSize::Percent(100.0));
-    document.append_child(line, size, ItemSize::Intrinsic);
-
-    let row = styled::list_row(document, line);
-    if entry.expandable {
-        let expansion = expansion.clone();
-        let revision = revision.clone();
-        let key = entry.key;
-        let expanded = entry.expanded;
-        unstyled::set_pressable_on_click(document, row, move |_document| {
-            expansion.borrow_mut().insert(key, !expanded);
-            revision.set(revision.get() + 1);
-        });
-    }
-
-    Row { row, detail, size }
-}
-
-fn marker(entry: &Entry) -> &'static str {
-    match (entry.expandable, entry.expanded) {
-        (true, true) => "-",
-        (true, false) => "+",
-        (false, _) => "",
-    }
+fn bounds_label(rect: Rect) -> String {
+    format!(
+        "{}, {}  {} x {}",
+        rect.left().round(),
+        rect.top().round(),
+        rect.width().round(),
+        rect.height().round()
+    )
 }

@@ -66,6 +66,12 @@ impl Arena {
         id
     }
 
+    pub(crate) fn contains(&self, id: NodeId) -> bool {
+        self.nodes
+            .get(id.0 as usize)
+            .is_some_and(std::option::Option::is_some)
+    }
+
     pub(crate) fn get(&self, id: NodeId) -> &dyn Element {
         self.nodes[id.0 as usize]
             .as_deref()
