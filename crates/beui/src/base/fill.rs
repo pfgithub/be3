@@ -1,7 +1,9 @@
 use std::any::Any;
 use std::collections::HashMap;
 
-use egui::{Color32, Painter, Rect, Vec2};
+use crate::color::Color32;
+use crate::geometry::{Rect, Vec2};
+use crate::painter::Painter;
 
 use crate::document::Document;
 use crate::node::{Element, InteractInput, NodeId};
@@ -43,7 +45,7 @@ impl Element for FillNode {
     }
 
     fn paint(&self, doc: &Document, painter: &Painter, rects: &HashMap<NodeId, Rect>, rect: Rect) {
-        painter.rect_filled(rect, self.corner_radius, self.color);
+        painter.rect_filled(rect, f32::from(self.corner_radius), self.color);
         if let Some(child) = self.child {
             crate::paint::paint(doc, painter, rects, child);
         }

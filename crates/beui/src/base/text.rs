@@ -1,7 +1,10 @@
 use std::any::Any;
 use std::collections::HashMap;
 
-use egui::{pos2, Color32, FontId, Painter, Rect, Vec2};
+use crate::color::Color32;
+use crate::font::FontId;
+use crate::geometry::{pos2, Rect, Vec2};
+use crate::painter::Painter;
 
 use crate::document::Document;
 use crate::node::{Element, InteractInput, NodeId};
@@ -47,7 +50,6 @@ impl Element for TextNode {
             .layout(
                 self.content.clone(),
                 self.font(),
-                Color32::PLACEHOLDER,
                 self.wrap_width(available.x),
             )
             .size()
@@ -72,7 +74,6 @@ impl Element for TextNode {
         let galley = painter.layout(
             self.content.clone(),
             self.font(),
-            self.color,
             self.wrap_width(rect.width()),
         );
         let size = galley.size();

@@ -2,7 +2,8 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use egui::{Context, Rect};
+use crate::context::Context;
+use crate::geometry::Rect;
 
 use crate::base::{ItemSize, TextAlign};
 use crate::document::Document;

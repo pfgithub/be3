@@ -1,4 +1,4 @@
-use egui::CursorIcon;
+use crate::input::CursorIcon;
 
 use crate::document::Document;
 use crate::node::NodeId;

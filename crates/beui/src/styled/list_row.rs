@@ -1,7 +1,7 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use egui::Color32;
+use crate::color::Color32;
 
 use crate::document::Document;
 use crate::node::NodeId;

@@ -1,7 +1,9 @@
 use std::any::Any;
 use std::collections::HashMap;
 
-use egui::{CursorIcon, Painter, Rect, Vec2};
+use crate::geometry::{Rect, Vec2};
+use crate::input::CursorIcon;
+use crate::painter::Painter;
 
 use crate::document::Document;
 use crate::node::{ChangeHandler, ClickHandler, Element, InteractInput, NodeId};

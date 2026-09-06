@@ -1,4 +1,4 @@
-use egui::Color32;
+use crate::color::Color32;
 
 use crate::base::{Align, Direction};
 use crate::document::Document;

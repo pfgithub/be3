@@ -7,19 +7,10 @@ use beui::styled::theme::{
     SURFACE_RAISED, TEXT_MUTED,
 };
 use beui::styled::{self, ButtonVariant};
-use beui::{unstyled, Document, ItemSize, NodeId, TextAlign};
-use eframe::egui;
-use egui::{Color32, CursorIcon};
+use beui::{unstyled, Color32, Context, CursorIcon, Document, ItemSize, NodeId, Rect, TextAlign};
 
-fn main() -> eframe::Result {
-    eframe::run_native(
-        "beui demo",
-        eframe::NativeOptions {
-            renderer: eframe::Renderer::Wgpu,
-            ..Default::default()
-        },
-        Box::new(|_cc| Ok(Box::new(DemoApp::new()))),
-    )
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    beui::run("beui demo", DemoApp::new())
 }
 
 const HEADER_HEIGHT: f32 = 64.0;
@@ -292,13 +283,12 @@ fn build_main(document: &mut Document, counter_value: NodeId) -> NodeId {
     main
 }
 
-impl eframe::App for DemoApp {
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        let ctx = ui.ctx();
-        self.document.show(ctx, ctx.content_rect());
+impl beui::App for DemoApp {
+    fn update(&mut self, context: &Context, rect: Rect) {
+        self.document.show(context, rect);
     }
 
-    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
-        BACKGROUND.to_normalized_gamma_f32()
+    fn clear_color(&self) -> Color32 {
+        BACKGROUND
     }
 }

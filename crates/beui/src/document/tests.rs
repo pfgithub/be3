@@ -16,7 +16,10 @@ mod the_scroll_position_is_reported_to_its_listener;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use egui::{pos2, Color32, Context, Event, Key, Modifiers, PointerButton, Pos2, RawInput, Vec2};
+use crate::color::Color32;
+use crate::context::Context;
+use crate::geometry::{pos2, Pos2, Vec2};
+use crate::input::{Event, Key, Modifiers, PointerButton, RawInput};
 
 use crate::base::list::{Direction, ItemSize};
 use crate::inspector::Inspector;
@@ -34,19 +37,16 @@ pub(crate) struct Harness {
 impl Harness {
     pub(crate) fn new(document: Document) -> Self {
         Self {
-            context: Context::default(),
+            context: Context::new(),
             document,
         }
     }
 
     pub(crate) fn frame(&mut self, events: Vec<Event>) {
         let Self { context, document } = self;
-        let input = RawInput {
-            events,
-            ..Default::default()
-        };
-        let _ = context.run_ui(input, |ui| {
-            document.show(ui.ctx(), Rect::from_min_size(Pos2::ZERO, VIEWPORT));
+        let input = RawInput { events };
+        let _ = context.run(input, |context| {
+            document.show(context, Rect::from_min_size(Pos2::ZERO, VIEWPORT));
         });
     }
 
@@ -110,7 +110,6 @@ impl Harness {
 fn key_event(key: Key, pressed: bool, modifiers: Modifiers) -> Event {
     Event::Key {
         key,
-        physical_key: None,
         pressed,
         repeat: false,
         modifiers,

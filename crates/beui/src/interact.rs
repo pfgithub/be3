@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 
-use egui::{Context, Event, Key, Painter, Rect};
+use crate::context::Context;
+use crate::geometry::Rect;
+use crate::input::{Event, Key};
+use crate::painter::Painter;
 
 use crate::document::Document;
 use crate::node::{InteractInput, NodeId};
@@ -16,7 +19,7 @@ pub(crate) fn interact(
         pointer_pos: ctx.input(|input| input.pointer.interact_pos()),
         pressed_this_frame: ctx.input(|input| input.pointer.primary_pressed()),
         released_this_frame: ctx.input(|input| input.pointer.primary_released()),
-        scroll_delta: ctx.input(|input| input.smooth_scroll_delta.y),
+        scroll_delta: ctx.input(|input| input.scroll_delta.y),
     };
 
     let mut focus_target = None;

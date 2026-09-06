@@ -5,10 +5,13 @@ version.workspace = true
 license.workspace = true
 
 [dependencies]
-egui = "0.34.3"
-
-[dev-dependencies]
-eframe = { version = "0.34.3", default-features = false, features = ["default_fonts", "wayland", "wgpu", "x11"] }
+bytemuck = { version = "1", features = ["derive"] }
+freetype = "0.7"
+harfbuzz_rs = "2"
+pollster = "0.4"
+unicode-script = "0.5"
+wgpu = "29"
+winit = "0.30"
 
 [lints]
 workspace = true

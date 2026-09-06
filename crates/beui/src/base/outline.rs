@@ -1,7 +1,9 @@
 use std::any::Any;
 use std::collections::HashMap;
 
-use egui::{Color32, Painter, Rect, Stroke, StrokeKind, Vec2};
+use crate::color::Color32;
+use crate::geometry::{Rect, Vec2};
+use crate::painter::Painter;
 
 use crate::document::Document;
 use crate::node::{Element, InteractInput, NodeId};
@@ -52,9 +54,9 @@ impl Element for OutlineNode {
         if self.visible {
             painter.rect_stroke(
                 rect.expand(self.offset),
-                self.corner_radius,
-                Stroke::new(self.width, self.color),
-                StrokeKind::Inside,
+                f32::from(self.corner_radius),
+                self.width,
+                self.color,
             );
         }
         if let Some(child) = self.child {

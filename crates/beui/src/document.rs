@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
-use egui::{pos2, Context, Event, Id, Key, LayerId, Order, Rect};
+use crate::context::Context;
+use crate::geometry::{pos2, Rect};
+use crate::input::{Event, Key};
 
 use crate::inspector::{Inspector, PANEL_WIDTH};
 use crate::interact;
@@ -97,7 +99,7 @@ impl Document {
             self.rects.clear();
             return;
         };
-        let painter = ctx.layer_painter(LayerId::new(Order::Middle, Id::new("beui")));
+        let painter = ctx.painter();
         let mut rects = HashMap::new();
         layout::layout(self, &painter, root, rect, &mut rects);
 

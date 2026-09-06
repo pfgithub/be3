@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
-use egui::{Painter, Rect};
+use crate::geometry::Rect;
+use crate::painter::Painter;
 
 use crate::document::Document;
 use crate::node::NodeId;

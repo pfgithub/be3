@@ -1,4 +1,4 @@
-use egui::Color32;
+use crate::color::Color32;
 
 pub const BACKGROUND: Color32 = Color32::from_rgb(14, 17, 23);
 pub const SURFACE: Color32 = Color32::from_rgb(22, 26, 34);
