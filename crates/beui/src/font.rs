@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::ffi::CString;
+use std::ops::Range;
 use std::path::Path;
 use std::ptr;
 use std::rc::Rc;
@@ -8,7 +9,7 @@ use freetype::freetype as ft;
 use harfbuzz_rs::{shape, Face as HbFace, Font as HbFont, Owned, Tag, UnicodeBuffer};
 use unicode_script::{Script, UnicodeScript};
 
-use crate::geometry::{vec2, Vec2};
+use crate::geometry::{pos2, vec2, Pos2, Rect, Vec2};
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum FontFamily {
@@ -67,7 +68,28 @@ pub struct Galley {
 
 struct GalleyData {
     size: Vec2,
+    line_height: f32,
     glyphs: Vec<PlacedGlyph>,
+    lines: Vec<GalleyLine>,
+}
+
+struct GalleyLine {
+    top: f32,
+    range: Range<usize>,
+    cursors: Vec<(usize, f32)>,
+}
+
+impl GalleyLine {
+    fn x(&self, index: usize) -> f32 {
+        let mut x = 0.0;
+        for (at, candidate) in &self.cursors {
+            if *at > index {
+                break;
+            }
+            x = *candidate;
+        }
+        x
+    }
 }
 
 impl Galley {
@@ -75,8 +97,71 @@ impl Galley {
         self.inner.size
     }
 
+    pub fn line_height(&self) -> f32 {
+        self.inner.line_height
+    }
+
+    pub fn cursor_pos(&self, origin: Pos2, index: usize) -> Pos2 {
+        match self.line_of(index) {
+            Some(line) => origin + vec2(line.x(index), line.top),
+            None => origin,
+        }
+    }
+
+    pub fn cursor_at(&self, origin: Pos2, pos: Pos2) -> usize {
+        let Some(line) = self.line_at(pos.y - origin.y) else {
+            return 0;
+        };
+        let target = pos.x - origin.x;
+        let mut closest = line.range.start;
+        let mut distance = f32::INFINITY;
+        for (index, x) in &line.cursors {
+            let candidate = (*x - target).abs();
+            if candidate < distance {
+                distance = candidate;
+                closest = *index;
+            }
+        }
+        closest
+    }
+
+    pub fn selection_rects(&self, origin: Pos2, range: Range<usize>) -> Vec<Rect> {
+        self.inner
+            .lines
+            .iter()
+            .filter_map(|line| {
+                let start = range.start.max(line.range.start);
+                let end = range.end.min(line.range.end);
+                if start >= end {
+                    return None;
+                }
+                let top = origin.y + line.top;
+                Some(Rect::from_min_max(
+                    pos2(origin.x + line.x(start), top),
+                    pos2(origin.x + line.x(end), top + self.inner.line_height),
+                ))
+            })
+            .collect()
+    }
+
     pub(crate) fn glyphs(&self) -> &[PlacedGlyph] {
         &self.inner.glyphs
+    }
+
+    fn line_of(&self, index: usize) -> Option<&GalleyLine> {
+        self.inner
+            .lines
+            .iter()
+            .find(|line| index <= line.range.end)
+            .or_else(|| self.inner.lines.last())
+    }
+
+    fn line_at(&self, y: f32) -> Option<&GalleyLine> {
+        self.inner
+            .lines
+            .iter()
+            .find(|line| y < line.top + self.inner.line_height)
+            .or_else(|| self.inner.lines.last())
     }
 }
 
@@ -219,29 +304,52 @@ impl Fonts {
         let (ascent, line_height) = self.metrics(family, pixel_size);
         let scale = self.pixels_per_point;
         let mut glyphs = Vec::new();
+        let mut lines = Vec::new();
         let mut width = 0.0f32;
         let mut cursor = 0.0;
+        let mut start = 0;
 
         for line in text.split('\n') {
             let shaped = self.shape_line(line, family, pixel_size);
-            for run in break_lines(&shaped, line, wrap) {
+            let runs = break_lines(&shaped, line, wrap);
+            let last = runs.len() - 1;
+            for (index, run) in runs.into_iter().enumerate() {
+                let end = start
+                    + match shaped.get(run.end) {
+                        Some(glyph) if index < last => glyph.cluster,
+                        _ => line.len(),
+                    };
                 let mut pen = 0.0;
+                let mut cursors = Vec::new();
                 for glyph in &shaped[run] {
+                    let at = start + glyph.cluster;
+                    if cursors.last().is_none_or(|(previous, _)| *previous != at) {
+                        cursors.push((at, pen / scale));
+                    }
                     let placed = self.place(*glyph, pixel_size, pen, cursor + ascent);
                     if let Some(placed) = placed {
                         glyphs.push(placed);
                     }
                     pen += glyph.x_advance;
                 }
+                cursors.push((end, pen / scale));
                 width = width.max(pen);
+                lines.push(GalleyLine {
+                    top: cursor / scale,
+                    range: cursors[0].0..end,
+                    cursors,
+                });
                 cursor += line_height;
             }
+            start += line.len() + 1;
         }
 
         Galley {
             inner: Rc::new(GalleyData {
                 size: vec2(width.ceil() / scale, cursor.ceil() / scale),
+                line_height: line_height / scale,
                 glyphs,
+                lines,
             }),
         }
     }

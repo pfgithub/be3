@@ -71,6 +71,10 @@ impl Pos2 {
     pub const fn to_vec2(self) -> Vec2 {
         Vec2::new(self.x, self.y)
     }
+
+    pub fn distance(self, other: Self) -> f32 {
+        (self.x - other.x).hypot(self.y - other.y)
+    }
 }
 
 pub const fn pos2(x: f32, y: f32) -> Pos2 {

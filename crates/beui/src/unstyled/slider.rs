@@ -37,8 +37,8 @@ pub fn slider(document: &mut Document, value: f32) -> NodeId {
         },
     );
 
-    document.set_click_catcher_on_drag(click_catcher, move |document, fraction| {
-        set_slider_value(document, slider, fraction.x);
+    document.set_click_catcher_on_drag(click_catcher, move |document, press| {
+        set_slider_value(document, slider, press.fraction.x);
     });
     document.set_click_catcher_on_active_change(click_catcher, move |document, dragging| {
         document.component_state_mut::<State>(slider).dragging = dragging;

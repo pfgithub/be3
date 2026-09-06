@@ -1,6 +1,5 @@
 use crate::color::Color32;
 
-use crate::base::TextAlign;
 use crate::document::Document;
 use crate::node::{Handler, NodeId};
 use crate::styled::theme::{
@@ -25,16 +24,11 @@ pub fn text_input(document: &mut Document, value: impl Into<String>) -> NodeId {
     let text = unstyled::text_input_text(document, input);
     document.set_text_font_size(text, FONT_BODY);
     document.set_text_color(text, TEXT);
-    document.set_text_align(text, TextAlign::Start, TextAlign::Center);
 
-    let placeholder = unstyled::text_input_placeholder_text(document, input);
-    document.set_text_font_size(placeholder, FONT_BODY);
-    document.set_text_color(placeholder, TEXT_MUTED);
-    document.set_text_align(placeholder, TextAlign::Start, TextAlign::Center);
-
-    document.set_text_edit_selection_color(field, ACCENT_SOFT);
-    document.set_text_edit_caret_color(field, ACCENT);
-    document.set_text_edit_padding(field, PADDING_HORIZONTAL);
+    unstyled::set_text_input_placeholder_color(document, input, TEXT_MUTED);
+    unstyled::set_text_input_selection_color(document, input, ACCENT_SOFT);
+    unstyled::set_text_input_caret_color(document, input, ACCENT);
+    unstyled::set_text_input_padding(document, input, PADDING_HORIZONTAL, 0.0);
 
     let fill = document.create_fill(SURFACE_RAISED, RADIUS);
     document.set_fill_child(fill, field);

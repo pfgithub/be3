@@ -2,7 +2,7 @@ use std::any::Any;
 use std::collections::HashMap;
 
 use crate::geometry::{Pos2, Rect, Vec2};
-use crate::input::CursorIcon;
+use crate::input::{CursorIcon, PointerPress};
 use crate::painter::Painter;
 
 use crate::document::Document;
@@ -15,11 +15,12 @@ pub(crate) struct ClickCatcherNode {
     pub(crate) key_active: bool,
     pub(crate) hovered: bool,
     pub(crate) active: bool,
-    pub(crate) dragged: Option<Vec2>,
+    pub(crate) dragged: Option<Pos2>,
     pub(crate) on_click: Option<ClickHandler>,
     pub(crate) on_hover_change: Option<ChangeHandler>,
     pub(crate) on_active_change: Option<ChangeHandler>,
-    pub(crate) on_drag: Option<Handler<Vec2>>,
+    pub(crate) on_press: Option<Handler<PointerPress>>,
+    pub(crate) on_drag: Option<Handler<PointerPress>>,
 }
 
 impl ClickCatcherNode {
@@ -35,12 +36,22 @@ impl ClickCatcherNode {
             on_click: None,
             on_hover_change: None,
             on_active_change: None,
+            on_press: None,
             on_drag: None,
         }
     }
 
     pub(crate) fn is_active(&self) -> bool {
         self.armed || self.key_active
+    }
+
+    fn press(&self, input: &InteractInput, rect: Rect, pos: Pos2) -> PointerPress {
+        PointerPress {
+            pos,
+            fraction: fraction(rect, pos),
+            clicks: input.clicks,
+            modifiers: input.modifiers,
+        }
     }
 }
 
@@ -96,6 +107,13 @@ impl Element for ClickCatcherNode {
         let hovered = input.pointer_pos.is_some_and(|pos| rect.contains(pos));
         if hovered && input.pressed_this_frame {
             self.armed = true;
+            if let Some(pos) = input.pointer_pos {
+                let press = self.press(input, rect, pos);
+                if let Some(mut handler) = self.on_press.take() {
+                    handler(doc, press);
+                    self.on_press = Some(handler);
+                }
+            }
         }
         if input.released_this_frame {
             if hovered && self.armed {
@@ -126,11 +144,12 @@ impl Element for ClickCatcherNode {
             }
         }
         if self.armed && input.pointer_down {
-            if let Some(dragged) = input.pointer_pos.map(|pos| fraction(rect, pos)) {
-                if self.dragged != Some(dragged) {
-                    self.dragged = Some(dragged);
+            if let Some(pos) = input.pointer_pos {
+                if self.dragged != Some(pos) {
+                    self.dragged = Some(pos);
+                    let press = self.press(input, rect, pos);
                     if let Some(mut handler) = self.on_drag.take() {
-                        handler(doc, dragged);
+                        handler(doc, press);
                         self.on_drag = Some(handler);
                     }
                 }
@@ -188,10 +207,20 @@ impl Document {
             .on_hover_change = Some(Box::new(handler));
     }
 
+    pub fn set_click_catcher_on_press(
+        &mut self,
+        click_catcher: NodeId,
+        handler: impl FnMut(&mut Document, PointerPress) + 'static,
+    ) {
+        self.arena
+            .get_mut_as::<ClickCatcherNode>(click_catcher)
+            .on_press = Some(Box::new(handler));
+    }
+
     pub fn set_click_catcher_on_drag(
         &mut self,
         click_catcher: NodeId,
-        handler: impl FnMut(&mut Document, Vec2) + 'static,
+        handler: impl FnMut(&mut Document, PointerPress) + 'static,
     ) {
         self.arena
             .get_mut_as::<ClickCatcherNode>(click_catcher)

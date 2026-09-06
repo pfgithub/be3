@@ -21,6 +21,7 @@ pub(crate) fn interact(
         pressed_this_frame: ctx.input(|input| input.pointer.primary_pressed()),
         released_this_frame: ctx.input(|input| input.pointer.primary_released()),
         scroll_delta: ctx.input(|input| input.scroll_delta.y),
+        clicks: ctx.input(|input| input.pointer.clicks()),
         modifiers: ctx.input(|input| input.modifiers),
     };
 

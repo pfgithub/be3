@@ -1,4 +1,10 @@
+use std::time::Instant;
+
 use crate::geometry::{Pos2, Vec2};
+
+const MULTI_CLICK_DELAY: f32 = 0.3;
+const MULTI_CLICK_DISTANCE: f32 = 6.0;
+const MULTI_CLICK_LIMIT: u32 = 4;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Key {
@@ -82,6 +88,14 @@ pub struct KeyPress {
     pub modifiers: Modifiers,
 }
 
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct PointerPress {
+    pub pos: Pos2,
+    pub fraction: Vec2,
+    pub clicks: u32,
+    pub modifiers: Modifiers,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum PointerButton {
     Primary,
@@ -159,6 +173,7 @@ impl InputState {
                     self.modifiers = *modifiers;
                     if *pressed {
                         self.pointer.primary_pressed = true;
+                        self.pointer.count_click(*pos);
                     } else {
                         self.pointer.primary_released = true;
                     }
@@ -178,12 +193,32 @@ pub struct Pointer {
     pub primary_down: bool,
     pub primary_pressed: bool,
     pub primary_released: bool,
+    clicks: u32,
+    last_click: Option<(Instant, Pos2)>,
 }
 
 impl Pointer {
     fn begin_frame(&mut self) {
         self.primary_pressed = false;
         self.primary_released = false;
+    }
+
+    fn count_click(&mut self, pos: Pos2) {
+        let now = Instant::now();
+        let repeated = self.last_click.is_some_and(|(when, at)| {
+            now.duration_since(when).as_secs_f32() <= MULTI_CLICK_DELAY
+                && at.distance(pos) <= MULTI_CLICK_DISTANCE
+        });
+        self.clicks = if repeated {
+            self.clicks % MULTI_CLICK_LIMIT + 1
+        } else {
+            1
+        };
+        self.last_click = Some((now, pos));
+    }
+
+    pub fn clicks(&self) -> u32 {
+        self.clicks
     }
 
     pub fn interact_pos(&self) -> Option<Pos2> {
