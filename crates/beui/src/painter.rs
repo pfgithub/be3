@@ -3,7 +3,7 @@ use crate::context::Context;
 use crate::font::{FontId, Galley};
 use crate::geometry::{Pos2, Rect};
 
-pub(crate) enum Shape {
+pub enum Shape {
     Rect {
         rect: Rect,
         corner_radius: f32,

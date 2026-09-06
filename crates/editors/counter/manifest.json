@@ -9,10 +9,5 @@
   "regions": [
     "Frame"
   ],
-  "chrome": [
-    "Toolbar",
-    "LeftSidebar",
-    "RightSidebar"
-  ],
   "entry_point": "counter.wasm"
 }

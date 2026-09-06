@@ -1,7 +1,7 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use crate::font::{FontId, Fonts, Galley};
+use crate::font::{FontId, FontSources, Fonts, Galley};
 use crate::geometry::Rect;
 use crate::input::{CursorIcon, InputState, RawInput};
 use crate::painter::{Painter, Shape};
@@ -25,11 +25,21 @@ pub struct FrameOutput {
     pub repaint: bool,
 }
 
+impl FrameOutput {
+    pub fn shapes(&self) -> &[Shape] {
+        &self.shapes
+    }
+}
+
 impl Context {
     pub fn new() -> Self {
+        Self::with_fonts(&FontSources::installed())
+    }
+
+    pub fn with_fonts(sources: &FontSources) -> Self {
         Self {
             inner: Rc::new(Inner {
-                fonts: RefCell::new(Fonts::new()),
+                fonts: RefCell::new(Fonts::new(sources)),
                 input: RefCell::new(InputState::default()),
                 shapes: RefCell::new(Vec::new()),
                 cursor_icon: Cell::new(CursorIcon::Default),

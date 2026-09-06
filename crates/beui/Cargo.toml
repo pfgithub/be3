@@ -4,15 +4,23 @@ edition.workspace = true
 version.workspace = true
 license.workspace = true
 
+[features]
+default = ["window"]
+window = ["dep:bytemuck", "dep:pollster", "dep:wgpu", "dep:winit"]
+
 [dependencies]
-bytemuck = { version = "1", features = ["derive"] }
+bytemuck = { version = "1", features = ["derive"], optional = true }
 freetype = "0.7"
 harfbuzz_rs = "2"
-pollster = "0.4"
+pollster = { version = "0.4", optional = true }
 text-editor-core = { path = "../text-editor-core" }
 unicode-script = "0.5"
-wgpu = "29"
-winit = "0.30"
+wgpu = { version = "29", optional = true }
+winit = { version = "0.30", optional = true }
 
 [lints]
 workspace = true
+
+[[example]]
+name = "demo"
+required-features = ["window"]

@@ -40,25 +40,25 @@ impl FontId {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub(crate) struct GlyphKey {
+pub struct GlyphId {
     face: usize,
     glyph: u32,
     pixel_size: u32,
 }
 
-pub(crate) struct GlyphImage {
-    pub(crate) width: u32,
-    pub(crate) height: u32,
+pub struct GlyphImage {
+    pub width: u32,
+    pub height: u32,
     left: i32,
     top: i32,
-    pub(crate) pixels: Vec<u8>,
+    pub pixels: Vec<u8>,
 }
 
 #[derive(Clone)]
-pub(crate) struct PlacedGlyph {
-    pub(crate) key: GlyphKey,
-    pub(crate) image: Rc<GlyphImage>,
-    pub(crate) offset: Vec2,
+pub struct Glyph {
+    pub id: GlyphId,
+    pub image: Rc<GlyphImage>,
+    pub offset: Vec2,
 }
 
 #[derive(Clone)]
@@ -69,7 +69,7 @@ pub struct Galley {
 struct GalleyData {
     size: Vec2,
     line_height: f32,
-    glyphs: Vec<PlacedGlyph>,
+    glyphs: Vec<Glyph>,
     lines: Vec<GalleyLine>,
 }
 
@@ -144,7 +144,7 @@ impl Galley {
             .collect()
     }
 
-    pub(crate) fn glyphs(&self) -> &[PlacedGlyph] {
+    pub fn glyphs(&self) -> &[Glyph] {
         &self.inner.glyphs
     }
 
@@ -175,8 +175,48 @@ struct GalleyKey {
 
 const GALLEY_CACHE_LIMIT: usize = 4096;
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum FontSource {
+    File(&'static str),
+    Memory(&'static [u8]),
+}
+
+#[derive(Clone, Debug)]
+pub struct FontSources {
+    pub proportional: Vec<FontSource>,
+    pub monospace: Vec<FontSource>,
+    pub fallback: Vec<FontSource>,
+}
+
+impl FontSources {
+    pub fn installed() -> Self {
+        Self {
+            proportional: files(PROPORTIONAL_CANDIDATES),
+            monospace: files(MONOSPACE_CANDIDATES),
+            fallback: files(FALLBACK_CANDIDATES),
+        }
+    }
+}
+
+impl Default for FontSources {
+    fn default() -> Self {
+        Self::installed()
+    }
+}
+
+fn files(candidates: &[&'static str]) -> Vec<FontSource> {
+    candidates.iter().copied().map(FontSource::File).collect()
+}
+
+fn available(source: &FontSource) -> bool {
+    match source {
+        FontSource::File(path) => Path::new(path).exists(),
+        FontSource::Memory(_) => true,
+    }
+}
+
 struct FaceData {
-    path: &'static str,
+    source: FontSource,
     face: ft::FT_Face,
     font: Owned<HbFont<'static>>,
 }
@@ -196,13 +236,13 @@ pub(crate) struct Fonts {
     faces: Vec<FaceData>,
     proportional: Vec<usize>,
     monospace: Vec<usize>,
-    glyphs: HashMap<GlyphKey, Rc<GlyphImage>>,
+    glyphs: HashMap<GlyphId, Rc<GlyphImage>>,
     galleys: HashMap<GalleyKey, Galley>,
     pixels_per_point: f32,
 }
 
 impl Fonts {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(sources: &FontSources) -> Self {
         let mut library = ptr::null_mut();
         let opened = unsafe { ft::FT_Init_FreeType(&mut library) == 0 };
         let mut fonts = Self {
@@ -215,7 +255,7 @@ impl Fonts {
             pixels_per_point: 1.0,
         };
         if opened {
-            fonts.load_families();
+            fonts.load_families(sources);
         }
         fonts
     }
@@ -233,40 +273,60 @@ impl Fonts {
         self.glyphs.clear();
     }
 
-    fn load_families(&mut self) {
-        let proportional = self.load_chain(PROPORTIONAL_CANDIDATES);
-        let monospace = self.load_chain(MONOSPACE_CANDIDATES);
-        let fallback = self.load_chain(FALLBACK_CANDIDATES);
+    fn load_families(&mut self, sources: &FontSources) {
+        let proportional = self.load_chain(&sources.proportional);
+        let monospace = self.load_chain(&sources.monospace);
+        let fallback = self.load_chain(&sources.fallback);
         self.proportional = chain(&proportional, &[&monospace, &fallback]);
         self.monospace = chain(&monospace, &[&proportional, &fallback]);
     }
 
-    fn load_chain(&mut self, candidates: &[&'static str]) -> Vec<usize> {
-        candidates
+    fn load_chain(&mut self, sources: &[FontSource]) -> Vec<usize> {
+        sources
             .iter()
             .copied()
-            .filter(|path| Path::new(path).exists())
-            .filter_map(|path| self.load_face(path))
+            .filter(available)
+            .filter_map(|source| self.load_face(source))
             .collect()
     }
 
-    fn load_face(&mut self, path: &'static str) -> Option<usize> {
-        if let Some(index) = self.faces.iter().position(|face| face.path == path) {
+    fn load_face(&mut self, source: FontSource) -> Option<usize> {
+        if let Some(index) = self.faces.iter().position(|face| face.source == source) {
             return Some(index);
         }
-        let name = CString::new(path).ok()?;
         let mut face = ptr::null_mut();
-        unsafe {
-            if ft::FT_New_Face(self.library, name.as_ptr(), 0, &mut face) != 0 {
-                return None;
+        let hb_face = match source {
+            FontSource::File(path) => {
+                let name = CString::new(path).ok()?;
+                unsafe {
+                    if ft::FT_New_Face(self.library, name.as_ptr(), 0, &mut face) != 0 {
+                        return None;
+                    }
+                }
+                HbFace::from_file(path, 0).ok()
             }
-        }
-        let Ok(hb_face) = HbFace::from_file(path, 0) else {
+            FontSource::Memory(bytes) => {
+                unsafe {
+                    if ft::FT_New_Memory_Face(
+                        self.library,
+                        bytes.as_ptr(),
+                        bytes.len() as ft::FT_Long,
+                        0,
+                        &mut face,
+                    ) != 0
+                    {
+                        return None;
+                    }
+                }
+                Some(HbFace::from_bytes(bytes, 0))
+            }
+        };
+        let Some(hb_face) = hb_face else {
             unsafe { ft::FT_Done_Face(face) };
             return None;
         };
         self.faces.push(FaceData {
-            path,
+            source,
             face,
             font: HbFont::new(hb_face),
         });
@@ -360,26 +420,26 @@ impl Fonts {
         pixel_size: u32,
         pen: f32,
         baseline: f32,
-    ) -> Option<PlacedGlyph> {
-        let key = GlyphKey {
+    ) -> Option<Glyph> {
+        let id = GlyphId {
             face: glyph.face,
             glyph: glyph.glyph,
             pixel_size,
         };
-        let image = self.image(key)?;
+        let image = self.image(id)?;
         if image.width == 0 || image.height == 0 {
             return None;
         }
         let x = (pen + glyph.x_offset).round() + image.left as f32;
         let y = (baseline - glyph.y_offset).round() - image.top as f32;
-        Some(PlacedGlyph {
-            key,
+        Some(Glyph {
+            id,
             image,
             offset: vec2(x, y),
         })
     }
 
-    fn image(&mut self, key: GlyphKey) -> Option<Rc<GlyphImage>> {
+    fn image(&mut self, key: GlyphId) -> Option<Rc<GlyphImage>> {
         if let Some(image) = self.glyphs.get(&key) {
             return Some(image.clone());
         }
@@ -388,7 +448,7 @@ impl Fonts {
         Some(image)
     }
 
-    fn rasterize(&self, key: GlyphKey) -> Option<GlyphImage> {
+    fn rasterize(&self, key: GlyphId) -> Option<GlyphImage> {
         let face = self.faces.get(key.face)?.face;
         unsafe {
             if ft::FT_Set_Pixel_Sizes(face, 0, key.pixel_size) != 0 {

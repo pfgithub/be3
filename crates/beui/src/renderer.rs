@@ -4,7 +4,7 @@ use bytemuck::{Pod, Zeroable};
 
 use crate::color::Color32;
 use crate::context::FrameOutput;
-use crate::font::{GlyphImage, GlyphKey};
+use crate::font::{GlyphId, GlyphImage};
 use crate::geometry::{vec2, Rect, Vec2};
 use crate::painter::Shape;
 
@@ -49,7 +49,7 @@ struct Uniforms {
 struct Atlas {
     texture: wgpu::Texture,
     view: wgpu::TextureView,
-    entries: HashMap<GlyphKey, [f32; 4]>,
+    entries: HashMap<GlyphId, [f32; 4]>,
     row_y: u32,
     row_height: u32,
     cursor_x: u32,
@@ -92,13 +92,8 @@ impl Atlas {
         self.full = false;
     }
 
-    fn insert(
-        &mut self,
-        queue: &wgpu::Queue,
-        key: GlyphKey,
-        image: &GlyphImage,
-    ) -> Option<[f32; 4]> {
-        if let Some(uv) = self.entries.get(&key) {
+    fn insert(&mut self, queue: &wgpu::Queue, id: GlyphId, image: &GlyphImage) -> Option<[f32; 4]> {
+        if let Some(uv) = self.entries.get(&id) {
             return Some(*uv);
         }
         let width = image.width + GLYPH_PADDING;
@@ -148,7 +143,7 @@ impl Atlas {
             (x + image.width) as f32 / scale,
             (y + image.height) as f32 / scale,
         ];
-        self.entries.insert(key, uv);
+        self.entries.insert(id, uv);
         Some(uv)
     }
 }
@@ -326,7 +321,7 @@ impl Renderer {
                         (origin.y * pixels_per_point).round(),
                     );
                     for glyph in galley.glyphs() {
-                        let Some(uv) = self.atlas.insert(queue, glyph.key, &glyph.image) else {
+                        let Some(uv) = self.atlas.insert(queue, glyph.id, &glyph.image) else {
                             continue;
                         };
                         let min = origin + glyph.offset;

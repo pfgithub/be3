@@ -22,6 +22,7 @@ impl Counter {
 pub enum CounterOperation {
     Increment,
     Decrement,
+    Reset,
 }
 
 impl Block for Counter {
@@ -34,6 +35,7 @@ impl Block for Counter {
         counter.count = match operation {
             CounterOperation::Increment => counter.count.saturating_add(1),
             CounterOperation::Decrement => counter.count.saturating_sub(1),
+            CounterOperation::Reset => 0,
         };
     }
 }

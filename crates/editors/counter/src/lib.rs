@@ -1,6 +1,6 @@
-pub mod demo;
+pub mod app;
 
-block_editor_plugin::plugin!(demo::CounterApp, "../manifest.json");
+block_editor_plugin::plugin!(app::CounterApp, "../manifest.json");
 
 #[cfg(test)]
 mod tests;
