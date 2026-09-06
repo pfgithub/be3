@@ -96,10 +96,8 @@ impl Runner {
         }
 
         let scale = surface.window.scale_factor() as f32;
-        let screen = vec2(
-            surface.config.width as f32 / scale,
-            surface.config.height as f32 / scale,
-        );
+        let physical = vec2(surface.config.width as f32, surface.config.height as f32);
+        let screen = vec2(physical.x / scale, physical.y / scale);
         self.context.set_pixels_per_point(scale);
 
         let raw = RawInput {
@@ -117,7 +115,7 @@ impl Runner {
 
         surface
             .renderer
-            .prepare(&surface.device, &surface.queue, &output, screen);
+            .prepare(&surface.device, &surface.queue, &output, physical, scale);
 
         let frame = match surface.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(frame)

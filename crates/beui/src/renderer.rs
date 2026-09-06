@@ -5,7 +5,7 @@ use bytemuck::{Pod, Zeroable};
 use crate::color::Color32;
 use crate::context::FrameOutput;
 use crate::font::{GlyphImage, GlyphKey};
-use crate::geometry::{Rect, Vec2};
+use crate::geometry::{vec2, Rect, Vec2};
 use crate::painter::Shape;
 
 const ATLAS_SIZE: u32 = 2048;
@@ -273,6 +273,7 @@ impl Renderer {
         queue: &wgpu::Queue,
         output: &FrameOutput,
         screen: Vec2,
+        pixels_per_point: f32,
     ) {
         if self.atlas.full {
             self.atlas.reset();
@@ -300,11 +301,16 @@ impl Renderer {
                         continue;
                     }
                     instances.push(Instance {
-                        rect: bounds(*rect),
-                        clip: bounds(*clip),
+                        rect: snapped(*rect, pixels_per_point),
+                        clip: bounds(*clip, pixels_per_point),
                         uv: [0.0; 4],
                         color: color.to_linear_f32(),
-                        params: [*corner_radius, *stroke_width, 0.0, 0.0],
+                        params: [
+                            corner_radius * pixels_per_point,
+                            stroke(*stroke_width, pixels_per_point),
+                            0.0,
+                            0.0,
+                        ],
                     });
                 }
                 Shape::Text {
@@ -314,14 +320,23 @@ impl Renderer {
                     clip,
                 } => {
                     let color = color.to_linear_f32();
-                    let clip = bounds(*clip);
+                    let clip = bounds(*clip, pixels_per_point);
+                    let origin = vec2(
+                        (origin.x * pixels_per_point).round(),
+                        (origin.y * pixels_per_point).round(),
+                    );
                     for glyph in galley.glyphs() {
                         let Some(uv) = self.atlas.insert(queue, glyph.key, &glyph.image) else {
                             continue;
                         };
-                        let min = *origin + glyph.pos.to_vec2();
+                        let min = origin + glyph.offset;
                         instances.push(Instance {
-                            rect: bounds(Rect::from_min_size(min, glyph.size)),
+                            rect: [
+                                min.x,
+                                min.y,
+                                min.x + glyph.image.width as f32,
+                                min.y + glyph.image.height as f32,
+                            ],
                             clip,
                             uv,
                             color,
@@ -396,8 +411,25 @@ fn bind_group(
     })
 }
 
-fn bounds(rect: Rect) -> [f32; 4] {
-    [rect.min.x, rect.min.y, rect.max.x, rect.max.y]
+fn bounds(rect: Rect, pixels_per_point: f32) -> [f32; 4] {
+    [
+        (rect.min.x * pixels_per_point).round(),
+        (rect.min.y * pixels_per_point).round(),
+        (rect.max.x * pixels_per_point).round(),
+        (rect.max.y * pixels_per_point).round(),
+    ]
+}
+
+fn snapped(rect: Rect, pixels_per_point: f32) -> [f32; 4] {
+    let [left, top, right, bottom] = bounds(rect, pixels_per_point);
+    [left, top, right.max(left + 1.0), bottom.max(top + 1.0)]
+}
+
+fn stroke(width: f32, pixels_per_point: f32) -> f32 {
+    if width <= 0.0 {
+        return 0.0;
+    }
+    (width * pixels_per_point).round().max(1.0)
 }
 
 #[cfg(test)]

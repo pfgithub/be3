@@ -8,7 +8,7 @@ use freetype::freetype as ft;
 use harfbuzz_rs::{shape, Face as HbFace, Font as HbFont, Owned, Tag, UnicodeBuffer};
 use unicode_script::{Script, UnicodeScript};
 
-use crate::geometry::{pos2, vec2, Pos2, Vec2};
+use crate::geometry::{vec2, Vec2};
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum FontFamily {
@@ -57,8 +57,7 @@ pub(crate) struct GlyphImage {
 pub(crate) struct PlacedGlyph {
     pub(crate) key: GlyphKey,
     pub(crate) image: Rc<GlyphImage>,
-    pub(crate) pos: Pos2,
-    pub(crate) size: Vec2,
+    pub(crate) offset: Vec2,
 }
 
 #[derive(Clone)]
@@ -228,7 +227,7 @@ impl Fonts {
             for run in break_lines(&shaped, line, wrap) {
                 let mut pen = 0.0;
                 for glyph in &shaped[run] {
-                    let placed = self.place(*glyph, pixel_size, pen, cursor + ascent, scale);
+                    let placed = self.place(*glyph, pixel_size, pen, cursor + ascent);
                     if let Some(placed) = placed {
                         glyphs.push(placed);
                     }
@@ -241,7 +240,7 @@ impl Fonts {
 
         Galley {
             inner: Rc::new(GalleyData {
-                size: vec2(width / scale, cursor / scale),
+                size: vec2(width.ceil() / scale, cursor.ceil() / scale),
                 glyphs,
             }),
         }
@@ -253,7 +252,6 @@ impl Fonts {
         pixel_size: u32,
         pen: f32,
         baseline: f32,
-        scale: f32,
     ) -> Option<PlacedGlyph> {
         let key = GlyphKey {
             face: glyph.face,
@@ -266,12 +264,10 @@ impl Fonts {
         }
         let x = (pen + glyph.x_offset).round() + image.left as f32;
         let y = (baseline - glyph.y_offset).round() - image.top as f32;
-        let size = vec2(image.width as f32 / scale, image.height as f32 / scale);
         Some(PlacedGlyph {
             key,
             image,
-            pos: pos2(x / scale, y / scale),
-            size,
+            offset: vec2(x, y),
         })
     }
 

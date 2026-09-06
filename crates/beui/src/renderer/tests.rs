@@ -1,7 +1,9 @@
 use super::*;
 
 mod a_clip_rectangle_hides_what_falls_outside_it;
+mod a_fill_with_fractional_bounds_lands_on_whole_pixels;
 mod a_filled_rectangle_covers_its_bounds;
+mod text_at_a_fractional_origin_lands_on_whole_pixels;
 mod text_paints_glyphs_over_the_background;
 
 use crate::context::Context;
@@ -58,7 +60,13 @@ pub(crate) fn capture(background: Color32, paint: impl FnOnce(&Painter)) -> Capt
     let output = context.run(RawInput::default(), |context| paint(&context.painter()));
 
     let mut renderer = Renderer::new(&device, FORMAT);
-    renderer.prepare(&device, &queue, &output, vec2(SIZE as f32, SIZE as f32));
+    renderer.prepare(
+        &device,
+        &queue,
+        &output,
+        vec2(SIZE as f32, SIZE as f32),
+        1.0,
+    );
 
     let target = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("beui test target"),
