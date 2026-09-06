@@ -14,7 +14,7 @@ mod layout;
 mod node;
 mod paint;
 mod painter;
-#[cfg(feature = "window")]
+#[cfg(feature = "render")]
 mod renderer;
 pub mod styled;
 pub mod unstyled;
@@ -32,5 +32,5 @@ pub use input::{
 };
 pub use node::{ClickHandler, Handler, NodeId};
 pub use painter::{Painter, Shape};
-#[cfg(feature = "window")]
+#[cfg(feature = "render")]
 pub use renderer::{clear_color, Renderer};

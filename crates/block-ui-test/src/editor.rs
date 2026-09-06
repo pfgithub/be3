@@ -89,30 +89,6 @@ impl<A: App> EditorTest<'_, A> {
             .query(by().predicate(move |node| node.author_id() == Some(test_id)))
     }
 
-    pub fn hover_at(&self, pos: egui::Pos2) {
-        self.harness.hover_at(pos);
-    }
-
-    pub fn click_at(&self, pos: egui::Pos2) {
-        self.harness.hover_at(pos);
-        self.harness.event(egui::Event::PointerButton {
-            pos,
-            button: egui::PointerButton::Primary,
-            pressed: true,
-            modifiers: egui::Modifiers::NONE,
-        });
-        self.harness.event(egui::Event::PointerButton {
-            pos,
-            button: egui::PointerButton::Primary,
-            pressed: false,
-            modifiers: egui::Modifiers::NONE,
-        });
-    }
-
-    pub fn remove_cursor(&self) {
-        self.harness.remove_cursor();
-    }
-
     pub fn key_press(&self, key: egui::Key) {
         self.harness.key_press(key);
     }

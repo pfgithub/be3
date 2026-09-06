@@ -16,8 +16,20 @@ pub(crate) fn start<A: crate::App>(
     version: &str,
     chrome: Vec<block_plugin_api::EditorBand>,
 ) -> Result<(), String> {
+    started(Runtime::new::<A>(id, name, version, chrome, waker()))
+}
+
+pub(crate) fn start_beui<A: crate::BeuiApp>(
+    id: &str,
+    name: &str,
+    version: &str,
+    chrome: Vec<block_plugin_api::EditorBand>,
+) -> Result<(), String> {
+    started(Runtime::beui::<A>(id, name, version, chrome, waker()))
+}
+
+fn started(runtime: Runtime) -> Result<(), String> {
     surface::initialize()?;
-    let runtime = Runtime::new::<A>(id, name, version, chrome, waker());
     post(vec![runtime.hello()])?;
     STARTED.with(|started| started.set(host::now()));
     PLUGIN.with(|plugin| *plugin.borrow_mut() = Some(runtime));

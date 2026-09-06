@@ -1,27 +1,16 @@
 use std::rc::Rc;
 use std::sync::Arc;
 
-use beui::demo::{Counter, Demo};
-use beui_egui::Canvas;
 use block_client::blocks::counter::{Counter as CounterBlock, CounterOperation};
-use block_editor_plugin::egui;
+use block_editor_plugin::beui::demo::{Counter, Demo};
+use block_editor_plugin::beui::{Context, Rect};
+use block_editor_plugin::EditorHost;
 
+#[derive(Default)]
 pub struct CounterApp {
-    canvas: Canvas,
     demo: Option<Demo>,
     counter: Option<Rc<BlockCounter>>,
     creation: Option<Arc<block_client::BlockClient>>,
-}
-
-impl Default for CounterApp {
-    fn default() -> Self {
-        Self {
-            canvas: Canvas::new(),
-            demo: None,
-            counter: None,
-            creation: None,
-        }
-    }
 }
 
 impl CounterApp {
@@ -30,16 +19,9 @@ impl CounterApp {
     }
 }
 
-fn open(counter: Option<&Rc<BlockCounter>>) -> Option<Demo> {
-    let counter = counter?;
-    counter.block.read()?;
-    let counter: Rc<dyn Counter> = counter.clone();
-    Some(Demo::new(counter))
-}
-
 struct BlockCounter {
     block: block_client::BlockHandle<CounterBlock>,
-    host: block_editor_plugin::EditorHost,
+    host: EditorHost,
 }
 
 impl BlockCounter {
@@ -68,10 +50,17 @@ impl Counter for BlockCounter {
     }
 }
 
-impl block_editor_plugin::App for CounterApp {
+fn open(counter: Option<&Rc<BlockCounter>>) -> Option<Demo> {
+    let counter = counter?;
+    counter.block.read()?;
+    let counter: Rc<dyn Counter> = counter.clone();
+    Some(Demo::new(counter))
+}
+
+impl block_editor_plugin::BeuiApp for CounterApp {
     fn connect(
         &mut self,
-        host: block_editor_plugin::EditorHost,
+        host: EditorHost,
         client: Arc<block_client::BlockClient>,
         block_id: uuid::Uuid,
     ) {
@@ -81,11 +70,7 @@ impl block_editor_plugin::App for CounterApp {
         }));
     }
 
-    fn connect_creation(
-        &mut self,
-        _host: block_editor_plugin::EditorHost,
-        client: Arc<block_client::BlockClient>,
-    ) {
+    fn connect_creation(&mut self, _host: EditorHost, client: Arc<block_client::BlockClient>) {
         self.creation = Some(client);
     }
 
@@ -97,14 +82,13 @@ impl block_editor_plugin::App for CounterApp {
         Ok(client.create_block(CounterBlock::default()).id())
     }
 
-    fn ui(&mut self, ui: &mut egui::Ui) {
+    fn frame(&mut self, context: &Context, rect: Rect) {
         if self.demo.is_none() {
             self.demo = open(self.counter.as_ref());
         }
         let Some(demo) = &mut self.demo else {
             return;
         };
-        self.canvas
-            .show(ui, |context, rect| demo.show(context, rect));
+        demo.show(context, rect);
     }
 }

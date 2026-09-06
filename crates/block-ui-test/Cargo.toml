@@ -5,10 +5,13 @@ version.workspace = true
 license.workspace = true
 
 [dependencies]
+beui = { path = "../beui", default-features = false, features = ["render"] }
 block-editor-plugin = { path = "../block-editor-plugin" }
 egui = "0.34.3"
 egui_kittest = { version = "0.34", default-features = false }
 paint-snapshot = { path = "../paint-snapshot" }
+pollster = "0.4"
+wgpu = "29"
 
 [lints]
 workspace = true

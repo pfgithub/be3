@@ -6,7 +6,8 @@ license.workspace = true
 
 [features]
 default = ["window"]
-window = ["dep:bytemuck", "dep:pollster", "dep:wgpu", "dep:winit"]
+render = ["dep:bytemuck", "dep:wgpu", "wgpu/std", "wgpu/wgsl"]
+window = ["render", "dep:pollster", "dep:winit", "wgpu/default"]
 
 [dependencies]
 bytemuck = { version = "1", features = ["derive"], optional = true }
@@ -15,7 +16,7 @@ harfbuzz_rs = "2"
 pollster = { version = "0.4", optional = true }
 text-editor-core = { path = "../text-editor-core" }
 unicode-script = "0.5"
-wgpu = { version = "29", optional = true }
+wgpu = { version = "29", default-features = false, optional = true }
 winit = { version = "0.30", optional = true }
 
 [lints]

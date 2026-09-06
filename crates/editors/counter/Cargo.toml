@@ -8,8 +8,6 @@ license.workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-beui = { path = "../../beui", default-features = false }
-beui-egui = { path = "../../beui-egui" }
 block-client = { path = "../../block-client" }
 block-editor-plugin = { path = "../../block-editor-plugin" }
 uuid = "1"

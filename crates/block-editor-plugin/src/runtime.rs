@@ -28,9 +28,23 @@ impl Runtime {
         chrome: Vec<EditorBand>,
         waker: Waker,
     ) -> Self {
+        Self::of(id, name, version, Screens::new::<A>(chrome, waker))
+    }
+
+    pub(crate) fn beui<A: crate::BeuiApp>(
+        id: &str,
+        name: &str,
+        version: &str,
+        chrome: Vec<EditorBand>,
+        waker: Waker,
+    ) -> Self {
+        Self::of(id, name, version, Screens::beui::<A>(chrome, waker))
+    }
+
+    fn of(id: &str, name: &str, version: &str, screens: Screens) -> Self {
         Self {
             session: ClientSession::new(id, name, version),
-            screens: Screens::new::<A>(chrome, waker),
+            screens,
             surface: None,
             generation: 0,
             asked: false,

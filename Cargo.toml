@@ -1,7 +1,6 @@
 [workspace]
 members = [
     "crates/beui",
-    "crates/beui-egui",
     "crates/tablet",
     "crates/reactive",
     "crates/block",

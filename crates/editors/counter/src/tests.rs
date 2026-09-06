@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
-use beui::NodeId;
 use block_client::blocks::counter::Counter;
 use block_client::{BlockClient, BlockHandle};
-use block_editor_plugin::{egui, App as _, EditorHost};
-use block_ui_test::EditorTest;
+use block_editor_plugin::beui::{pos2, NodeId};
+use block_editor_plugin::{BeuiApp as _, EditorHost};
+use block_ui_test::BeuiTest;
 use uuid::Uuid;
 
 use crate::app::CounterApp;
@@ -13,19 +13,17 @@ mod clicking_the_plus_button_counts_up_on_the_block;
 mod resetting_puts_the_block_back_to_zero;
 mod the_counter_shows_what_the_block_holds;
 
-fn editor() -> (EditorTest<'static, CounterApp>, BlockHandle<Counter>) {
+fn editor() -> (BeuiTest<CounterApp>, BlockHandle<Counter>) {
     let client = Arc::new(BlockClient::new(Uuid::new_v4(), Uuid::new_v4()));
     let block = client.create_block(Counter::default());
     let host = EditorHost::default();
     host.set_editable(true);
     let mut app = CounterApp::default();
     app.connect(host, client, block.id());
-    let mut editor = EditorTest::new(app);
-    editor.run();
-    (editor, block)
+    (BeuiTest::new(app), block)
 }
 
-fn click(editor: &mut EditorTest<'_, CounterApp>, node: impl Fn(&CounterApp) -> NodeId) {
+fn click(editor: &mut BeuiTest<CounterApp>, node: impl Fn(&CounterApp) -> NodeId) {
     let app = editor.app();
     let target = node(app);
     let rect = app
@@ -33,11 +31,11 @@ fn click(editor: &mut EditorTest<'_, CounterApp>, node: impl Fn(&CounterApp) -> 
         .and_then(|demo| demo.document().node_rect(target))
         .expect("the demo has not laid that node out");
     let center = rect.center();
-    editor.click_at(egui::pos2(center.x, center.y));
+    editor.click_at(pos2(center.x, center.y));
     editor.run();
 }
 
-fn shown(editor: &mut EditorTest<'_, CounterApp>) -> String {
+fn shown(editor: &mut BeuiTest<CounterApp>) -> String {
     let app = editor.app();
     let demo = app.demo().expect("the demo is not open yet");
     demo.document()

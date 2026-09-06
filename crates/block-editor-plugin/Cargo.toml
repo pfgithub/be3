@@ -5,12 +5,14 @@ version.workspace = true
 license.workspace = true
 
 [dependencies]
+beui = { path = "../beui", default-features = false }
 block-client = { path = "../block-client" }
 block = { path = "../block" }
 block-plugin-api = { path = "../block-plugin-api" }
 block-ui = { path = "../block-ui" }
 eframe = { version = "0.34.3", default-features = false, features = ["default_fonts"] }
 egui_material_icons = "0.6.0"
+epaint_default_fonts = "0.34.3"
 futures-util = "0.3"
 serde = "1"
 serde_json = "1"
@@ -25,6 +27,7 @@ naga = { version = "29", features = ["wgsl-in"] }
 # which is why a native build of this crate is only the App trait and the host
 # types an editor's own tests drive it through.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+beui = { path = "../beui", default-features = false, features = ["render"] }
 block-client = { path = "../block-client", features = ["hosted"] }
 block-gpu-abi = { path = "../block-gpu-abi" }
 block-gpu-guest = { path = "../block-gpu-guest" }

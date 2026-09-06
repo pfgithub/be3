@@ -12,10 +12,14 @@ use eframe::egui;
 use std::{collections::HashMap, rc::Rc, sync::Arc};
 use uuid::Uuid;
 
-use crate::{host::BlockDrag, EditorHost, Waker};
+use crate::{beui_frame, host::BlockDrag, EditorHost, Waker};
 
-pub(crate) struct EguiSession {
+const WHEEL_LINE: f32 = 40.0;
+const WHEEL_PAGE: f32 = 400.0;
+
+pub(crate) struct EditorSession {
     app: Box<dyn AppUi>,
+    beui: Option<HashMap<EditorRegion, BeuiRegion>>,
     chrome: Rc<Vec<EditorBand>>,
     instance: EditorInstanceId,
     regions: HashMap<EditorRegion, RegionState>,
@@ -59,6 +63,24 @@ impl ArtifactState {
     }
 }
 
+struct BeuiRegion {
+    context: beui::Context,
+    events: Vec<beui::Event>,
+    modifiers: beui::Modifiers,
+    pointer: beui::Pos2,
+}
+
+impl BeuiRegion {
+    fn new() -> Self {
+        Self {
+            context: beui::Context::with_fonts(&crate::beui_fonts()),
+            events: Vec::new(),
+            modifiers: beui::Modifiers::NONE,
+            pointer: beui::Pos2::ZERO,
+        }
+    }
+}
+
 #[derive(Default)]
 struct RegionState {
     input: egui::RawInput,
@@ -79,6 +101,8 @@ struct RegionState {
 }
 
 trait AppUi {
+    fn beui_frame(&mut self, _context: &beui::Context, _rect: beui::Rect) {}
+    fn beui_preview(&mut self, _context: &beui::Context, _rect: beui::Rect) {}
     fn connect(&mut self, host: EditorHost, client: Arc<BlockClient>, block_id: Uuid);
     fn connect_creation(&mut self, host: EditorHost, client: Arc<BlockClient>);
     fn create_block(&mut self) -> Result<Uuid, String>;
@@ -199,14 +223,121 @@ impl<A: crate::App> AppUi for A {
     }
 }
 
-impl EguiSession {
+struct BeuiHolder<A: crate::BeuiApp> {
+    app: A,
+}
+
+impl<A: crate::BeuiApp> AppUi for BeuiHolder<A> {
+    fn beui_frame(&mut self, context: &beui::Context, rect: beui::Rect) {
+        crate::BeuiApp::frame(&mut self.app, context, rect);
+    }
+
+    fn beui_preview(&mut self, context: &beui::Context, rect: beui::Rect) {
+        crate::BeuiApp::preview(&mut self.app, context, rect);
+    }
+
+    fn connect(&mut self, host: EditorHost, client: Arc<BlockClient>, block_id: Uuid) {
+        crate::BeuiApp::connect(&mut self.app, host, client, block_id);
+    }
+
+    fn connect_creation(&mut self, host: EditorHost, client: Arc<BlockClient>) {
+        crate::BeuiApp::connect_creation(&mut self.app, host, client);
+    }
+
+    fn create_block(&mut self) -> Result<Uuid, String> {
+        crate::BeuiApp::create_block(&mut self.app)
+    }
+
+    fn creation_ui(&mut self, _ui: &mut egui::Ui) {}
+
+    fn connect_artifact(
+        &mut self,
+        _host: EditorHost,
+        _client: Arc<BlockClient>,
+        _artifact: crate::Artifact,
+    ) {
+    }
+
+    fn describe_artifact(&mut self, _data: &[u8]) -> ArtifactDescription {
+        ArtifactDescription::Unreadable("this editor does not generate artifacts".to_owned())
+    }
+
+    fn artifact_settings_ui(&mut self, _ui: &mut egui::Ui, _data: &mut Vec<u8>) {}
+
+    fn regenerate_artifact(&mut self, _data: &[u8]) {}
+
+    fn poll_artifact(&mut self) -> Option<Result<(), String>> {
+        None
+    }
+
+    fn main_ui(&mut self, _ui: &mut egui::Ui) {}
+
+    fn toolbar_ui(&mut self, _ui: &mut egui::Ui) {}
+
+    fn left_sidebar_ui(&mut self, _ui: &mut egui::Ui) {}
+
+    fn right_sidebar_ui(&mut self, _ui: &mut egui::Ui) {}
+
+    fn preview_ui(&mut self, _ui: &mut egui::Ui) {}
+
+    fn intrinsic_size(&mut self) -> Option<egui::Vec2> {
+        crate::BeuiApp::intrinsic_size(&mut self.app).map(|size| egui::vec2(size.x, size.y))
+    }
+
+    fn set_intrinsic_size(&mut self, size: egui::Vec2) {
+        crate::BeuiApp::set_intrinsic_size(&mut self.app, beui::vec2(size.x, size.y));
+    }
+
+    fn aspect_ratio(&mut self) -> Option<f32> {
+        crate::BeuiApp::aspect_ratio(&mut self.app)
+    }
+
+    fn presence_visible(&mut self, visible: bool) {
+        crate::BeuiApp::presence_visible(&mut self.app, visible);
+    }
+
+    fn reveal_presence(&mut self, client_id: u64) {
+        crate::BeuiApp::reveal_presence(&mut self.app, client_id);
+    }
+
+    fn replace_child(&mut self, old: Uuid, new: Uuid) -> bool {
+        crate::BeuiApp::replace_child(&mut self.app, old, new)
+    }
+}
+
+impl EditorSession {
     pub(crate) fn new<A: crate::App>(
         chrome: Rc<Vec<EditorBand>>,
         instance: EditorInstanceId,
         waker: Waker,
     ) -> Self {
+        Self::of(Box::new(A::default()), None, chrome, instance, waker)
+    }
+
+    pub(crate) fn beui<A: crate::BeuiApp>(
+        chrome: Rc<Vec<EditorBand>>,
+        instance: EditorInstanceId,
+        waker: Waker,
+    ) -> Self {
+        Self::of(
+            Box::new(BeuiHolder { app: A::default() }),
+            Some(HashMap::new()),
+            chrome,
+            instance,
+            waker,
+        )
+    }
+
+    fn of(
+        app: Box<dyn AppUi>,
+        beui: Option<HashMap<EditorRegion, BeuiRegion>>,
+        chrome: Rc<Vec<EditorBand>>,
+        instance: EditorInstanceId,
+        waker: Waker,
+    ) -> Self {
         Self {
-            app: Box::new(A::default()),
+            app,
+            beui,
             chrome,
             instance,
             regions: HashMap::new(),
@@ -892,7 +1023,160 @@ impl EguiSession {
         )
     }
 
+    pub(crate) fn is_beui(&self) -> bool {
+        self.beui.is_some()
+    }
+
+    pub(crate) fn run_beui(
+        &mut self,
+        region: EditorRegion,
+        generation: u64,
+    ) -> Option<beui::FrameOutput> {
+        self.generation = generation;
+        let scale_factor = self.scale_factor(region);
+        let rect = self.rect(region);
+        let spec = self
+            .regions
+            .get(&region)
+            .and_then(|state| state.frame.clone())
+            .unwrap_or_default();
+        let beui = self.beui.as_mut()?;
+        let state = beui.entry(region).or_insert_with(BeuiRegion::new);
+        let events = std::mem::take(&mut state.events);
+        let context = state.context.clone();
+        context.set_pixels_per_point(scale_factor);
+
+        let frame = beui::Rect::from_min_max(
+            beui::pos2(rect.min.x, rect.min.y),
+            beui::pos2(rect.max.x, rect.max.y),
+        );
+        let app = &mut self.app;
+        let mut chrome = None;
+        let output = context.run(beui::RawInput { events }, |context| match region {
+            EditorRegion::Frame => {
+                let drawn = spec.chrome == FrameChrome::Drawn;
+                let shown = beui_frame::show(context, frame, &spec.trail, drawn);
+                let content = match spec.content {
+                    Some(content) => {
+                        let content = host_rect(content, rect.min.to_vec2());
+                        beui::Rect::from_min_max(
+                            beui::pos2(
+                                content.min.x.max(shown.content.min.x),
+                                content.min.y.max(shown.content.min.y),
+                            ),
+                            beui::pos2(
+                                content.max.x.min(shown.content.max.x),
+                                content.max.y.min(shown.content.max.y),
+                            ),
+                        )
+                    }
+                    None => shown.content,
+                };
+                app.beui_frame(context, content);
+                chrome = Some(shown);
+            }
+            EditorRegion::Preview => app.beui_preview(context, frame),
+            EditorRegion::ArtifactSettings => {}
+        });
+
+        let origin = rect.min.to_vec2();
+        let screen = self.placement(region).map(|placement| placement.screen);
+        let chrome = chrome.unwrap_or_else(|| beui_frame::Chrome::plain(frame));
+        self.leaving |= chrome.exit;
+        self.used(region, rect);
+        if let (Some(state), Some(screen)) = (self.regions.get_mut(&region), screen) {
+            state.cursor = beui_cursor(output.cursor_icon);
+            state.report = (region == EditorRegion::Frame).then(|| FrameReport {
+                screen,
+                content: plugin_rect(egui_rect(chrome.content), origin),
+                painted: chrome
+                    .painted
+                    .iter()
+                    .map(|rect| plugin_rect(egui_rect(*rect), origin))
+                    .collect(),
+                floating: Vec::new(),
+            });
+        }
+        Some(output)
+    }
+
+    fn beui_input(&mut self, region: EditorRegion, event: &InputEvent) {
+        let origin = self.rect(region).min.to_vec2();
+        let Some(beui) = self.beui.as_mut() else {
+            return;
+        };
+        let state = beui.entry(region).or_insert_with(BeuiRegion::new);
+        let at = |x: f32, y: f32| beui::pos2(x + origin.x, y + origin.y);
+        match event {
+            InputEvent::PointerMoved { x, y } => {
+                state.pointer = at(*x, *y);
+                state.events.push(beui::Event::PointerMoved(state.pointer));
+            }
+            InputEvent::PointerButton {
+                button,
+                pressed,
+                x,
+                y,
+            } => {
+                let Some(button) = beui_button(*button) else {
+                    return;
+                };
+                state.pointer = at(*x, *y);
+                state.events.push(beui::Event::PointerButton {
+                    pos: state.pointer,
+                    button,
+                    pressed: *pressed,
+                    modifiers: state.modifiers,
+                });
+            }
+            InputEvent::Wheel { x, y, unit } => {
+                let scale = match unit {
+                    WheelUnit::Pixels => 1.0,
+                    WheelUnit::Lines => WHEEL_LINE,
+                    WheelUnit::Pages => WHEEL_PAGE,
+                };
+                state
+                    .events
+                    .push(beui::Event::Scroll(beui::vec2(x * scale, y * scale)));
+            }
+            InputEvent::Key {
+                logical,
+                pressed,
+                repeat,
+                ..
+            } => {
+                let Some(key) = beui_key(logical) else {
+                    return;
+                };
+                state.events.push(beui::Event::Key {
+                    key,
+                    pressed: *pressed,
+                    repeat: *repeat,
+                    modifiers: state.modifiers,
+                });
+            }
+            InputEvent::Text(text) | InputEvent::Paste(text) => {
+                state.events.push(beui::Event::Text(text.clone()));
+            }
+            InputEvent::Modifiers(modifiers) => {
+                state.modifiers = beui::Modifiers {
+                    alt: modifiers.alt,
+                    ctrl: modifiers.control || modifiers.command,
+                    shift: modifiers.shift,
+                };
+            }
+            InputEvent::Focus(false) => state.events.push(beui::Event::PointerGone),
+            InputEvent::PointerMotion { .. }
+            | InputEvent::Zoom { .. }
+            | InputEvent::Ime(_)
+            | InputEvent::Focus(_) => {}
+        }
+    }
+
     pub(crate) fn input(&mut self, region: EditorRegion, event: &InputEvent) {
+        if self.beui.is_some() {
+            return self.beui_input(region, event);
+        }
         let origin = self.rect(region).min.to_vec2();
         let Some(state) = self.regions.get_mut(&region) else {
             return;
@@ -988,6 +1272,84 @@ impl block_ui::frame::FrameBands for AppBands<'_> {
         let rect = ui.max_rect();
         ui.painter().rect_filled(rect, 0.0, self.background);
         self.app.main_ui(ui);
+    }
+}
+
+fn egui_rect(rect: beui::Rect) -> egui::Rect {
+    egui::Rect::from_min_max(
+        egui::pos2(rect.min.x, rect.min.y),
+        egui::pos2(rect.max.x, rect.max.y),
+    )
+}
+
+fn beui_button(button: PointerButton) -> Option<beui::PointerButton> {
+    match button {
+        PointerButton::Primary => Some(beui::PointerButton::Primary),
+        PointerButton::Secondary => Some(beui::PointerButton::Secondary),
+        PointerButton::Middle => Some(beui::PointerButton::Middle),
+        PointerButton::Back | PointerButton::Forward | PointerButton::Other(_) => None,
+    }
+}
+
+fn beui_key(logical: &str) -> Option<beui::Key> {
+    let key = match logical {
+        "ArrowDown" => beui::Key::ArrowDown,
+        "ArrowLeft" => beui::Key::ArrowLeft,
+        "ArrowRight" => beui::Key::ArrowRight,
+        "ArrowUp" => beui::Key::ArrowUp,
+        "Backspace" => beui::Key::Backspace,
+        "Delete" => beui::Key::Delete,
+        "End" => beui::Key::End,
+        "Enter" => beui::Key::Enter,
+        "Escape" => beui::Key::Escape,
+        "Home" => beui::Key::Home,
+        "PageDown" => beui::Key::PageDown,
+        "PageUp" => beui::Key::PageUp,
+        "Space" => beui::Key::Space,
+        "Tab" => beui::Key::Tab,
+        "A" => beui::Key::A,
+        "B" => beui::Key::B,
+        "C" => beui::Key::C,
+        "D" => beui::Key::D,
+        "E" => beui::Key::E,
+        "F" => beui::Key::F,
+        "G" => beui::Key::G,
+        "H" => beui::Key::H,
+        "I" => beui::Key::I,
+        "J" => beui::Key::J,
+        "K" => beui::Key::K,
+        "L" => beui::Key::L,
+        "M" => beui::Key::M,
+        "N" => beui::Key::N,
+        "O" => beui::Key::O,
+        "P" => beui::Key::P,
+        "Q" => beui::Key::Q,
+        "R" => beui::Key::R,
+        "S" => beui::Key::S,
+        "T" => beui::Key::T,
+        "U" => beui::Key::U,
+        "V" => beui::Key::V,
+        "W" => beui::Key::W,
+        "X" => beui::Key::X,
+        "Y" => beui::Key::Y,
+        "Z" => beui::Key::Z,
+        _ => return None,
+    };
+    Some(key)
+}
+
+fn beui_cursor(cursor: beui::CursorIcon) -> CursorIcon {
+    match cursor {
+        beui::CursorIcon::Default => CursorIcon::Default,
+        beui::CursorIcon::Crosshair => CursorIcon::Crosshair,
+        beui::CursorIcon::Grab => CursorIcon::Grab,
+        beui::CursorIcon::Grabbing => CursorIcon::Grabbing,
+        beui::CursorIcon::NotAllowed => CursorIcon::NotAllowed,
+        beui::CursorIcon::PointingHand => CursorIcon::Pointer,
+        beui::CursorIcon::ResizeHorizontal => CursorIcon::ResizeHorizontal,
+        beui::CursorIcon::ResizeVertical => CursorIcon::ResizeVertical,
+        beui::CursorIcon::Text => CursorIcon::Text,
+        beui::CursorIcon::Wait => CursorIcon::Wait,
     }
 }
 

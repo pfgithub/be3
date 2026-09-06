@@ -1,3 +1,4 @@
+pub use beui;
 pub use eframe::egui;
 #[cfg(target_arch = "wasm32")]
 pub use eframe::egui_wgpu;
@@ -6,7 +7,9 @@ pub use egui_material_icons;
 use std::sync::Arc;
 
 #[cfg(target_arch = "wasm32")]
-mod egui_session;
+mod beui_frame;
+#[cfg(target_arch = "wasm32")]
+mod editor_session;
 mod host;
 #[cfg(target_arch = "wasm32")]
 mod panes;
@@ -35,6 +38,44 @@ pub use host::{
 #[cfg(target_arch = "wasm32")]
 pub fn surface_format() -> egui_wgpu::wgpu::TextureFormat {
     wasm::surface_format()
+}
+
+pub fn beui_fonts() -> beui::FontSources {
+    beui::FontSources {
+        proportional: vec![beui::FontSource::Memory(epaint_default_fonts::UBUNTU_LIGHT)],
+        monospace: vec![beui::FontSource::Memory(epaint_default_fonts::HACK_REGULAR)],
+        fallback: vec![beui::FontSource::Memory(
+            epaint_default_fonts::NOTO_EMOJI_REGULAR,
+        )],
+    }
+}
+
+pub trait BeuiApp: Default + 'static {
+    fn connect(
+        &mut self,
+        _host: EditorHost,
+        _client: Arc<block_client::BlockClient>,
+        _block_id: uuid::Uuid,
+    ) {
+    }
+    fn connect_creation(&mut self, _host: EditorHost, _client: Arc<block_client::BlockClient>) {}
+    fn create_block(&mut self) -> Result<uuid::Uuid, String> {
+        Err("this editor does not create blocks".into())
+    }
+    fn frame(&mut self, context: &beui::Context, rect: beui::Rect);
+    fn preview(&mut self, _context: &beui::Context, _rect: beui::Rect) {}
+    fn intrinsic_size(&mut self) -> Option<beui::Vec2> {
+        None
+    }
+    fn set_intrinsic_size(&mut self, _size: beui::Vec2) {}
+    fn aspect_ratio(&mut self) -> Option<f32> {
+        None
+    }
+    fn presence_visible(&mut self, _visible: bool) {}
+    fn reveal_presence(&mut self, _client_id: u64) {}
+    fn replace_child(&mut self, _old: uuid::Uuid, _new: uuid::Uuid) -> bool {
+        false
+    }
 }
 
 pub trait App: Default + 'static {
@@ -106,6 +147,20 @@ pub mod __private {
     }
 
     #[cfg(target_arch = "wasm32")]
+    pub fn start_wasm_beui<A: crate::BeuiApp>(manifest: &str) {
+        let document = document(manifest);
+        let identity = document.identity();
+        if let Err(error) = crate::wasm::start_beui::<A>(
+            &identity.id,
+            &identity.name,
+            &identity.version,
+            document.chrome,
+        ) {
+            panic!("{} could not start: {error}", identity.name);
+        }
+    }
+
+    #[cfg(target_arch = "wasm32")]
     pub fn step_wasm() {
         if let Err(error) = crate::wasm::step() {
             panic!("the plugin could not run a frame: {error}");
@@ -130,7 +185,7 @@ pub mod __private {
 #[cfg(target_arch = "wasm32")]
 #[macro_export]
 macro_rules! platform_entry {
-    ($app:ty, $manifest:ident) => {
+    ($app:ty, $manifest:ident, $start:ident) => {
         #[no_mangle]
         pub extern "C" fn plugin_initialize_tls(size: u32, align: u32) {
             $crate::__private::initialize_tls(size as usize, align as usize);
@@ -138,7 +193,7 @@ macro_rules! platform_entry {
 
         #[no_mangle]
         pub extern "C" fn plugin_start() {
-            $crate::__private::start_wasm::<$app>($manifest);
+            $crate::__private::$start::<$app>($manifest);
         }
 
         #[no_mangle]
@@ -156,7 +211,7 @@ macro_rules! platform_entry {
 #[cfg(not(target_arch = "wasm32"))]
 #[macro_export]
 macro_rules! platform_entry {
-    ($app:ty, $manifest:ident) => {};
+    ($app:ty, $manifest:ident, $start:ident) => {};
 }
 
 #[macro_export]
@@ -164,6 +219,15 @@ macro_rules! plugin {
     ($app:ty, $manifest:expr) => {
         const PLUGIN_MANIFEST: &str = include_str!($manifest);
 
-        $crate::platform_entry!($app, PLUGIN_MANIFEST);
+        $crate::platform_entry!($app, PLUGIN_MANIFEST, start_wasm);
+    };
+}
+
+#[macro_export]
+macro_rules! beui_plugin {
+    ($app:ty, $manifest:expr) => {
+        const PLUGIN_MANIFEST: &str = include_str!($manifest);
+
+        $crate::platform_entry!($app, PLUGIN_MANIFEST, start_wasm_beui);
     };
 }

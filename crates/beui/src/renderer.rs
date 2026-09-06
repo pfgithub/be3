@@ -149,6 +149,7 @@ impl Atlas {
 }
 
 pub struct Renderer {
+    srgb: bool,
     pipeline: wgpu::RenderPipeline,
     bind_group: wgpu::BindGroup,
     uniform_buffer: wgpu::Buffer,
@@ -252,6 +253,7 @@ impl Renderer {
         );
 
         Self {
+            srgb: format.is_srgb(),
             pipeline,
             bind_group,
             uniform_buffer,
@@ -299,7 +301,7 @@ impl Renderer {
                         rect: snapped(*rect, pixels_per_point),
                         clip: bounds(*clip, pixels_per_point),
                         uv: [0.0; 4],
-                        color: color.to_linear_f32(),
+                        color: self.encode(*color),
                         params: [
                             corner_radius * pixels_per_point,
                             stroke(*stroke_width, pixels_per_point),
@@ -314,7 +316,7 @@ impl Renderer {
                     color,
                     clip,
                 } => {
-                    let color = color.to_linear_f32();
+                    let color = self.encode(*color);
                     let clip = bounds(*clip, pixels_per_point);
                     let origin = vec2(
                         (origin.x * pixels_per_point).round(),
@@ -356,6 +358,13 @@ impl Renderer {
             });
         }
         queue.write_buffer(&self.instance_buffer, 0, bytemuck::cast_slice(&instances));
+    }
+
+    fn encode(&self, color: Color32) -> [f32; 4] {
+        match self.srgb {
+            true => color.to_linear_f32(),
+            false => color.to_normalized_gamma_f32(),
+        }
     }
 
     pub fn paint(&self, pass: &mut wgpu::RenderPass<'_>) {

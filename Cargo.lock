@@ -701,15 +701,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "beui-egui"
-version = "0.1.0"
-dependencies = [
- "beui",
- "egui",
- "egui_kittest",
-]
-
-[[package]]
 name = "bincode"
 version = "1.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1001,6 +992,7 @@ dependencies = [
 name = "block-editor-plugin"
 version = "0.1.0"
 dependencies = [
+ "beui",
  "block 0.1.0",
  "block-client",
  "block-gpu-abi",
@@ -1009,6 +1001,7 @@ dependencies = [
  "block-ui",
  "eframe",
  "egui_material_icons",
+ "epaint_default_fonts",
  "futures-util",
  "naga 29.0.3",
  "serde",
@@ -1114,10 +1107,13 @@ dependencies = [
 name = "block-ui-test"
 version = "0.1.0"
 dependencies = [
+ "beui",
  "block-editor-plugin",
  "egui",
  "egui_kittest",
  "paint-snapshot",
+ "pollster 0.4.0",
+ "wgpu",
 ]
 
 [[package]]
@@ -2017,8 +2013,6 @@ dependencies = [
 name = "counter"
 version = "0.1.0"
 dependencies = [
- "beui",
- "beui-egui",
  "block-client",
  "block-editor-plugin",
  "block-ui-test",

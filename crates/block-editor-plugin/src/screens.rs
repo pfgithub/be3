@@ -8,7 +8,7 @@ use eframe::egui;
 use std::{collections::HashMap, rc::Rc, sync::Arc};
 use uuid::Uuid;
 
-use crate::{egui_session::EguiSession, host::BlockDrag, Waker};
+use crate::{editor_session::EditorSession, host::BlockDrag, Waker};
 
 struct Client {
     client: Arc<BlockClient>,
@@ -18,9 +18,9 @@ struct Client {
 }
 
 pub(crate) struct Screens {
-    sessions: HashMap<EditorInstanceId, EguiSession>,
+    sessions: HashMap<EditorInstanceId, EditorSession>,
     chrome: Rc<Vec<EditorBand>>,
-    open: fn(Rc<Vec<EditorBand>>, EditorInstanceId, Waker) -> EguiSession,
+    open: fn(Rc<Vec<EditorBand>>, EditorInstanceId, Waker) -> EditorSession,
     waker: Waker,
     requests: Vec<ScreenRequest>,
     layout: ScreenLayout,
@@ -31,10 +31,22 @@ pub(crate) struct Screens {
 
 impl Screens {
     pub(crate) fn new<A: crate::App>(chrome: Vec<EditorBand>, waker: Waker) -> Self {
+        Self::of(EditorSession::new::<A>, chrome, waker)
+    }
+
+    pub(crate) fn beui<A: crate::BeuiApp>(chrome: Vec<EditorBand>, waker: Waker) -> Self {
+        Self::of(EditorSession::beui::<A>, chrome, waker)
+    }
+
+    fn of(
+        open: fn(Rc<Vec<EditorBand>>, EditorInstanceId, Waker) -> EditorSession,
+        chrome: Vec<EditorBand>,
+        waker: Waker,
+    ) -> Self {
         Self {
             sessions: HashMap::new(),
             chrome: Rc::new(chrome),
-            open: EguiSession::new::<A>,
+            open,
             waker,
             requests: Vec::new(),
             layout: ScreenLayout::default(),
@@ -434,7 +446,7 @@ impl Screens {
         messages
     }
 
-    pub(crate) fn session(&mut self, instance: EditorInstanceId) -> Option<&mut EguiSession> {
+    pub(crate) fn session(&mut self, instance: EditorInstanceId) -> Option<&mut EditorSession> {
         self.sessions.get_mut(&instance)
     }
 
