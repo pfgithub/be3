@@ -1,5 +1,6 @@
 use super::*;
 
+mod a_border_paints_over_the_fill_it_wraps;
 mod a_clip_rectangle_hides_what_falls_outside_it;
 mod a_fill_with_fractional_bounds_lands_on_whole_pixels;
 mod a_filled_rectangle_covers_its_bounds;
@@ -7,6 +8,7 @@ mod text_at_a_fractional_origin_lands_on_whole_pixels;
 mod text_paints_glyphs_over_the_background;
 
 use crate::context::Context;
+use crate::document::Document;
 use crate::font::FontId;
 use crate::geometry::{pos2, vec2, Pos2};
 use crate::input::RawInput;

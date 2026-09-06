@@ -51,6 +51,9 @@ impl Element for OutlineNode {
     }
 
     fn paint(&self, doc: &Document, painter: &Painter, rects: &HashMap<NodeId, Rect>, rect: Rect) {
+        if let Some(child) = self.child {
+            crate::paint::paint(doc, painter, rects, child);
+        }
         if self.visible {
             painter.rect_stroke(
                 rect.expand(self.offset),
@@ -58,9 +61,6 @@ impl Element for OutlineNode {
                 self.width,
                 self.color,
             );
-        }
-        if let Some(child) = self.child {
-            crate::paint::paint(doc, painter, rects, child);
         }
     }
 
