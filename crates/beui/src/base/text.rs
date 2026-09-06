@@ -159,6 +159,14 @@ impl Document {
         self.arena.get_mut_as::<TextNode>(text).wrap = wrap;
     }
 
+    pub fn set_text_font_size(&mut self, text: NodeId, font_size: f32) {
+        self.arena.get_mut_as::<TextNode>(text).font_size = font_size;
+    }
+
+    pub(crate) fn text_font(&self, text: NodeId) -> FontId {
+        self.arena.get_as::<TextNode>(text).font()
+    }
+
     pub fn set_text_monospace(&mut self, text: NodeId, monospace: bool) {
         self.arena.get_mut_as::<TextNode>(text).monospace = monospace;
     }

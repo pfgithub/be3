@@ -9,6 +9,7 @@ bytemuck = { version = "1", features = ["derive"] }
 freetype = "0.7"
 harfbuzz_rs = "2"
 pollster = "0.4"
+text-editor-core = { path = "../text-editor-core" }
 unicode-script = "0.5"
 wgpu = "29"
 winit = "0.30"

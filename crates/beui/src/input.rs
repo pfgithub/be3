@@ -75,6 +75,14 @@ impl Modifiers {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct KeyPress {
+    pub key: Key,
+    pub pressed: bool,
+    pub repeat: bool,
+    pub modifiers: Modifiers,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum PointerButton {
     Primary,
     Secondary,

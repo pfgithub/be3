@@ -2,12 +2,14 @@ use std::any::Any;
 use std::collections::HashMap;
 
 use crate::geometry::{Rect, Vec2};
+use crate::input::KeyPress;
 use crate::painter::Painter;
 
 use crate::document::Document;
-use crate::node::{ChangeHandler, ClickHandler, Element, InteractInput, NodeId};
+use crate::node::{ChangeHandler, ClickHandler, Element, Handler, InteractInput, NodeId};
 
 pub(crate) type StepHandler = Box<dyn FnMut(&mut Document, f32)>;
+pub(crate) type KeyHandler = Box<dyn FnMut(&mut Document, KeyPress) -> bool>;
 
 pub(crate) struct FocusableNode {
     pub(crate) child: Option<NodeId>,
@@ -16,6 +18,8 @@ pub(crate) struct FocusableNode {
     pub(crate) on_activate_change: Option<ChangeHandler>,
     pub(crate) on_activate: Option<ClickHandler>,
     pub(crate) on_step: Option<StepHandler>,
+    pub(crate) on_text: Option<Handler<String>>,
+    pub(crate) on_key: Option<KeyHandler>,
 }
 
 impl FocusableNode {
@@ -27,6 +31,8 @@ impl FocusableNode {
             on_activate_change: None,
             on_activate: None,
             on_step: None,
+            on_text: None,
+            on_key: None,
         }
     }
 }
@@ -135,6 +141,63 @@ impl Document {
         handler: impl FnMut(&mut Document, f32) + 'static,
     ) {
         self.arena.get_mut_as::<FocusableNode>(focusable).on_step = Some(Box::new(handler));
+    }
+
+    pub fn set_focusable_on_text(
+        &mut self,
+        focusable: NodeId,
+        handler: impl FnMut(&mut Document, String) + 'static,
+    ) {
+        self.arena.get_mut_as::<FocusableNode>(focusable).on_text = Some(Box::new(handler));
+    }
+
+    pub fn set_focusable_on_key(
+        &mut self,
+        focusable: NodeId,
+        handler: impl FnMut(&mut Document, KeyPress) -> bool + 'static,
+    ) {
+        self.arena.get_mut_as::<FocusableNode>(focusable).on_key = Some(Box::new(handler));
+    }
+
+    pub(crate) fn text_focused(&mut self, text: &str) {
+        let Some(focused) = self.focused else {
+            return;
+        };
+        let mut element = self.arena.take(focused);
+        let handler = element
+            .as_any_mut()
+            .downcast_mut::<FocusableNode>()
+            .and_then(|focusable| focusable.on_text.take());
+        if let Some(mut handler) = handler {
+            handler(self, text.to_owned());
+            if let Some(focusable) = element.as_any_mut().downcast_mut::<FocusableNode>() {
+                focusable.on_text = Some(handler);
+            }
+        }
+        self.arena.put_back(focused, element);
+    }
+
+    pub(crate) fn key_focused(&mut self, press: KeyPress) -> bool {
+        let Some(focused) = self.focused else {
+            return false;
+        };
+        let mut element = self.arena.take(focused);
+        let handler = element
+            .as_any_mut()
+            .downcast_mut::<FocusableNode>()
+            .and_then(|focusable| focusable.on_key.take());
+        let consumed = match handler {
+            Some(mut handler) => {
+                let consumed = handler(self, press);
+                if let Some(focusable) = element.as_any_mut().downcast_mut::<FocusableNode>() {
+                    focusable.on_key = Some(handler);
+                }
+                consumed
+            }
+            None => false,
+        };
+        self.arena.put_back(focused, element);
+        consumed
     }
 
     pub fn step_focused(&mut self, delta: f32) {

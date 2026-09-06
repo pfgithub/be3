@@ -2,13 +2,17 @@ use super::*;
 
 mod a_virtual_scroll_only_builds_the_items_in_view;
 mod arrow_keys_step_the_focused_slider;
+mod backspace_deletes_the_character_before_the_caret;
 mod clicking_a_checkbox_toggles_it;
 mod clicking_a_row_collapses_its_children;
 mod clicking_a_row_selects_the_node_it_lists;
 mod clicking_a_tab_selects_the_panel_it_names;
 mod clicking_an_accordion_header_hides_its_content;
 mod clicking_the_padding_around_a_button_label_activates_it;
+mod clicking_the_start_of_a_text_input_puts_the_caret_before_the_text;
+mod ctrl_a_selects_everything_so_typing_replaces_the_value;
 mod ctrl_shift_i_opens_and_closes_the_inspector;
+mod ctrl_z_undoes_what_was_typed_into_a_text_input;
 mod dragging_a_slider_moves_its_value;
 mod dragging_the_inspector_edge_resizes_the_panel;
 mod enter_activates_the_focused_button;
@@ -18,13 +22,18 @@ mod hovering_a_row_highlights_the_node_it_lists;
 mod picking_a_node_leaves_the_document_alone;
 mod picking_a_node_reveals_it_in_the_tree;
 mod scrolling_a_virtual_scroll_replaces_the_items_in_view;
+mod setting_the_value_of_a_text_input_reports_the_change;
+mod shift_arrow_selects_the_character_that_typing_then_replaces;
 mod shift_tab_moves_focus_to_the_previous_button;
+mod tab_moves_focus_from_one_text_input_to_the_next;
 mod tab_moves_focus_to_the_next_button;
 mod the_inspector_follows_nodes_added_to_the_document;
 mod the_inspector_hides_the_internals_of_a_styled_component;
 mod the_inspector_lists_the_document_tree;
 mod the_inspector_separates_component_internals_from_slots;
 mod the_scroll_position_is_reported_to_its_listener;
+mod typing_into_a_focused_text_input_inserts_the_text;
+mod typing_into_an_empty_field_does_not_pick_up_its_placeholder;
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -116,6 +125,12 @@ impl Harness {
         self.frame(vec![key_event(key, false, modifiers)]);
     }
 
+    pub(crate) fn type_text(&mut self, text: &str) {
+        for letter in text.chars() {
+            self.frame(vec![Event::Text(letter.to_string())]);
+        }
+    }
+
     pub(crate) fn toggle_inspector(&mut self) {
         self.chord(Key::I);
     }
@@ -137,6 +152,10 @@ impl Harness {
 
     pub(crate) fn document(&self) -> &Document {
         &self.document
+    }
+
+    pub(crate) fn document_mut(&mut self) -> &mut Document {
+        &mut self.document
     }
 
     pub(crate) fn rect(&self, id: NodeId) -> Rect {

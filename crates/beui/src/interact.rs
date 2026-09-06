@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::context::Context;
 use crate::geometry::Rect;
-use crate::input::{Event, Key};
+use crate::input::{Event, Key, KeyPress};
 use crate::painter::Painter;
 
 use crate::document::Document;
@@ -21,6 +21,7 @@ pub(crate) fn interact(
         pressed_this_frame: ctx.input(|input| input.pointer.primary_pressed()),
         released_this_frame: ctx.input(|input| input.pointer.primary_released()),
         scroll_delta: ctx.input(|input| input.scroll_delta.y),
+        modifiers: ctx.input(|input| input.modifiers),
     };
 
     let mut focus_target = None;
@@ -31,15 +32,27 @@ pub(crate) fn interact(
     }
 
     for event in ctx.input(|input| input.events.clone()) {
-        let Event::Key {
+        let (key, pressed, repeat, modifiers) = match event {
+            Event::Text(text) => {
+                doc.text_focused(&text);
+                continue;
+            }
+            Event::Key {
+                key,
+                pressed,
+                repeat,
+                modifiers,
+            } => (key, pressed, repeat, modifiers),
+            _ => continue,
+        };
+        if doc.key_focused(KeyPress {
             key,
             pressed,
+            repeat,
             modifiers,
-            ..
-        } = event
-        else {
+        }) {
             continue;
-        };
+        }
         match key {
             Key::Tab if pressed => {
                 if modifiers.shift {

@@ -2,6 +2,7 @@ use std::any::Any;
 use std::collections::HashMap;
 
 use crate::geometry::{Pos2, Rect, Vec2};
+use crate::input::Modifiers;
 use crate::painter::Painter;
 
 use crate::document::Document;
@@ -15,6 +16,7 @@ pub(crate) struct InteractInput {
     pub(crate) pressed_this_frame: bool,
     pub(crate) released_this_frame: bool,
     pub(crate) scroll_delta: f32,
+    pub(crate) modifiers: Modifiers,
 }
 
 pub type Handler<V> = Box<dyn FnMut(&mut Document, V)>;

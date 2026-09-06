@@ -266,6 +266,7 @@ fn build_sidebar(document: &mut Document) -> NodeId {
     let enter = styled::shortcut(document, "Enter", "activate the focused control");
     let arrows = styled::shortcut(document, "Arrows", "adjust the focused slider");
     let wheel = styled::shortcut(document, "Wheel", "scroll the row list");
+    let typing = styled::shortcut(document, "Ctrl+Z", "undo an edit in a text field");
     let inspect = styled::shortcut(document, "Ctrl+Shift+I", "open the inspector");
     let pick = styled::shortcut(document, "Ctrl+Shift+C", "pick a node to inspect");
 
@@ -275,6 +276,7 @@ fn build_sidebar(document: &mut Document) -> NodeId {
     document.append_child(keys, enter, ItemSize::Intrinsic);
     document.append_child(keys, arrows, ItemSize::Intrinsic);
     document.append_child(keys, wheel, ItemSize::Intrinsic);
+    document.append_child(keys, typing, ItemSize::Intrinsic);
     document.append_child(keys, inspect, ItemSize::Intrinsic);
     document.append_child(keys, pick, ItemSize::Intrinsic);
     let keyboard_section = styled::accordion(document, "Keyboard", keys, true);
@@ -341,14 +343,20 @@ fn build_controls(document: &mut Document, scroll: NodeId, rows: &Rc<Rows>) -> N
     let load_visibility = document.create_visibility(false);
     document.set_visibility_child(load_visibility, load_panel);
 
+    let name_panel = build_name_controls(document);
+    let name_visibility = document.create_visibility(false);
+    document.set_visibility_child(name_visibility, name_panel);
+
     let panels = unstyled::column(document, 0.0);
     document.append_child(panels, list_visibility, ItemSize::Intrinsic);
     document.append_child(panels, load_visibility, ItemSize::Intrinsic);
+    document.append_child(panels, name_visibility, ItemSize::Intrinsic);
 
-    let tabs = styled::tabs(document, &["List", "Load"], 0);
+    let tabs = styled::tabs(document, &["List", "Load", "Name"], 0);
     styled::set_tabs_on_change(document, tabs, move |document, selected| {
         document.set_visible(list_visibility, selected == 0);
         document.set_visible(load_visibility, selected == 1);
+        document.set_visible(name_visibility, selected == 2);
     });
 
     let column = unstyled::column(document, 16.0);
@@ -401,6 +409,40 @@ fn build_load_controls(document: &mut Document) -> NodeId {
     document.append_child(column, slider, ItemSize::Intrinsic);
     document.append_child(column, bar, ItemSize::Intrinsic);
     column
+}
+
+fn build_name_controls(document: &mut Document) -> NodeId {
+    let label = styled::caption(document, "Display name");
+    let greeting = styled::caption(document, greeting_label(""));
+    document.set_text_align(greeting, TextAlign::End, TextAlign::Center);
+    let header = unstyled::centered_row(document, 12.0);
+    document.append_child(header, label, ItemSize::Intrinsic);
+    document.append_child(header, greeting, ItemSize::Percent(100.0));
+
+    let input = styled::text_input(document, "");
+    styled::set_text_input_placeholder(document, input, "Type a name");
+    styled::set_text_input_on_change(document, input, move |document, value| {
+        document.set_text(greeting, greeting_label(&value));
+    });
+
+    let hint = styled::paragraph(
+        document,
+        "Click to place the caret, drag to select, and Ctrl+Z to undo.",
+    );
+
+    let column = unstyled::column(document, 12.0);
+    document.append_child(column, header, ItemSize::Intrinsic);
+    document.append_child(column, input, ItemSize::Intrinsic);
+    document.append_child(column, hint, ItemSize::Intrinsic);
+    column
+}
+
+fn greeting_label(name: &str) -> String {
+    if name.is_empty() {
+        "Nobody yet".to_owned()
+    } else {
+        format!("Hello, {name}")
+    }
 }
 
 fn percent_label(value: f32) -> String {
