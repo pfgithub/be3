@@ -1,11 +1,9 @@
 [package]
 name = "reactive"
+description = "Single-threaded reactive signals, memos, effects, and scopes"
 edition.workspace = true
 version.workspace = true
 license.workspace = true
-
-[dependencies]
-
 
 [lints]
 workspace = true
