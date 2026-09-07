@@ -78,27 +78,23 @@ impl ListNode {
 
 impl Element for ListNode {
     fn measure(&self, doc: &Document, painter: &Painter, available: Vec2) -> Vec2 {
-        let (_, available_cross) = self.main_and_cross(available);
+        let (available_main, available_cross) = self.main_and_cross(available);
+
+        let sizes: Vec<ItemSize> = self.items.iter().map(|item| item.size).collect();
+        let intrinsic_lengths = self.intrinsic_lengths(doc, painter, available_cross);
+        let main_lengths =
+            distribute_main_axis(available_main, self.spacing, &sizes, &intrinsic_lengths);
+
         let mut main = 0.0f32;
         let mut cross = 0.0f32;
-        for (index, item) in self.items.iter().enumerate() {
+        for (index, (item, length)) in self.items.iter().zip(main_lengths.iter()).enumerate() {
             if index > 0 {
                 main += self.spacing;
             }
-
-            let item_main = match item.size {
-                ItemSize::Intrinsic => f32::INFINITY,
-                ItemSize::Fixed(fixed) => fixed.max(0.0),
-                ItemSize::Percent(_) => continue,
-            };
-            let available = self.axes(item_main, available_cross);
+            let available = self.axes(*length, available_cross);
             let size = crate::layout::measure(doc, painter, item.child, available);
-            let (measured_main, measured_cross) = self.main_and_cross(size);
-            main += if item_main.is_finite() {
-                item_main
-            } else {
-                measured_main
-            };
+            let (_, measured_cross) = self.main_and_cross(size);
+            main += length;
             cross = cross.max(measured_cross);
         }
         self.axes(main, cross)
