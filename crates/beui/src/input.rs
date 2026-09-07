@@ -162,21 +162,35 @@ impl InputState {
                 Event::Focus(false) | Event::PointerGone => {
                     self.pointer.pos = None;
                     self.pointer.primary_down = false;
+                    self.pointer.secondary_down = false;
                 }
                 Event::PointerButton {
                     pos,
-                    button: PointerButton::Primary,
+                    button,
                     pressed,
                     modifiers,
                 } => {
                     self.pointer.pos = Some(*pos);
-                    self.pointer.primary_down = *pressed;
                     self.modifiers = *modifiers;
-                    if *pressed {
-                        self.pointer.primary_pressed = true;
-                        self.pointer.count_click(*pos);
-                    } else {
-                        self.pointer.primary_released = true;
+                    match button {
+                        PointerButton::Primary => {
+                            self.pointer.primary_down = *pressed;
+                            if *pressed {
+                                self.pointer.primary_pressed = true;
+                                self.pointer.count_click(*pos);
+                            } else {
+                                self.pointer.primary_released = true;
+                            }
+                        }
+                        PointerButton::Secondary => {
+                            self.pointer.secondary_down = *pressed;
+                            if *pressed {
+                                self.pointer.secondary_pressed = true;
+                            } else {
+                                self.pointer.secondary_released = true;
+                            }
+                        }
+                        PointerButton::Middle => {}
                     }
                 }
                 Event::Scroll(delta) => self.scroll_delta = self.scroll_delta + *delta,
@@ -194,6 +208,9 @@ pub struct Pointer {
     pub primary_down: bool,
     pub primary_pressed: bool,
     pub primary_released: bool,
+    pub secondary_down: bool,
+    pub secondary_pressed: bool,
+    pub secondary_released: bool,
     clicks: u32,
     last_click: Option<(Instant, Pos2)>,
 }
@@ -202,6 +219,8 @@ impl Pointer {
     fn begin_frame(&mut self) {
         self.primary_pressed = false;
         self.primary_released = false;
+        self.secondary_pressed = false;
+        self.secondary_released = false;
     }
 
     fn count_click(&mut self, pos: Pos2) {
@@ -232,5 +251,13 @@ impl Pointer {
 
     pub fn primary_released(&self) -> bool {
         self.primary_released
+    }
+
+    pub fn secondary_pressed(&self) -> bool {
+        self.secondary_pressed
+    }
+
+    pub fn secondary_released(&self) -> bool {
+        self.secondary_released
     }
 }

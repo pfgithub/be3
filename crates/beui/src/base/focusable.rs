@@ -1,6 +1,7 @@
 use std::any::Any;
 use std::collections::HashMap;
 
+use crate::base::overlay::OverlayNode;
 use crate::base::scroll::ScrollNode;
 use crate::base::visibility::VisibilityNode;
 use crate::geometry::{Rect, Vec2};
@@ -256,8 +257,9 @@ impl Document {
 
     fn focusables(&self) -> Vec<NodeId> {
         let mut out = Vec::new();
-        if let Some(root) = self.root {
-            self.collect_focusables(root, &mut out);
+        let start = self.overlay_stack.last().copied().or(self.root);
+        if let Some(start) = start {
+            self.collect_focusables(start, &mut out);
         }
         out
     }
@@ -268,6 +270,13 @@ impl Document {
             .as_any()
             .downcast_ref::<VisibilityNode>()
             .is_some_and(|node| !node.visible)
+        {
+            return;
+        }
+        if element
+            .as_any()
+            .downcast_ref::<OverlayNode>()
+            .is_some_and(|node| !node.is_open())
         {
             return;
         }

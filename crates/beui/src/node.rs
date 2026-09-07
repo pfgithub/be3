@@ -15,6 +15,7 @@ pub(crate) struct InteractInput {
     pub(crate) pointer_down: bool,
     pub(crate) pressed_this_frame: bool,
     pub(crate) released_this_frame: bool,
+    pub(crate) secondary_pressed_this_frame: bool,
     pub(crate) scroll_delta: f32,
     pub(crate) clicks: u32,
     pub(crate) modifiers: Modifiers,

@@ -18,6 +18,8 @@ const WORD_CLICKS: u32 = 2;
 const LINE_CLICKS: u32 = 3;
 const ALL_CLICKS: u32 = 4;
 
+type KeyOverrideHandler = Box<dyn FnMut(&mut Document, KeyPress) -> bool>;
+
 struct State {
     focusable: NodeId,
     field: NodeId,
@@ -30,6 +32,7 @@ struct State {
     on_submit: Option<Handler<String>>,
     on_hover_change: Option<Handler<bool>>,
     on_focus_change: Option<Handler<bool>>,
+    on_key_override: Option<KeyOverrideHandler>,
 }
 
 pub fn text_input(document: &mut Document, value: impl Into<String>) -> NodeId {
@@ -63,6 +66,7 @@ pub fn text_input(document: &mut Document, value: impl Into<String>) -> NodeId {
             on_submit: None,
             on_hover_change: None,
             on_focus_change: None,
+            on_key_override: None,
         },
     );
 
@@ -94,6 +98,22 @@ pub fn text_input(document: &mut Document, value: impl Into<String>) -> NodeId {
         insert(document, input, &typed);
     });
     document.set_focusable_on_key(focusable, move |document, press| {
+        let overridden = document
+            .component_state_mut::<State>(input)
+            .on_key_override
+            .take();
+        if let Some(mut handler) = overridden {
+            let handled = handler(document, press);
+            if document.contains(input) {
+                let state = document.component_state_mut::<State>(input);
+                if state.on_key_override.is_none() {
+                    state.on_key_override = Some(handler);
+                }
+            }
+            if handled {
+                return true;
+            }
+        }
         key(document, input, press)
     });
 
@@ -197,6 +217,14 @@ pub fn set_text_input_on_focus_change(
     handler: impl FnMut(&mut Document, bool) + 'static,
 ) {
     document.component_state_mut::<State>(input).on_focus_change = Some(Box::new(handler));
+}
+
+pub fn set_text_input_on_key_override(
+    document: &mut Document,
+    input: NodeId,
+    handler: impl FnMut(&mut Document, KeyPress) -> bool + 'static,
+) {
+    document.component_state_mut::<State>(input).on_key_override = Some(Box::new(handler));
 }
 
 pub fn focus_text_input(document: &mut Document, input: NodeId) {

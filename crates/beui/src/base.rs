@@ -3,6 +3,7 @@ pub(crate) mod fill;
 pub(crate) mod focusable;
 pub(crate) mod list;
 pub(crate) mod outline;
+pub(crate) mod overlay;
 pub(crate) mod padding;
 pub(crate) mod scroll;
 pub(crate) mod shadow;

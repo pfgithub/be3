@@ -20,13 +20,20 @@ pub(crate) fn interact(
         pointer_down: ctx.input(|input| input.pointer.primary_down),
         pressed_this_frame: ctx.input(|input| input.pointer.primary_pressed()),
         released_this_frame: ctx.input(|input| input.pointer.primary_released()),
+        secondary_pressed_this_frame: ctx.input(|input| input.pointer.secondary_pressed()),
         scroll_delta: ctx.input(|input| input.scroll_delta.y),
         clicks: ctx.input(|input| input.pointer.clicks()),
         modifiers: ctx.input(|input| input.modifiers),
     };
 
     let mut focus_target = None;
-    interact_node(doc, painter, &input, rects, root, &mut focus_target);
+    if doc.overlay_stack.is_empty() {
+        interact_node(doc, painter, &input, rects, root, &mut focus_target);
+    } else {
+        for overlay in doc.overlay_stack.clone() {
+            interact_node(doc, painter, &input, rects, overlay, &mut focus_target);
+        }
+    }
 
     if input.pressed_this_frame {
         doc.update_focus(focus_target);
@@ -73,6 +80,9 @@ pub(crate) fn interact(
                 } else {
                     doc.focus_next();
                 }
+            }
+            Key::Escape if pressed && !doc.overlay_stack.is_empty() => {
+                doc.close_topmost_overlay();
             }
             Key::Escape if pressed => doc.cancel_focus_activation(),
             Key::Enter | Key::Space if !pressed || (!modifiers.ctrl && !modifiers.alt) => {

@@ -396,18 +396,24 @@ fn build_controls(document: &mut Document, scroll: NodeId, rows: &Rc<Rows>) -> N
     let choices_visibility = document.create_visibility(false);
     document.set_visibility_child(choices_visibility, choices_panel);
 
+    let menus_panel = build_menu_controls(document);
+    let menus_visibility = document.create_visibility(false);
+    document.set_visibility_child(menus_visibility, menus_panel);
+
     let panels = unstyled::column(document, 0.0);
     document.append_child(panels, list_visibility, ItemSize::Intrinsic);
     document.append_child(panels, load_visibility, ItemSize::Intrinsic);
     document.append_child(panels, name_visibility, ItemSize::Intrinsic);
     document.append_child(panels, choices_visibility, ItemSize::Intrinsic);
+    document.append_child(panels, menus_visibility, ItemSize::Intrinsic);
 
-    let tabs = styled::tabs(document, &["List", "Load", "Name", "Choices"], 0);
+    let tabs = styled::tabs(document, &["List", "Load", "Name", "Choices", "Menus"], 0);
     styled::set_tabs_on_change(document, tabs, move |document, selected| {
         document.set_visible(list_visibility, selected == 0);
         document.set_visible(load_visibility, selected == 1);
         document.set_visible(name_visibility, selected == 2);
         document.set_visible(choices_visibility, selected == 3);
+        document.set_visible(menus_visibility, selected == 4);
     });
 
     let column = unstyled::column(document, 16.0);
@@ -539,6 +545,72 @@ fn build_choice_controls(document: &mut Document) -> NodeId {
     for child in [color_label, color, color_status] {
         document.append_child(right, child, ItemSize::Intrinsic);
     }
+    let row = unstyled::row(document, 20.0);
+    document.append_child(row, left, ItemSize::Percent(50.0));
+    document.append_child(row, right, ItemSize::Percent(50.0));
+    row
+}
+
+fn build_menu_controls(document: &mut Document) -> NodeId {
+    let fruits: Vec<String> = ["Apple", "Banana", "Cherry", "Date", "Grape", "Mango"]
+        .iter()
+        .map(|label| (*label).to_owned())
+        .collect();
+    let fruit_label = styled::caption(document, "Favorite fruit (type to search)");
+    let fruit = styled::select(document, &fruits, Some(0));
+    let fruit_status = styled::caption(document, "Apple selected");
+    let fruit_names = fruits.clone();
+    styled::set_select_on_change(document, fruit, move |document, selected| {
+        let text = selected
+            .and_then(|index| fruit_names.get(index))
+            .map_or_else(
+                || "Nothing selected".to_owned(),
+                |label| format!("{label} selected"),
+            );
+        document.set_text(fruit_status, text);
+    });
+    let left = unstyled::column(document, 8.0);
+    document.append_child(left, fruit_label, ItemSize::Intrinsic);
+    document.append_child(left, fruit, ItemSize::Intrinsic);
+    document.append_child(left, fruit_status, ItemSize::Intrinsic);
+
+    let region_label = styled::caption(document, "Right-click the card below");
+    let region_hint = styled::paragraph(
+        document,
+        "The Share item opens a submenu on hover or Right Arrow; Left Arrow closes it.",
+    );
+    let region_column = unstyled::column(document, 4.0);
+    document.append_child(region_column, region_label, ItemSize::Intrinsic);
+    document.append_child(region_column, region_hint, ItemSize::Intrinsic);
+    let region_card = styled::card(document, region_column);
+
+    let menu_status = styled::caption(document, "Nothing chosen yet");
+    let items = vec![
+        unstyled::MenuItem::new("Copy"),
+        unstyled::MenuItem::new("Paste"),
+        unstyled::MenuItem::with_children(
+            "Share",
+            vec![
+                unstyled::MenuItem::new("Email"),
+                unstyled::MenuItem::new("Link"),
+            ],
+        ),
+    ];
+    let context_menu = styled::context_menu(document, region_card, items);
+    styled::set_context_menu_on_select(document, context_menu, move |document, path| {
+        let label = match path.as_slice() {
+            [0] => "Copy".to_owned(),
+            [1] => "Paste".to_owned(),
+            [2, 0] => "Share > Email".to_owned(),
+            [2, 1] => "Share > Link".to_owned(),
+            other => format!("{other:?}"),
+        };
+        document.set_text(menu_status, format!("Chose: {label}"));
+    });
+    let right = unstyled::column(document, 8.0);
+    document.append_child(right, context_menu, ItemSize::Intrinsic);
+    document.append_child(right, menu_status, ItemSize::Intrinsic);
+
     let row = unstyled::row(document, 20.0);
     document.append_child(row, left, ItemSize::Percent(50.0));
     document.append_child(row, right, ItemSize::Percent(50.0));

@@ -22,6 +22,7 @@ pub struct Document {
     pub(crate) rects: Rc<HashMap<NodeId, Rect>>,
     pub(crate) inspector: Option<Box<Inspector>>,
     pub(crate) inspectable: bool,
+    pub(crate) overlay_stack: Vec<NodeId>,
     layout_revision: u64,
     paint_revision: u64,
     viewport: Option<(Context, Rect, f32)>,
@@ -41,6 +42,7 @@ impl Document {
             rects: Rc::new(HashMap::new()),
             inspector: None,
             inspectable: true,
+            overlay_stack: Vec::new(),
             layout_revision: 0,
             paint_revision: 0,
             viewport: None,
@@ -165,6 +167,13 @@ impl Document {
                 if let Some(root) = self.root {
                     paint::paint(self, &ctx.painter(), &self.rects, root);
                 }
+                for overlay in self.overlay_stack.clone() {
+                    if let Some(content) = self.overlay_content(overlay) {
+                        if self.rects.contains_key(&content) {
+                            paint::paint(self, &ctx.painter(), &self.rects, content);
+                        }
+                    }
+                }
             });
             self.shapes = shapes;
             self.next_paint = Instant::now().checked_add(delay);
@@ -174,6 +183,12 @@ impl Document {
             ctx.request_repaint_after(deadline.saturating_duration_since(Instant::now()));
         }
         ctx.extend(&self.shapes);
+    }
+
+    pub(crate) fn viewport_rect(&self) -> Rect {
+        self.viewport
+            .as_ref()
+            .map_or(Rect::NOTHING, |(_, rect, _)| *rect)
     }
 
     fn update_layout(&mut self, ctx: &Context, rect: Rect) {

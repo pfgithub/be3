@@ -20,6 +20,7 @@ pub(crate) struct ClickCatcherNode {
     pub(crate) on_hover_change: Option<ChangeHandler>,
     pub(crate) on_active_change: Option<ChangeHandler>,
     pub(crate) on_press: Option<Handler<PointerPress>>,
+    pub(crate) on_secondary_press: Option<Handler<PointerPress>>,
     pub(crate) on_drag: Option<Handler<PointerPress>>,
 }
 
@@ -37,6 +38,7 @@ impl ClickCatcherNode {
             on_hover_change: None,
             on_active_change: None,
             on_press: None,
+            on_secondary_press: None,
             on_drag: None,
         }
     }
@@ -116,6 +118,15 @@ impl Element for ClickCatcherNode {
                 if let Some(mut handler) = self.on_press.take() {
                     handler(doc, press);
                     self.on_press = Some(handler);
+                }
+            }
+        }
+        if hovered && input.secondary_pressed_this_frame {
+            if let Some(pos) = input.pointer_pos {
+                let press = self.press(input, rect, pos);
+                if let Some(mut handler) = self.on_secondary_press.take() {
+                    handler(doc, press);
+                    self.on_secondary_press = Some(handler);
                 }
             }
         }
@@ -222,6 +233,16 @@ impl Document {
         self.arena
             .get_mut_as::<ClickCatcherNode>(click_catcher)
             .on_press = Some(Box::new(handler));
+    }
+
+    pub fn set_click_catcher_on_secondary_press(
+        &mut self,
+        click_catcher: NodeId,
+        handler: impl FnMut(&mut Document, PointerPress) + 'static,
+    ) {
+        self.arena
+            .get_mut_as::<ClickCatcherNode>(click_catcher)
+            .on_secondary_press = Some(Box::new(handler));
     }
 
     pub fn set_click_catcher_on_drag(
