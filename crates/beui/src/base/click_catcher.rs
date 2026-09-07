@@ -104,6 +104,10 @@ impl Element for ClickCatcherNode {
         rect: Rect,
         _focus_target: &mut Option<NodeId>,
     ) -> Vec<NodeId> {
+        if !input.pointer_down && !input.released_this_frame {
+            self.armed = false;
+            self.dragged = None;
+        }
         let hovered = input.pointer_pos.is_some_and(|pos| rect.contains(pos));
         if hovered && input.pressed_this_frame {
             self.armed = true;

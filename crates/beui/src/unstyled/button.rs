@@ -125,3 +125,21 @@ pub fn focus_button(document: &mut Document, button: NodeId) {
     let focusable = document.component_state::<State>(button).focusable;
     document.focus_focusable(focusable);
 }
+
+pub fn button_focusable(document: &Document, button: NodeId) -> NodeId {
+    document.component_state::<State>(button).focusable
+}
+
+pub fn set_button_on_key(
+    document: &mut Document,
+    button: NodeId,
+    handler: impl FnMut(&mut Document, crate::input::KeyPress) -> bool + 'static,
+) {
+    let focusable = button_focusable(document, button);
+    document.set_focusable_on_key(focusable, handler);
+}
+
+pub fn set_button_tab_stop(document: &mut Document, button: NodeId, tab_stop: bool) {
+    let focusable = button_focusable(document, button);
+    document.set_focusable_tab_stop(focusable, tab_stop);
+}

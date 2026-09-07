@@ -105,6 +105,7 @@ pub enum PointerButton {
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum Event {
+    Focus(bool),
     Key {
         key: Key,
         pressed: bool,
@@ -158,7 +159,7 @@ impl InputState {
         for event in &raw.events {
             match event {
                 Event::PointerMoved(pos) => self.pointer.pos = Some(*pos),
-                Event::PointerGone => {
+                Event::Focus(false) | Event::PointerGone => {
                     self.pointer.pos = None;
                     self.pointer.primary_down = false;
                 }

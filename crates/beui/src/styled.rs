@@ -27,9 +27,25 @@ pub use scrollbar::scrollbar;
 pub use shortcut::shortcut;
 pub use slider::{set_slider_on_change, set_slider_value, slider, slider_value};
 pub use switch::{set_switch_on, set_switch_on_change, switch, switch_on};
-pub use tabs::{set_tabs_on_change, set_tabs_selected, tabs, tabs_selected};
+pub use tabs::{focus_tabs, set_tabs_on_change, set_tabs_selected, tabs, tabs_selected};
 pub use text::{body, caption, code, display, heading, paragraph, title};
 pub use text_input::{
     focus_text_input, set_text_input_on_change, set_text_input_on_submit,
     set_text_input_placeholder, set_text_input_value, text_input, text_input_value,
+};
+
+mod choice;
+mod listbox;
+mod radio_group;
+mod toggle_button;
+pub use listbox::{
+    focus_listbox, listbox, listbox_selected, set_listbox_on_change, set_listbox_selected,
+};
+pub use radio_group::{
+    focus_radio_group, radio_group, radio_group_selected, set_radio_group_on_change,
+    set_radio_group_selected,
+};
+pub use toggle_button::{
+    focus_toggle_button, set_toggle_button_on_change, set_toggle_button_pressed, toggle_button,
+    toggle_button_pressed,
 };

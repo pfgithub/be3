@@ -9,7 +9,7 @@ const PADDING_HORIZONTAL: f32 = 8.0;
 const PADDING_VERTICAL: f32 = 4.0;
 
 pub fn list_row(document: &mut Document, child: NodeId) -> NodeId {
-    let row = unstyled::pressable(document);
+    let row = unstyled::button(document);
 
     let slot = document.create_slot("content");
     document.set_slot_child(slot, child);
@@ -19,15 +19,20 @@ pub fn list_row(document: &mut Document, child: NodeId) -> NodeId {
 
     let fill = document.create_fill(Color32::TRANSPARENT, RADIUS);
     document.set_fill_child(fill, padding);
-    unstyled::set_pressable_child(document, row, fill);
+    let ring = document.create_outline(crate::styled::theme::ACCENT, 2.0, RADIUS, 0.0);
+    document.set_outline_child(ring, fill);
+    unstyled::set_button_child(document, row, ring);
+    unstyled::set_button_on_focus_change(document, row, move |document, focused| {
+        document.set_outline_visible(ring, focused);
+    });
 
-    unstyled::set_pressable_on_hover_change(document, row, move |document, hovered| {
-        let active = unstyled::pressable_active(document, row);
+    unstyled::set_button_on_hover_change(document, row, move |document, hovered| {
+        let active = unstyled::button_active(document, row);
         document.set_fill_color(fill, background(hovered, active));
     });
 
-    unstyled::set_pressable_on_active_change(document, row, move |document, active| {
-        let hovered = unstyled::pressable_hovered(document, row);
+    unstyled::set_button_on_active_change(document, row, move |document, active| {
+        let hovered = unstyled::button_hovered(document, row);
         document.set_fill_color(fill, background(hovered, active));
     });
 
@@ -40,7 +45,7 @@ pub fn set_list_row_on_click(
     handler: impl FnMut(&mut Document) + 'static,
 ) {
     let row = document.shadow_root(list_row);
-    unstyled::set_pressable_on_click(document, row, handler);
+    unstyled::set_button_on_click(document, row, handler);
 }
 
 fn background(hovered: bool, active: bool) -> Color32 {

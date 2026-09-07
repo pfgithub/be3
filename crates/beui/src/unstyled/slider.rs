@@ -1,4 +1,4 @@
-use crate::input::CursorIcon;
+use crate::input::{CursorIcon, Key};
 
 use crate::document::Document;
 use crate::node::{Handler, NodeId};
@@ -57,6 +57,23 @@ pub fn slider(document: &mut Document, value: f32) -> NodeId {
         set_slider_value(document, slider, value);
     });
 
+    document.set_focusable_on_key(focusable, move |document, press| {
+        if press.modifiers.ctrl || press.modifiers.alt {
+            return false;
+        }
+        let value = slider_value(document, slider);
+        let next = match press.key {
+            Key::Home => 0.0,
+            Key::End => 1.0,
+            Key::PageDown => value - STEP * 4.0,
+            Key::PageUp => value + STEP * 4.0,
+            _ => return false,
+        };
+        if press.pressed {
+            set_slider_value(document, slider, next);
+        }
+        true
+    });
     slider
 }
 

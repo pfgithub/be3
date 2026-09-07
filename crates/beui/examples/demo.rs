@@ -7,7 +7,7 @@ use beui::styled::theme::{
     SURFACE_RAISED, TEXT_MUTED,
 };
 use beui::styled::{self, ButtonVariant};
-use beui::{unstyled, Color32, Context, CursorIcon, Document, ItemSize, NodeId, Rect, TextAlign};
+use beui::{unstyled, Color32, Context, Document, ItemSize, NodeId, Rect, TextAlign};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     beui::run("beui demo", DemoApp::new())
@@ -195,8 +195,13 @@ fn scroll_row(document: &mut Document, index: usize, rows: &Rc<Rows>, compact: b
     let fill = document.create_fill(Color32::TRANSPARENT, RADIUS);
     document.set_fill_child(fill, padding);
 
-    let catcher = document.create_click_catcher(CursorIcon::PointingHand);
-    document.set_click_catcher_child(catcher, fill);
+    let ring = document.create_outline(ACCENT, 2.0, RADIUS, 0.0);
+    document.set_outline_child(ring, fill);
+    let catcher = unstyled::button(document);
+    unstyled::set_button_child(document, catcher, ring);
+    unstyled::set_button_on_focus_change(document, catcher, move |document, focused| {
+        document.set_outline_visible(ring, focused);
+    });
 
     let visual = Rc::new(RowVisual {
         index,
@@ -210,13 +215,13 @@ fn scroll_row(document: &mut Document, index: usize, rows: &Rc<Rows>, compact: b
     visual.apply(document);
 
     let hovered = visual.clone();
-    document.set_click_catcher_on_hover_change(catcher, move |document, is_hovered| {
+    unstyled::set_button_on_hover_change(document, catcher, move |document, is_hovered| {
         hovered.hovered.set(is_hovered);
         hovered.apply(document);
     });
 
     let clicked = visual;
-    document.set_click_catcher_on_click(catcher, move |document| {
+    unstyled::set_button_on_click(document, catcher, move |document| {
         clicked.rows.select(document, clicked.index);
     });
 
@@ -304,8 +309,8 @@ fn build_sidebar(document: &mut Document) -> NodeId {
     let tab = styled::shortcut(document, "Tab", "move focus to the next control");
     let shift_tab = styled::shortcut(document, "Shift+Tab", "move focus back");
     let enter = styled::shortcut(document, "Enter", "activate the focused control");
-    let arrows = styled::shortcut(document, "Arrows", "adjust the focused slider");
-    let wheel = styled::shortcut(document, "Wheel", "scroll the row list");
+    let arrows = styled::shortcut(document, "Arrows", "adjust sliders or move within choices");
+    let wheel = styled::shortcut(document, "Page Up/Down", "scroll the focused row list");
     let typing = styled::shortcut(document, "Ctrl+Z", "undo an edit in a text field");
     let inspect = styled::shortcut(document, "Ctrl+Shift+I", "open the inspector");
     let pick = styled::shortcut(document, "Ctrl+Shift+C", "pick a node to inspect");
@@ -387,16 +392,22 @@ fn build_controls(document: &mut Document, scroll: NodeId, rows: &Rc<Rows>) -> N
     let name_visibility = document.create_visibility(false);
     document.set_visibility_child(name_visibility, name_panel);
 
+    let choices_panel = build_choice_controls(document);
+    let choices_visibility = document.create_visibility(false);
+    document.set_visibility_child(choices_visibility, choices_panel);
+
     let panels = unstyled::column(document, 0.0);
     document.append_child(panels, list_visibility, ItemSize::Intrinsic);
     document.append_child(panels, load_visibility, ItemSize::Intrinsic);
     document.append_child(panels, name_visibility, ItemSize::Intrinsic);
+    document.append_child(panels, choices_visibility, ItemSize::Intrinsic);
 
-    let tabs = styled::tabs(document, &["List", "Load", "Name"], 0);
+    let tabs = styled::tabs(document, &["List", "Load", "Name", "Choices"], 0);
     styled::set_tabs_on_change(document, tabs, move |document, selected| {
         document.set_visible(list_visibility, selected == 0);
         document.set_visible(load_visibility, selected == 1);
         document.set_visible(name_visibility, selected == 2);
+        document.set_visible(choices_visibility, selected == 3);
     });
 
     let column = unstyled::column(document, 16.0);
@@ -487,4 +498,49 @@ fn greeting_label(name: &str) -> String {
 
 fn percent_label(value: f32) -> String {
     format!("{}%", (value * 100.0).round())
+}
+
+fn build_choice_controls(document: &mut Document) -> NodeId {
+    let modes = ["Automatic", "Manual", "Scheduled"];
+    let mode_label = styled::caption(document, "Update mode");
+    let mode = styled::radio_group(document, &modes, Some(0));
+    let mode_status = styled::caption(document, "Automatic updates");
+    styled::set_radio_group_on_change(document, mode, move |document, selected| {
+        if let Some(index) = selected {
+            document.set_text(mode_status, format!("{} updates", modes[index]));
+        }
+    });
+    let colors = ["Amber", "Blue", "Green", "Purple"];
+    let color_label = styled::caption(document, "Highlight color (type to search)");
+    let color = styled::listbox(document, &colors, Some(1));
+    let color_status = styled::caption(document, "Blue selected");
+    styled::set_listbox_on_change(document, color, move |document, selected| {
+        if let Some(index) = selected {
+            document.set_text(color_status, format!("{} selected", colors[index]));
+        }
+    });
+    let pin = styled::toggle_button(document, "Pin selection", false);
+    let pin_status = styled::caption(document, "Selection is unpinned");
+    styled::set_toggle_button_on_change(document, pin, move |document, pressed| {
+        document.set_text(
+            pin_status,
+            if pressed {
+                "Selection is pinned"
+            } else {
+                "Selection is unpinned"
+            },
+        );
+    });
+    let left = unstyled::column(document, 8.0);
+    for child in [mode_label, mode, mode_status, pin, pin_status] {
+        document.append_child(left, child, ItemSize::Intrinsic);
+    }
+    let right = unstyled::column(document, 8.0);
+    for child in [color_label, color, color_status] {
+        document.append_child(right, child, ItemSize::Intrinsic);
+    }
+    let row = unstyled::row(document, 20.0);
+    document.append_child(row, left, ItemSize::Percent(50.0));
+    document.append_child(row, right, ItemSize::Percent(50.0));
+    row
 }

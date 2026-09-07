@@ -1,8 +1,10 @@
 use std::any::Any;
 use std::collections::HashMap;
 
+use crate::base::scroll::ScrollNode;
+use crate::base::visibility::VisibilityNode;
 use crate::geometry::{Rect, Vec2};
-use crate::input::KeyPress;
+use crate::input::{Key, KeyPress};
 use crate::painter::Painter;
 
 use crate::document::Document;
@@ -14,6 +16,7 @@ pub(crate) type KeyHandler = Box<dyn FnMut(&mut Document, KeyPress) -> bool>;
 pub(crate) struct FocusableNode {
     pub(crate) child: Option<NodeId>,
     pub(crate) focused: bool,
+    pub(crate) tab_stop: bool,
     pub(crate) on_focus_change: Option<ChangeHandler>,
     pub(crate) on_activate_change: Option<ChangeHandler>,
     pub(crate) on_activate: Option<ClickHandler>,
@@ -27,6 +30,7 @@ impl FocusableNode {
         Self {
             child: None,
             focused: false,
+            tab_stop: true,
             on_focus_change: None,
             on_activate_change: None,
             on_activate: None,
@@ -161,63 +165,52 @@ impl Document {
         self.arena.get_mut_as::<FocusableNode>(focusable).on_key = Some(Box::new(handler));
     }
 
-    pub(crate) fn text_focused(&mut self, text: &str) {
-        let Some(focused) = self.focused else {
-            return;
-        };
-        let mut element = self.arena.take(focused);
-        let handler = element
-            .as_any_mut()
-            .downcast_mut::<FocusableNode>()
-            .and_then(|focusable| focusable.on_text.take());
-        if let Some(mut handler) = handler {
-            handler(self, text.to_owned());
-            if let Some(focusable) = element.as_any_mut().downcast_mut::<FocusableNode>() {
-                focusable.on_text = Some(handler);
-            }
+    pub fn set_focusable_tab_stop(&mut self, focusable: NodeId, tab_stop: bool) {
+        if self.arena.get_as::<FocusableNode>(focusable).tab_stop != tab_stop {
+            self.arena.get_mut_as::<FocusableNode>(focusable).tab_stop = tab_stop;
         }
-        self.arena.put_back(focused, element);
+    }
+
+    pub fn focused_node(&self) -> Option<NodeId> {
+        self.focused
+    }
+
+    pub(crate) fn text_focused(&mut self, text: &str) {
+        if let Some(focused) = self.focused {
+            self.call_focusable_handler(focused, text.to_owned(), |node| &mut node.on_text);
+        }
     }
 
     pub(crate) fn key_focused(&mut self, press: KeyPress) -> bool {
         let Some(focused) = self.focused else {
             return false;
         };
+        if self.arena.get(focused).as_any().is::<ScrollNode>() {
+            return self.key_scroll(focused, press);
+        }
         let mut element = self.arena.take(focused);
         let handler = element
             .as_any_mut()
             .downcast_mut::<FocusableNode>()
-            .and_then(|focusable| focusable.on_key.take());
-        let consumed = match handler {
-            Some(mut handler) => {
-                let consumed = handler(self, press);
-                if let Some(focusable) = element.as_any_mut().downcast_mut::<FocusableNode>() {
-                    focusable.on_key = Some(handler);
-                }
-                consumed
-            }
-            None => false,
-        };
+            .and_then(|node| node.on_key.take());
         self.arena.put_back(focused, element);
+        let Some(mut handler) = handler else {
+            return false;
+        };
+        let consumed = handler(self, press);
+        if self.contains(focused) {
+            let node = self.arena.get_mut_as::<FocusableNode>(focused);
+            if node.on_key.is_none() {
+                node.on_key = Some(handler);
+            }
+        }
         consumed
     }
 
     pub fn step_focused(&mut self, delta: f32) {
-        let Some(focused) = self.focused else {
-            return;
-        };
-        let mut element = self.arena.take(focused);
-        let step = element
-            .as_any_mut()
-            .downcast_mut::<FocusableNode>()
-            .and_then(|focusable| focusable.on_step.take());
-        if let Some(mut handler) = step {
-            handler(self, delta);
-            if let Some(focusable) = element.as_any_mut().downcast_mut::<FocusableNode>() {
-                focusable.on_step = Some(handler);
-            }
+        if let Some(focused) = self.focused {
+            self.call_focusable_handler(focused, delta, |node| &mut node.on_step);
         }
-        self.arena.put_back(focused, element);
     }
 
     pub fn focus_focusable(&mut self, focusable: NodeId) {
@@ -235,20 +228,30 @@ impl Document {
     fn move_focus(&mut self, step: isize) {
         let order = self.focusables();
         if order.is_empty() {
+            self.update_focus(None);
             return;
         }
         let index = self
             .focused
             .and_then(|focused| order.iter().position(|id| *id == focused));
-        let next = match index {
-            Some(index) => {
-                let count = order.len() as isize;
-                order[(index as isize + step).rem_euclid(count) as usize]
+        let start = index.map_or_else(
+            || if step >= 0 { 0 } else { order.len() - 1 },
+            |index| (index as isize + step).rem_euclid(order.len() as isize) as usize,
+        );
+        for offset in 0..order.len() {
+            let id = order[(start as isize + offset as isize * step)
+                .rem_euclid(order.len() as isize) as usize];
+            let element = self.arena.get(id);
+            if element
+                .as_any()
+                .downcast_ref::<FocusableNode>()
+                .is_none_or(|node| node.tab_stop)
+            {
+                self.update_focus(Some(id));
+                return;
             }
-            None if step >= 0 => order[0],
-            None => order[order.len() - 1],
-        };
-        self.update_focus(Some(next));
+        }
+        self.update_focus(None);
     }
 
     fn focusables(&self) -> Vec<NodeId> {
@@ -261,7 +264,14 @@ impl Document {
 
     fn collect_focusables(&self, id: NodeId, out: &mut Vec<NodeId>) {
         let element = self.arena.get(id);
-        if element.as_any().is::<FocusableNode>() {
+        if element
+            .as_any()
+            .downcast_ref::<VisibilityNode>()
+            .is_some_and(|node| !node.visible)
+        {
+            return;
+        }
+        if element.as_any().is::<FocusableNode>() || element.as_any().is::<ScrollNode>() {
             out.push(id);
         }
         for child in element.children() {
@@ -269,80 +279,125 @@ impl Document {
         }
     }
 
+    pub(crate) fn validate_focus(&mut self) {
+        if self
+            .focused
+            .is_some_and(|id| !self.focusables().contains(&id))
+        {
+            self.update_focus(None);
+        }
+    }
+
     pub(crate) fn update_focus(&mut self, new_focus: Option<NodeId>) {
         if new_focus == self.focused {
             return;
         }
-        if let Some(old) = self.focused {
-            if self.activated == Some(old) {
-                self.activated = None;
-                self.call_focusable_activate(old, false, false);
-            }
+        let old = self.focused;
+        self.cancel_focus_activation();
+        self.focused = new_focus;
+        self.arena.invalidate();
+        if let Some(old) = old {
             self.set_focusable_focused(old, false);
         }
-        if let Some(new) = new_focus {
+        if let Some(new) = self.focused {
             self.set_focusable_focused(new, true);
         }
-        self.focused = new_focus;
     }
 
-    pub(crate) fn set_focus_pressed(&mut self, pressed: bool) {
+    pub(crate) fn cancel_focus_activation(&mut self) {
+        self.activation_key = None;
+        if let Some(activated) = self.activated.take() {
+            self.call_focusable_activate(activated, false, false);
+        }
+    }
+
+    pub(crate) fn set_focus_key_pressed(&mut self, key: Key, pressed: bool, repeat: bool) {
         if pressed {
             let Some(focused) = self.focused else {
                 return;
             };
-            if self.activated.is_some() {
+            if repeat || self.activated.is_some() {
                 return;
             }
             self.activated = Some(focused);
+            self.activation_key = Some(key);
             self.call_focusable_activate(focused, true, false);
-        } else if let Some(activated) = self.activated.take() {
-            self.call_focusable_activate(activated, false, true);
+        } else if self.activation_key == Some(key) {
+            self.activation_key = None;
+            if let Some(activated) = self.activated.take() {
+                self.call_focusable_activate(activated, false, self.focused == Some(activated));
+            }
         }
     }
 
     fn call_focusable_activate(&mut self, id: NodeId, pressed: bool, activate: bool) {
-        let mut element = self.arena.take(id);
-        let change = element
-            .as_any_mut()
-            .downcast_mut::<FocusableNode>()
-            .and_then(|focusable| focusable.on_activate_change.take());
-        if let Some(mut handler) = change {
-            handler(self, pressed);
-            if let Some(focusable) = element.as_any_mut().downcast_mut::<FocusableNode>() {
-                focusable.on_activate_change = Some(handler);
-            }
+        self.call_focusable_handler(id, pressed, |node| &mut node.on_activate_change);
+        if !activate || !self.contains(id) {
+            return;
         }
-        if activate {
-            let activate = element
-                .as_any_mut()
-                .downcast_mut::<FocusableNode>()
-                .and_then(|focusable| focusable.on_activate.take());
-            if let Some(mut handler) = activate {
-                handler(self);
-                if let Some(focusable) = element.as_any_mut().downcast_mut::<FocusableNode>() {
-                    focusable.on_activate = Some(handler);
-                }
-            }
-        }
-        self.arena.put_back(id, element);
-    }
-
-    fn set_focusable_focused(&mut self, id: NodeId, focused: bool) {
         let mut element = self.arena.take(id);
         let handler = element
             .as_any_mut()
             .downcast_mut::<FocusableNode>()
-            .and_then(|focusable| {
-                focusable.focused = focused;
-                focusable.on_focus_change.take()
-            });
+            .and_then(|node| node.on_activate.take());
+        self.arena.put_back(id, element);
         if let Some(mut handler) = handler {
-            handler(self, focused);
-            if let Some(focusable) = element.as_any_mut().downcast_mut::<FocusableNode>() {
-                focusable.on_focus_change = Some(handler);
+            handler(self);
+            if self.contains(id) {
+                let node = self.arena.get_mut_as::<FocusableNode>(id);
+                if node.on_activate.is_none() {
+                    node.on_activate = Some(handler);
+                }
             }
         }
+    }
+
+    fn set_focusable_focused(&mut self, id: NodeId, focused: bool) {
+        if !self.contains(id) {
+            return;
+        }
+        if let Some(node) = self
+            .arena
+            .get_mut(id)
+            .as_any_mut()
+            .downcast_mut::<FocusableNode>()
+        {
+            node.focused = focused;
+        }
+        if let Some(node) = self
+            .arena
+            .get_mut(id)
+            .as_any_mut()
+            .downcast_mut::<ScrollNode>()
+        {
+            node.focused = focused;
+        }
+        self.call_focusable_handler(id, focused, |node| &mut node.on_focus_change);
+    }
+
+    fn call_focusable_handler<V>(
+        &mut self,
+        id: NodeId,
+        value: V,
+        select: impl Fn(&mut FocusableNode) -> &mut Option<Handler<V>>,
+    ) {
+        if !self.contains(id) {
+            return;
+        }
+        let mut element = self.arena.take(id);
+        let handler = element
+            .as_any_mut()
+            .downcast_mut::<FocusableNode>()
+            .and_then(|node| select(node).take());
         self.arena.put_back(id, element);
+        if let Some(mut handler) = handler {
+            handler(self, value);
+            if self.contains(id) {
+                let node = self.arena.get_mut_as::<FocusableNode>(id);
+                if select(node).is_none() {
+                    *select(node) = Some(handler);
+                }
+            }
+        }
     }
 }

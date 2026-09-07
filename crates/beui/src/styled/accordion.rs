@@ -37,7 +37,12 @@ pub fn accordion(document: &mut Document, title: &str, child: NodeId, open: bool
 
     let header = document.create_fill(Color32::TRANSPARENT, RADIUS);
     document.set_fill_child(header, padding);
-    unstyled::set_disclosure_header(document, disclosure, header);
+    let ring = document.create_outline(crate::styled::theme::ACCENT, 2.0, RADIUS, 2.0);
+    document.set_outline_child(ring, header);
+    unstyled::set_disclosure_header(document, disclosure, ring);
+    unstyled::set_disclosure_on_focus_change(document, disclosure, move |document, focused| {
+        document.set_outline_visible(ring, focused);
+    });
 
     let slot = document.create_slot("content");
     document.set_slot_child(slot, child);

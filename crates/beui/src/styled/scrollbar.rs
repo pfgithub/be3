@@ -10,6 +10,7 @@ const RADIUS: u8 = 3;
 const MINIMUM_THUMB: f32 = 0.08;
 
 pub fn scrollbar(document: &mut Document, scroll: NodeId) -> NodeId {
+    document.set_scroll_focus_color(scroll, crate::styled::theme::ACCENT);
     let before = unstyled::spacer(document);
     let thumb = document.create_fill(Color32::TRANSPARENT, RADIUS);
     let after = unstyled::spacer(document);

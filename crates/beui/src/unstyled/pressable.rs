@@ -7,6 +7,8 @@ use crate::node::{ClickHandler, Handler, NodeId};
 struct State {
     hovered: bool,
     active: bool,
+    focused: bool,
+    on_focus_change: Option<Handler<bool>>,
     on_click: Option<ClickHandler>,
     on_hover_change: Option<Handler<bool>>,
     on_active_change: Option<Handler<bool>>,
@@ -17,7 +19,9 @@ pub fn pressable(document: &mut Document) -> NodeId {
     let click_catcher = document.create_click_catcher(CursorIcon::PointingHand);
     document.set_click_catcher_child(click_catcher, slot);
 
-    let pressable = document.create_shadow("pressable", click_catcher, vec![slot]);
+    let focusable = document.create_focusable();
+    document.set_focusable_child(focusable, click_catcher);
+    let pressable = document.create_shadow("pressable", focusable, vec![slot]);
     document.set_component_state(pressable, State::default());
 
     document.set_click_catcher_on_click(click_catcher, move |document| {
@@ -36,6 +40,18 @@ pub fn pressable(document: &mut Document) -> NodeId {
         });
     });
 
+    document.set_focusable_on_focus_change(focusable, move |document, focused| {
+        document.component_state_mut::<State>(pressable).focused = focused;
+        document.call_component_handler(pressable, focused, |state: &mut State| {
+            &mut state.on_focus_change
+        });
+    });
+    document.set_focusable_on_activate_change(focusable, move |document, pressed| {
+        document.set_click_catcher_key_active(click_catcher, pressed);
+    });
+    document.set_focusable_on_activate(focusable, move |document| {
+        document.click_click_catcher(click_catcher);
+    });
     pressable
 }
 
@@ -77,4 +93,23 @@ pub fn set_pressable_on_active_change(
     document
         .component_state_mut::<State>(pressable)
         .on_active_change = Some(Box::new(handler));
+}
+
+pub fn pressable_focused(document: &Document, pressable: NodeId) -> bool {
+    document.component_state::<State>(pressable).focused
+}
+
+pub fn set_pressable_on_focus_change(
+    document: &mut Document,
+    pressable: NodeId,
+    handler: impl FnMut(&mut Document, bool) + 'static,
+) {
+    document
+        .component_state_mut::<State>(pressable)
+        .on_focus_change = Some(Box::new(handler));
+}
+
+pub fn focus_pressable(document: &mut Document, pressable: NodeId) {
+    let focusable = document.shadow_root(pressable);
+    document.focus_focusable(focusable);
 }

@@ -1097,6 +1097,9 @@ impl EditorSession {
                 floating: Vec::new(),
             });
         }
+        if let Some(text) = &output.copied_text {
+            self.copied.push(text.clone());
+        }
         Some(output)
     }
 
@@ -1165,7 +1168,7 @@ impl EditorSession {
                     shift: modifiers.shift,
                 };
             }
-            InputEvent::Focus(false) => state.events.push(beui::Event::PointerGone),
+            InputEvent::Focus(false) => state.events.push(beui::Event::Focus(false)),
             InputEvent::PointerMotion { .. }
             | InputEvent::Zoom { .. }
             | InputEvent::Ime(_)

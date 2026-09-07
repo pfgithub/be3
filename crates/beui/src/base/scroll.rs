@@ -1,3 +1,5 @@
+use crate::color::Color32;
+use crate::input::{Key, KeyPress};
 use std::any::Any;
 use std::collections::HashMap;
 
@@ -39,6 +41,9 @@ pub(crate) struct ScrollNode {
     pub(crate) items: Vec<NodeId>,
     pub(crate) virtual_items: Option<VirtualItems>,
     pub(crate) offset: f32,
+    pub(crate) focused: bool,
+    focus_color: Color32,
+    position: Option<ScrollPosition>,
     anchor: Option<ScrollAnchor>,
     pub(crate) on_change: Option<ScrollHandler>,
     pub(crate) reported: Option<ScrollPosition>,
@@ -50,6 +55,9 @@ impl ScrollNode {
             items: Vec::new(),
             virtual_items: None,
             offset: 0.0,
+            focused: false,
+            focus_color: Color32::WHITE,
+            position: None,
             anchor: None,
             on_change: None,
             reported: None,
@@ -218,6 +226,9 @@ impl Element for ScrollNode {
                 crate::paint::paint(doc, &clipped, rects, *item);
             }
         }
+        if self.focused {
+            painter.rect_stroke(rect.shrink(1.0), 0.0, 2.0, self.focus_color);
+        }
     }
 
     fn interact(
@@ -225,10 +236,13 @@ impl Element for ScrollNode {
         doc: &mut Document,
         painter: &Painter,
         input: &InteractInput,
-        _id: NodeId,
+        id: NodeId,
         rect: Rect,
-        _focus_target: &mut Option<NodeId>,
+        focus_target: &mut Option<NodeId>,
     ) -> Vec<NodeId> {
+        if input.pressed_this_frame && input.pointer_pos.is_some_and(|pos| rect.contains(pos)) {
+            *focus_target = Some(id);
+        }
         let mut position = self.position(doc, painter, rect);
         let anchored_offset = position.offset;
         if input.scroll_delta != 0.0 && input.pointer_pos.is_some_and(|pos| rect.contains(pos)) {
@@ -244,6 +258,7 @@ impl Element for ScrollNode {
         if self.anchor.is_none() || position.offset != anchored_offset || self.items.is_empty() {
             self.remember_anchor(doc, painter, rect.width());
         }
+        self.position = Some(position);
         if self.on_change.is_some() && self.reported != Some(position) {
             self.reported = Some(position);
             if let Some(mut handler) = self.on_change.take() {
@@ -341,5 +356,124 @@ impl Document {
         handler: impl FnMut(&mut Document, ScrollPosition) + 'static,
     ) {
         self.arena.get_mut_as::<ScrollNode>(scroll).on_change = Some(Box::new(handler));
+    }
+}
+
+impl Document {
+    pub fn set_scroll_focus_color(&mut self, scroll: NodeId, color: Color32) {
+        self.arena.get_mut_as::<ScrollNode>(scroll).focus_color = color;
+    }
+
+    pub(crate) fn key_scroll(&mut self, scroll: NodeId, press: KeyPress) -> bool {
+        if press.modifiers.ctrl || press.modifiers.alt {
+            return false;
+        }
+        let Some(position) = self.arena.get_as::<ScrollNode>(scroll).position else {
+            return false;
+        };
+        let offset = match press.key {
+            Key::ArrowDown => position.offset + 40.0,
+            Key::ArrowUp => position.offset - 40.0,
+            Key::PageDown | Key::Space if !press.modifiers.shift => {
+                position.offset + position.viewport
+            }
+            Key::PageUp | Key::Space => position.offset - position.viewport,
+            Key::Home => 0.0,
+            Key::End => position.max_offset(),
+            _ => return false,
+        };
+        if press.pressed {
+            let offset = offset.clamp(0.0, position.max_offset());
+            self.set_scroll_offset(scroll, offset);
+            self.arena.get_mut_as::<ScrollNode>(scroll).position =
+                Some(ScrollPosition { offset, ..position });
+        }
+        true
+    }
+
+    pub(crate) fn key_scroll_ancestor(&mut self, press: KeyPress) -> bool {
+        if !matches!(
+            press.key,
+            Key::ArrowUp | Key::ArrowDown | Key::Home | Key::End | Key::PageUp | Key::PageDown
+        ) {
+            return false;
+        }
+        let (Some(root), Some(focused)) = (self.root, self.focused) else {
+            return false;
+        };
+        if self
+            .arena
+            .get(focused)
+            .as_any()
+            .downcast_ref::<crate::base::focusable::FocusableNode>()
+            .is_some_and(|node| node.on_step.is_some())
+        {
+            return false;
+        }
+        let mut path = Vec::new();
+        if !self.focus_path(root, focused, &mut path) {
+            return false;
+        }
+        for id in path.into_iter().rev().skip(1) {
+            if self.arena.get(id).as_any().is::<ScrollNode>() {
+                return self.key_scroll(id, press);
+            }
+        }
+        false
+    }
+
+    pub(crate) fn reveal_focus(&mut self, painter: &Painter) {
+        let (Some(root), Some(focused)) = (self.root, self.focused) else {
+            return;
+        };
+        let mut path = Vec::new();
+        if !self.focus_path(root, focused, &mut path) {
+            return;
+        }
+        for pair in path.windows(2).rev() {
+            let (scroll, item) = (pair[0], pair[1]);
+            let Some(node) = self.arena.get(scroll).as_any().downcast_ref::<ScrollNode>() else {
+                continue;
+            };
+            let Some(rect) = self.node_rect(scroll) else {
+                continue;
+            };
+            let heights = node.heights(self, painter, rect.width());
+            let Some(index) = node.items.iter().position(|id| *id == item) else {
+                continue;
+            };
+            let top = heights[..index].iter().sum::<f32>() + node.top(0.0);
+            let item_rect = Rect::from_min_size(
+                pos2(rect.left(), rect.top() + top - node.offset),
+                vec2(rect.width(), heights[index]),
+            );
+            let mut rects = HashMap::new();
+            crate::layout::layout(self, painter, item, item_rect, &mut rects);
+            let target = rects.get(&focused).copied().unwrap_or(item_rect);
+            let top = target.top() - rect.top() + node.offset;
+            let bottom = target.bottom() - rect.top() + node.offset;
+            let offset = if top < node.offset {
+                top
+            } else if bottom > node.offset + rect.height() {
+                (bottom - rect.height()).min(top)
+            } else {
+                continue;
+            };
+            self.set_scroll_offset(scroll, offset.max(0.0));
+        }
+    }
+
+    fn focus_path(&self, id: NodeId, focused: NodeId, path: &mut Vec<NodeId>) -> bool {
+        path.push(id);
+        if id == focused {
+            return true;
+        }
+        for child in self.children(id) {
+            if self.focus_path(child, focused, path) {
+                return true;
+            }
+        }
+        path.pop();
+        false
     }
 }

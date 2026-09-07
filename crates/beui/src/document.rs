@@ -18,6 +18,7 @@ pub struct Document {
     pub(crate) root: Option<NodeId>,
     pub(crate) focused: Option<NodeId>,
     pub(crate) activated: Option<NodeId>,
+    pub(crate) activation_key: Option<Key>,
     pub(crate) rects: Rc<HashMap<NodeId, Rect>>,
     pub(crate) inspector: Option<Box<Inspector>>,
     pub(crate) inspectable: bool,
@@ -25,6 +26,7 @@ pub struct Document {
     paint_revision: u64,
     viewport: Option<(Context, Rect, f32)>,
     shapes: Vec<Shape>,
+    pub(crate) copied_text: Option<String>,
     next_paint: Option<Instant>,
 }
 
@@ -35,6 +37,7 @@ impl Document {
             root: None,
             focused: None,
             activated: None,
+            activation_key: None,
             rects: Rc::new(HashMap::new()),
             inspector: None,
             inspectable: true,
@@ -42,6 +45,7 @@ impl Document {
             paint_revision: 0,
             viewport: None,
             shapes: Vec::new(),
+            copied_text: None,
             next_paint: None,
         }
     }
@@ -149,6 +153,9 @@ impl Document {
             }
         }
 
+        if let Some(text) = self.copied_text.take() {
+            ctx.copy_text(text);
+        }
         self.update_layout(ctx, rect);
         let now = Instant::now();
         if self.paint_revision != self.arena.revision

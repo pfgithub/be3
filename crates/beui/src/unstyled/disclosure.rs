@@ -1,4 +1,4 @@
-use crate::input::CursorIcon;
+use crate::unstyled;
 
 use crate::base::{Direction, ItemSize};
 use crate::document::Document;
@@ -6,6 +6,7 @@ use crate::node::{Handler, NodeId};
 
 struct State {
     visibility: NodeId,
+    button: NodeId,
     open: bool,
     hovered: bool,
     on_toggle: Option<Handler<bool>>,
@@ -14,15 +15,15 @@ struct State {
 
 pub fn disclosure(document: &mut Document, spacing: f32, open: bool) -> NodeId {
     let header = document.create_slot("header");
-    let click_catcher = document.create_click_catcher(CursorIcon::PointingHand);
-    document.set_click_catcher_child(click_catcher, header);
+    let button = unstyled::button(document);
+    unstyled::set_button_child(document, button, header);
 
     let content = document.create_slot("content");
     let visibility = document.create_visibility(open);
     document.set_visibility_child(visibility, content);
 
     let column = document.create_list(Direction::Vertical, spacing);
-    document.append_child(column, click_catcher, ItemSize::Intrinsic);
+    document.append_child(column, button, ItemSize::Intrinsic);
     document.append_child(column, visibility, ItemSize::Intrinsic);
 
     let disclosure = document.create_shadow("disclosure", column, vec![header, content]);
@@ -31,6 +32,7 @@ pub fn disclosure(document: &mut Document, spacing: f32, open: bool) -> NodeId {
         disclosure,
         State {
             visibility,
+            button,
             open,
             hovered: false,
             on_toggle: None,
@@ -38,11 +40,11 @@ pub fn disclosure(document: &mut Document, spacing: f32, open: bool) -> NodeId {
         },
     );
 
-    document.set_click_catcher_on_click(click_catcher, move |document| {
+    unstyled::set_button_on_click(document, button, move |document| {
         let open = disclosure_open(document, disclosure);
         set_disclosure_open(document, disclosure, !open);
     });
-    document.set_click_catcher_on_hover_change(click_catcher, move |document, hovered| {
+    unstyled::set_button_on_hover_change(document, button, move |document, hovered| {
         document.component_state_mut::<State>(disclosure).hovered = hovered;
         document.call_component_handler(disclosure, hovered, |state: &mut State| {
             &mut state.on_hover_change
@@ -106,4 +108,18 @@ pub fn set_disclosure_on_hover_change(
     document
         .component_state_mut::<State>(disclosure)
         .on_hover_change = Some(Box::new(handler));
+}
+
+pub fn set_disclosure_on_focus_change(
+    document: &mut Document,
+    disclosure: NodeId,
+    handler: impl FnMut(&mut Document, bool) + 'static,
+) {
+    let button = document.component_state::<State>(disclosure).button;
+    unstyled::set_button_on_focus_change(document, button, handler);
+}
+
+pub fn focus_disclosure(document: &mut Document, disclosure: NodeId) {
+    let button = document.component_state::<State>(disclosure).button;
+    unstyled::focus_button(document, button);
 }

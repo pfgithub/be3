@@ -16,6 +16,7 @@ struct Inner {
     fonts: RefCell<Fonts>,
     input: RefCell<InputState>,
     shapes: RefCell<Vec<Shape>>,
+    copied_text: RefCell<Option<String>>,
     cursor_icon: Cell<CursorIcon>,
     repaint: Cell<bool>,
     repaint_after: Cell<Duration>,
@@ -25,6 +26,7 @@ struct Inner {
 pub struct FrameOutput {
     pub(crate) shapes: Vec<Shape>,
     pub cursor_icon: CursorIcon,
+    pub copied_text: Option<String>,
     pub repaint: bool,
     pub repaint_after: Duration,
     pub changed: bool,
@@ -47,6 +49,7 @@ impl Context {
                 fonts: RefCell::new(Fonts::new(sources)),
                 input: RefCell::new(InputState::default()),
                 shapes: RefCell::new(Vec::new()),
+                copied_text: RefCell::new(None),
                 cursor_icon: Cell::new(CursorIcon::Default),
                 repaint: Cell::new(false),
                 repaint_after: Cell::new(Duration::MAX),
@@ -58,6 +61,7 @@ impl Context {
     pub fn begin_frame(&self, raw: RawInput) {
         self.inner.input.borrow_mut().begin_frame(raw);
         self.inner.shapes.borrow_mut().clear();
+        self.inner.copied_text.borrow_mut().take();
         self.inner.cursor_icon.set(CursorIcon::Default);
         self.inner.repaint.set(false);
         self.inner.repaint_after.set(Duration::MAX);
@@ -75,6 +79,7 @@ impl Context {
         }
         FrameOutput {
             shapes,
+            copied_text: self.inner.copied_text.borrow_mut().take(),
             changed,
             repaint_after: self.inner.repaint_after.get(),
             cursor_icon: self.inner.cursor_icon.get(),
@@ -94,6 +99,10 @@ impl Context {
 
     pub fn painter(&self) -> Painter {
         Painter::new(self.clone(), Rect::EVERYTHING)
+    }
+
+    pub fn copy_text(&self, text: String) {
+        *self.inner.copied_text.borrow_mut() = Some(text);
     }
 
     pub fn set_cursor_icon(&self, cursor_icon: CursorIcon) {

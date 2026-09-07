@@ -2,8 +2,8 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use text_editor_core::{
-    Core, CursorLeftRightStop, DragSelectionMode, EditorCommand, LRDirection, MoveMode, TextBuffer,
-    TextLanguage,
+    CopyMode, Core, CursorLeftRightStop, DragSelectionMode, EditorCommand, LRDirection, MoveMode,
+    TextBuffer, TextLanguage,
 };
 
 use crate::color::Color32;
@@ -362,6 +362,18 @@ fn key(document: &mut Document, input: NodeId, press: KeyPress) -> bool {
                 stop,
             },
         ),
+        Key::C | Key::X if modifiers.ctrl && !modifiers.alt => {
+            let state = document.component_state_mut::<State>(input);
+            if !selection(&state.core).is_empty() {
+                let mode = if press.key == Key::X {
+                    CopyMode::Cut
+                } else {
+                    CopyMode::Copy
+                };
+                document.copied_text = Some(state.core.copy_utf8(mode));
+                show(document, input);
+            }
+        }
         Key::A if modifiers.ctrl => command(document, input, EditorCommand::SelectAll),
         Key::Z if modifiers.ctrl && modifiers.shift => {
             command(document, input, EditorCommand::Redo);

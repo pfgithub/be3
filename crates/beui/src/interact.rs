@@ -32,10 +32,17 @@ pub(crate) fn interact(
         doc.update_focus(focus_target);
     }
 
+    doc.validate_focus();
     for event in ctx.input(|input| input.events.clone()) {
+        doc.validate_focus();
         let (key, pressed, repeat, modifiers) = match event {
+            Event::Focus(false) => {
+                doc.cancel_focus_activation();
+                continue;
+            }
             Event::Text(text) => {
                 doc.text_focused(&text);
+                doc.reveal_focus(painter);
                 continue;
             }
             Event::Key {
@@ -46,28 +53,42 @@ pub(crate) fn interact(
             } => (key, pressed, repeat, modifiers),
             _ => continue,
         };
-        if doc.key_focused(KeyPress {
+        let press = KeyPress {
             key,
             pressed,
             repeat,
             modifiers,
-        }) {
+        };
+        if doc.key_focused(press) {
+            doc.reveal_focus(painter);
+            continue;
+        }
+        if doc.key_scroll_ancestor(press) {
             continue;
         }
         match key {
-            Key::Tab if pressed => {
+            Key::Tab if pressed && !modifiers.ctrl && !modifiers.alt => {
                 if modifiers.shift {
                     doc.focus_previous();
                 } else {
                     doc.focus_next();
                 }
             }
-            Key::Enter | Key::Space => doc.set_focus_pressed(pressed),
-            Key::ArrowLeft | Key::ArrowDown if pressed => doc.step_focused(-1.0),
-            Key::ArrowRight | Key::ArrowUp if pressed => doc.step_focused(1.0),
+            Key::Escape if pressed => doc.cancel_focus_activation(),
+            Key::Enter | Key::Space if !pressed || (!modifiers.ctrl && !modifiers.alt) => {
+                doc.set_focus_key_pressed(key, pressed, repeat);
+            }
+            Key::ArrowLeft | Key::ArrowDown if pressed && !modifiers.ctrl && !modifiers.alt => {
+                doc.step_focused(-1.0)
+            }
+            Key::ArrowRight | Key::ArrowUp if pressed && !modifiers.ctrl && !modifiers.alt => {
+                doc.step_focused(1.0)
+            }
             _ => {}
         }
+        doc.reveal_focus(painter);
     }
+    doc.validate_focus();
 }
 
 fn interact_node(

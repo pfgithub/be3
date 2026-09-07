@@ -1,0 +1,42 @@
+use super::*;
+
+#[test]
+fn every_styled_interactive_control_paints_a_keyboard_focus_ring() {
+    let builders: &[fn(&mut Document) -> NodeId] = &[
+        |doc| styled::button(doc, "Button", styled::ButtonVariant::Primary),
+        |doc| styled::checkbox(doc, "Check", false),
+        |doc| styled::switch(doc, false),
+        |doc| styled::slider(doc, 0.5),
+        |doc| styled::text_input(doc, "Text"),
+        |doc| styled::tabs(doc, &["One", "Two"], 0),
+        |doc| styled::radio_group(doc, &["One", "Two"], Some(0)),
+        |doc| styled::listbox(doc, &["One", "Two"], Some(0)),
+        |doc| styled::toggle_button(doc, "Toggle", false),
+        |doc| {
+            let text = styled::body(doc, "Content");
+            styled::accordion(doc, "Header", text, false)
+        },
+        |doc| {
+            let text = styled::body(doc, "Row");
+            styled::list_row(doc, text)
+        },
+    ];
+    for build in builders {
+        let mut document = Document::new();
+        let control = build(&mut document);
+        toolbar(&mut document, &[control]);
+        let mut harness = Harness::new(document);
+        let initial = harness.frame(vec![]);
+        let focused = harness.frame(vec![key_event(Key::Tab, true, Modifiers::NONE)]);
+        let rings = |output: &crate::FrameOutput| {
+            output.shapes().iter().filter(|shape| matches!(shape,
+            crate::Shape::Rect { color, stroke_width, .. } if *color == styled::theme::ACCENT && *stroke_width == 2.0
+        )).count()
+        };
+        assert!(
+            rings(&focused) > rings(&initial),
+            "{} has no focus ring",
+            harness.document.node_kind(control)
+        );
+    }
+}

@@ -9,7 +9,9 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{Window, WindowId};
 
+use self::clipboard::Clipboard;
 use crate::color::Color32;
+mod clipboard;
 use crate::context::Context;
 use crate::geometry::{pos2, vec2, Pos2, Rect, Vec2};
 use crate::input::{CursorIcon, Event, Key, Modifiers, PointerButton, RawInput};
@@ -39,6 +41,7 @@ pub fn run(title: impl Into<String>, app: impl App + 'static) -> Result<(), Box<
         pointer: Pos2::ZERO,
         error: None,
         next_update: None,
+        clipboard: Clipboard::new(),
     };
     event_loop.run_app(&mut runner)?;
     match runner.error {
@@ -69,6 +72,7 @@ struct Runner {
     pointer: Pos2,
     error: Option<String>,
     next_update: Option<Instant>,
+    clipboard: Clipboard,
 }
 
 impl Runner {
@@ -112,6 +116,9 @@ impl Runner {
             app.update(context, Rect::from_min_size(Pos2::ZERO, screen));
         });
 
+        if let Some(text) = &output.copied_text {
+            self.clipboard.set(text.clone());
+        }
         if output.cursor_icon != surface.cursor_icon {
             surface.cursor_icon = output.cursor_icon;
             surface.window.set_cursor(cursor(output.cursor_icon));
@@ -245,11 +252,12 @@ impl ApplicationHandler for Runner {
                     surface.window.request_redraw();
                 }
             }
+            WindowEvent::Focused(focused) => self.push(Event::Focus(focused)),
             WindowEvent::ModifiersChanged(modifiers) => {
                 let state = modifiers.state();
                 self.modifiers = Modifiers {
                     alt: state.alt_key(),
-                    ctrl: state.control_key(),
+                    ctrl: state.control_key() || state.super_key(),
                     shift: state.shift_key(),
                 };
             }
@@ -281,6 +289,15 @@ impl ApplicationHandler for Runner {
             WindowEvent::KeyboardInput { event, .. } => {
                 let pressed = event.state == ElementState::Pressed;
                 if let PhysicalKey::Code(code) = event.physical_key {
+                    if pressed
+                        && code == KeyCode::KeyV
+                        && self.modifiers.ctrl
+                        && !self.modifiers.alt
+                    {
+                        if let Some(text) = self.clipboard.get() {
+                            self.push(Event::Text(text));
+                        }
+                    }
                     if let Some(key) = key(code) {
                         self.push(Event::Key {
                             key,
