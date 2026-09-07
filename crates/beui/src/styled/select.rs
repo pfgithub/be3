@@ -10,6 +10,7 @@ use crate::unstyled;
 
 const TRIGGER_WIDTH: f32 = 220.0;
 const POPUP_WIDTH: f32 = 220.0;
+const POPUP_PADDING: f32 = 6.0;
 const HEIGHT: f32 = 34.0;
 const PADDING_HORIZONTAL: f32 = 10.0;
 const OPTION_PADDING_VERTICAL: f32 = 6.0;
@@ -105,8 +106,10 @@ pub fn select(document: &mut Document, options: &[String], selected: Option<usiz
     let popup = document
         .overlay_content(unstyled::select_overlay(document, inner))
         .expect("select popup always has content");
+    let popup_padding = document.create_padding(POPUP_PADDING, POPUP_PADDING);
+    document.set_padding_child(popup_padding, popup);
     let popup_fill = document.create_fill(SURFACE_RAISED, RADIUS);
-    document.set_fill_child(popup_fill, popup);
+    document.set_fill_child(popup_fill, popup_padding);
     let popup_border = document.create_outline(BORDER, BORDER_WIDTH, RADIUS, 0.0);
     document.set_outline_visible(popup_border, true);
     document.set_outline_child(popup_border, popup_fill);

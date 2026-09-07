@@ -28,7 +28,12 @@ fn right_click_opens_a_context_menu_at_the_cursor_position() {
     let inner = harness.document().shadow_root(menu);
     let content = unstyled::context_menu_menu(harness.document(), inner);
     assert_eq!(unstyled::menu_list_len(harness.document(), content), 2);
-    let content_rect = harness.rect(content);
-    assert!((content_rect.left() - pos.x).abs() < 0.5);
-    assert!((content_rect.top() - pos.y).abs() < 0.5);
+    let overlay = unstyled::context_menu_overlay(harness.document(), inner);
+    let panel = harness
+        .document()
+        .overlay_content(overlay)
+        .expect("open context menu has content");
+    let panel_rect = harness.rect(panel);
+    assert!((panel_rect.left() - pos.x).abs() < 0.5);
+    assert!((panel_rect.top() - pos.y).abs() < 0.5);
 }

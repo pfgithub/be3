@@ -34,7 +34,7 @@ pub fn select(document: &mut Document, options: &[String], selected: Option<usiz
 
     let search = unstyled::text_input(document, "");
     let list = document.create_scroll();
-    let popup = unstyled::column(document, 0.0);
+    let popup = unstyled::column(document, 6.0);
     document.append_child(popup, search, ItemSize::Intrinsic);
     document.append_child(popup, list, ItemSize::Fixed(OPTIONS_MAX_HEIGHT));
 
@@ -67,6 +67,9 @@ pub fn select(document: &mut Document, options: &[String], selected: Option<usiz
 
     unstyled::set_button_on_click(document, trigger, move |document| {
         open(document, select);
+    });
+    unstyled::set_button_on_key(document, trigger, move |document, press| {
+        trigger_key(document, select, press)
     });
     document.set_overlay_on_dismiss(overlay, move |document| {
         unstyled::focus_button(document, trigger);
@@ -225,6 +228,27 @@ fn set_highlighted(document: &mut Document, select: NodeId, highlighted: Option<
     document.call_component_handler(select, highlighted, |state: &mut State| {
         &mut state.on_highlight_change
     });
+}
+
+fn trigger_key(document: &mut Document, select: NodeId, press: KeyPress) -> bool {
+    if press.modifiers.ctrl || press.modifiers.alt {
+        return false;
+    }
+    if !matches!(
+        press.key,
+        Key::ArrowDown | Key::ArrowUp | Key::Home | Key::End
+    ) {
+        return false;
+    }
+    let overlay = document.component_state::<State>(select).overlay;
+    if document.is_overlay_open(overlay) {
+        return false;
+    }
+    if press.pressed {
+        open(document, select);
+        navigate(document, select, press);
+    }
+    true
 }
 
 fn open(document: &mut Document, select: NodeId) {

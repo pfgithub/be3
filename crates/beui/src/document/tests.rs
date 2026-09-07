@@ -1,7 +1,9 @@
 use super::*;
 
 mod a_virtual_scroll_only_builds_the_items_in_view;
+mod arrow_down_on_a_closed_select_trigger_opens_it_and_highlights_the_first_option;
 mod arrow_keys_in_a_select_search_box_move_the_highlighted_option_without_editing_the_search_text;
+mod arrow_keys_move_a_visible_highlight_through_an_open_context_menu;
 mod arrow_keys_step_the_focused_slider;
 mod backspace_deletes_the_character_before_the_caret;
 mod clicking_a_checkbox_toggles_it;

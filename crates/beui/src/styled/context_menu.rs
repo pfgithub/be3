@@ -3,13 +3,14 @@ use crate::color::Color32;
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::styled::theme::{
-    BORDER, BORDER_WIDTH, FONT_BODY, RADIUS, SURFACE_RAISED, TEXT, TEXT_MUTED,
+    ACCENT_SOFT, BORDER, BORDER_WIDTH, FONT_BODY, RADIUS, SURFACE_RAISED, TEXT, TEXT_MUTED,
 };
 use crate::unstyled;
 use crate::unstyled::MenuItem;
 
 const PADDING_HORIZONTAL: f32 = 14.0;
 const PADDING_VERTICAL: f32 = 6.0;
+const MENU_PADDING: f32 = 4.0;
 const MENU_WIDTH: f32 = 200.0;
 
 pub fn context_menu(document: &mut Document, region: NodeId, items: Vec<MenuItem>) -> NodeId {
@@ -44,8 +45,10 @@ fn style_menu_panel(document: &mut Document, overlay: NodeId, items: &[MenuItem]
         .expect("menu overlay always has content");
     style_menu_rows(document, menu, items);
 
+    let padding = document.create_padding(MENU_PADDING, MENU_PADDING);
+    document.set_padding_child(padding, menu);
     let fill = document.create_fill(SURFACE_RAISED, RADIUS);
-    document.set_fill_child(fill, menu);
+    document.set_fill_child(fill, padding);
     let border = document.create_outline(BORDER, BORDER_WIDTH, RADIUS, 0.0);
     document.set_outline_visible(border, true);
     document.set_outline_child(border, fill);
@@ -68,14 +71,12 @@ fn style_menu_rows(document: &mut Document, menu: NodeId, items: &[MenuItem]) {
         unstyled::set_button_child(document, button, fill);
 
         unstyled::set_button_on_hover_change(document, button, move |document, hovered| {
-            document.set_fill_color(
-                fill,
-                if hovered {
-                    BORDER
-                } else {
-                    Color32::TRANSPARENT
-                },
-            );
+            let focused = unstyled::button_focused(document, button);
+            document.set_fill_color(fill, row_background(focused, hovered));
+        });
+        unstyled::set_button_on_focus_change(document, button, move |document, focused| {
+            let hovered = unstyled::button_hovered(document, button);
+            document.set_fill_color(fill, row_background(focused, hovered));
         });
 
         if !item.children.is_empty() {
@@ -83,5 +84,13 @@ fn style_menu_rows(document: &mut Document, menu: NodeId, items: &[MenuItem]) {
                 style_menu_panel(document, overlay, &item.children);
             }
         }
+    }
+}
+
+fn row_background(focused: bool, hovered: bool) -> Color32 {
+    match (focused, hovered) {
+        (true, _) => ACCENT_SOFT,
+        (false, true) => BORDER,
+        (false, false) => Color32::TRANSPARENT,
     }
 }
