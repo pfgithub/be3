@@ -2,7 +2,7 @@ use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::ops::Range;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::color::Color32;
 use crate::font::{FontId, Galley};
@@ -13,7 +13,7 @@ use crate::document::Document;
 use crate::node::{Element, InteractInput, NodeId};
 
 const CARET_WIDTH: f32 = 1.0;
-const BLINK_INTERVAL: f32 = 0.53;
+const BLINK_INTERVAL: Duration = Duration::from_millis(530);
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum TextAlign {
@@ -135,7 +135,7 @@ impl TextNode {
     }
 
     fn caret_shown(&self) -> bool {
-        let phase = (self.blink.elapsed().as_secs_f32() / BLINK_INTERVAL) as u32;
+        let phase = (self.blink.elapsed().as_secs_f64() / BLINK_INTERVAL.as_secs_f64()) as u32;
         phase.is_multiple_of(2)
     }
 
@@ -199,7 +199,11 @@ impl Element for TextNode {
                     self.caret_color,
                 );
             }
-            painter.ctx().request_repaint();
+            let elapsed = self.blink.elapsed().as_nanos();
+            let remaining = BLINK_INTERVAL.as_nanos() - elapsed % BLINK_INTERVAL.as_nanos();
+            painter
+                .ctx()
+                .request_repaint_after(Duration::from_nanos(remaining as u64));
         }
     }
 
@@ -265,7 +269,10 @@ impl Document {
     }
 
     pub fn set_text(&mut self, id: NodeId, content: impl Into<String>) {
-        self.arena.get_mut_as::<TextNode>(id).content = content.into();
+        let value = content.into();
+        if self.arena.get_as::<TextNode>(id).content != value {
+            self.arena.get_mut_as::<TextNode>(id).content = value;
+        }
     }
 
     pub fn text(&self, id: NodeId) -> &str {
@@ -273,55 +280,83 @@ impl Document {
     }
 
     pub fn set_text_align(&mut self, text: NodeId, horizontal: TextAlign, vertical: TextAlign) {
+        let node = self.arena.get_as::<TextNode>(text);
+        if node.horizontal == horizontal && node.vertical == vertical {
+            return;
+        }
         let node = self.arena.get_mut_as::<TextNode>(text);
         node.horizontal = horizontal;
         node.vertical = vertical;
     }
 
     pub fn set_text_wrap(&mut self, text: NodeId, wrap: bool) {
-        self.arena.get_mut_as::<TextNode>(text).wrap = wrap;
+        if self.arena.get_as::<TextNode>(text).wrap != wrap {
+            self.arena.get_mut_as::<TextNode>(text).wrap = wrap;
+        }
     }
 
     pub fn set_text_font_size(&mut self, text: NodeId, font_size: f32) {
-        self.arena.get_mut_as::<TextNode>(text).font_size = font_size;
+        if self.arena.get_as::<TextNode>(text).font_size != font_size {
+            self.arena.get_mut_as::<TextNode>(text).font_size = font_size;
+        }
     }
 
     pub fn set_text_monospace(&mut self, text: NodeId, monospace: bool) {
-        self.arena.get_mut_as::<TextNode>(text).monospace = monospace;
+        if self.arena.get_as::<TextNode>(text).monospace != monospace {
+            self.arena.get_mut_as::<TextNode>(text).monospace = monospace;
+        }
     }
 
     pub fn set_text_color(&mut self, text: NodeId, color: Color32) {
-        self.arena.get_mut_as::<TextNode>(text).color = color;
+        if self.arena.get_as::<TextNode>(text).color != color {
+            self.arena.get_mut_as::<TextNode>(text).color = color;
+        }
     }
 
     pub fn set_text_placeholder(&mut self, text: NodeId, placeholder: impl Into<String>) {
-        self.arena.get_mut_as::<TextNode>(text).placeholder = placeholder.into();
+        let value = placeholder.into();
+        if self.arena.get_as::<TextNode>(text).placeholder != value {
+            self.arena.get_mut_as::<TextNode>(text).placeholder = value;
+        }
     }
 
     pub fn set_text_placeholder_color(&mut self, text: NodeId, color: Color32) {
-        self.arena.get_mut_as::<TextNode>(text).placeholder_color = color;
+        if self.arena.get_as::<TextNode>(text).placeholder_color != color {
+            self.arena.get_mut_as::<TextNode>(text).placeholder_color = color;
+        }
     }
 
     pub fn set_text_selection_color(&mut self, text: NodeId, color: Color32) {
-        self.arena.get_mut_as::<TextNode>(text).selection_color = color;
+        if self.arena.get_as::<TextNode>(text).selection_color != color {
+            self.arena.get_mut_as::<TextNode>(text).selection_color = color;
+        }
     }
 
     pub fn set_text_caret_color(&mut self, text: NodeId, color: Color32) {
-        self.arena.get_mut_as::<TextNode>(text).caret_color = color;
+        if self.arena.get_as::<TextNode>(text).caret_color != color {
+            self.arena.get_mut_as::<TextNode>(text).caret_color = color;
+        }
     }
 
     pub fn set_text_clip(&mut self, text: NodeId, clip: bool) {
-        self.arena.get_mut_as::<TextNode>(text).clip = clip;
+        if self.arena.get_as::<TextNode>(text).clip != clip {
+            self.arena.get_mut_as::<TextNode>(text).clip = clip;
+        }
     }
 
     pub fn set_text_caret(&mut self, text: NodeId, caret: Option<usize>) {
+        if caret.is_none() && self.arena.get_as::<TextNode>(text).caret.is_none() {
+            return;
+        }
         let node = self.arena.get_mut_as::<TextNode>(text);
         node.caret = caret;
         node.blink = Instant::now();
     }
 
     pub fn set_text_selection(&mut self, text: NodeId, selection: Vec<Range<usize>>) {
-        self.arena.get_mut_as::<TextNode>(text).selection = selection;
+        if self.arena.get_as::<TextNode>(text).selection != selection {
+            self.arena.get_mut_as::<TextNode>(text).selection = selection;
+        }
     }
 
     pub fn text_index_at(&self, text: NodeId, pos: Pos2) -> usize {

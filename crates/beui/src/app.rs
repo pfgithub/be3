@@ -1,5 +1,6 @@
 use std::error::Error;
 use std::sync::Arc;
+use std::time::Instant;
 
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalPosition};
@@ -37,6 +38,7 @@ pub fn run(title: impl Into<String>, app: impl App + 'static) -> Result<(), Box<
         modifiers: Modifiers::NONE,
         pointer: Pos2::ZERO,
         error: None,
+        next_update: None,
     };
     event_loop.run_app(&mut runner)?;
     match runner.error {
@@ -53,6 +55,8 @@ struct Surface {
     config: wgpu::SurfaceConfiguration,
     renderer: Renderer,
     cursor_icon: CursorIcon,
+    prepared_size: Option<(Vec2, f32)>,
+    clear_color: Option<Color32>,
 }
 
 struct Runner {
@@ -64,6 +68,7 @@ struct Runner {
     modifiers: Modifiers,
     pointer: Pos2,
     error: Option<String>,
+    next_update: Option<Instant>,
 }
 
 impl Runner {
@@ -74,9 +79,6 @@ impl Runner {
 
     fn push(&mut self, event: Event) {
         self.events.push(event);
-        if let Some(surface) = &self.surface {
-            surface.window.request_redraw();
-        }
     }
 
     fn logical(&self, position: PhysicalPosition<f64>) -> Pos2 {
@@ -87,12 +89,14 @@ impl Runner {
         pos2((position.x / scale) as f32, (position.y / scale) as f32)
     }
 
-    fn redraw(&mut self) {
+    fn update(&mut self) -> bool {
         let Some(surface) = &mut self.surface else {
-            return;
+            return false;
         };
         if surface.config.width == 0 || surface.config.height == 0 {
-            return;
+            self.events.clear();
+            self.next_update = None;
+            return false;
         }
 
         let scale = surface.window.scale_factor() as f32;
@@ -113,15 +117,36 @@ impl Runner {
             surface.window.set_cursor(cursor(output.cursor_icon));
         }
 
-        surface
-            .renderer
-            .prepare(&surface.device, &surface.queue, &output, physical, scale);
+        let size = (physical, scale);
+        let changed = output.changed || surface.prepared_size != Some(size);
+        if changed {
+            surface
+                .renderer
+                .prepare(&surface.device, &surface.queue, &output, physical, scale);
+            surface.prepared_size = Some(size);
+        }
+        let clear_color = self.app.clear_color();
+        let changed = changed || surface.clear_color != Some(clear_color);
+        surface.clear_color = Some(clear_color);
+        self.next_update = Instant::now().checked_add(output.repaint_after);
+        changed
+    }
+
+    fn redraw(&mut self) {
+        self.update();
+        let Some(surface) = &mut self.surface else {
+            return;
+        };
+        if surface.config.width == 0 || surface.config.height == 0 {
+            return;
+        }
 
         let frame = match surface.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(frame)
             | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => frame,
             wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
                 surface.surface.configure(&surface.device, &surface.config);
+                surface.window.request_redraw();
                 return;
             }
             _ => return,
@@ -155,14 +180,27 @@ impl Runner {
         }
         surface.queue.submit(Some(encoder.finish()));
         frame.present();
-
-        if output.repaint {
-            surface.window.request_redraw();
-        }
     }
 }
 
 impl ApplicationHandler for Runner {
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        if (!self.events.is_empty()
+            || self
+                .next_update
+                .is_some_and(|deadline| deadline <= Instant::now()))
+            && self.update()
+        {
+            if let Some(surface) = &self.surface {
+                surface.window.request_redraw();
+            }
+        }
+        event_loop.set_control_flow(match self.next_update {
+            Some(deadline) => ControlFlow::WaitUntil(deadline),
+            None => ControlFlow::Wait,
+        });
+    }
+
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.surface.is_some() {
             return;
@@ -305,6 +343,8 @@ async fn create_surface(window: Arc<Window>) -> Result<Surface, Box<dyn Error>> 
         config,
         renderer,
         cursor_icon: CursorIcon::Default,
+        prepared_size: None,
+        clear_color: None,
     })
 }
 

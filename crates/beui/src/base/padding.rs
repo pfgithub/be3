@@ -96,10 +96,16 @@ impl Document {
     }
 
     pub fn set_padding_child(&mut self, padding: NodeId, child: NodeId) {
-        self.arena.get_mut_as::<PaddingNode>(padding).child = Some(child);
+        if self.arena.get_as::<PaddingNode>(padding).child != Some(child) {
+            self.arena.get_mut_as::<PaddingNode>(padding).child = Some(child);
+        }
     }
 
     pub fn set_padding(&mut self, padding: NodeId, horizontal: f32, vertical: f32) {
+        let node = self.arena.get_as::<PaddingNode>(padding);
+        if node.horizontal == horizontal && node.vertical == vertical {
+            return;
+        }
         let node = self.arena.get_mut_as::<PaddingNode>(padding);
         node.horizontal = horizontal;
         node.vertical = vertical;

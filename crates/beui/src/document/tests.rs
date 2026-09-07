@@ -84,16 +84,16 @@ impl Harness {
         }
     }
 
-    pub(crate) fn frame(&mut self, events: Vec<Event>) {
+    pub(crate) fn frame(&mut self, events: Vec<Event>) -> crate::FrameOutput {
         let Self {
             context,
             document,
             viewport,
         } = self;
         let input = RawInput { events };
-        let _ = context.run(input, |context| {
+        context.run(input, |context| {
             document.show(context, Rect::from_min_size(Pos2::ZERO, *viewport));
-        });
+        })
     }
 
     pub(crate) fn click(&mut self, pos: Pos2) {
@@ -275,3 +275,82 @@ pub(crate) fn toolbar(document: &mut Document, buttons: &[NodeId]) -> NodeId {
     document.set_root(list);
     list
 }
+
+use crate::node::{Element, InteractInput};
+use crate::painter::Painter;
+use std::any::Any;
+use std::time::{Duration, Instant};
+
+struct Counted {
+    inner: Box<dyn Element>,
+    layouts: Rc<Cell<usize>>,
+    paints: Rc<Cell<usize>>,
+}
+
+impl Element for Counted {
+    fn measure(&self, doc: &Document, painter: &Painter, available: Vec2) -> Vec2 {
+        self.inner.measure(doc, painter, available)
+    }
+
+    fn layout(
+        &self,
+        doc: &Document,
+        painter: &Painter,
+        rect: Rect,
+        out: &mut HashMap<NodeId, Rect>,
+    ) {
+        self.layouts.set(self.layouts.get() + 1);
+        self.inner.layout(doc, painter, rect, out);
+    }
+
+    fn paint(&self, doc: &Document, painter: &Painter, rects: &HashMap<NodeId, Rect>, rect: Rect) {
+        self.paints.set(self.paints.get() + 1);
+        self.inner.paint(doc, painter, rects, rect);
+    }
+
+    fn interact(
+        &mut self,
+        doc: &mut Document,
+        painter: &Painter,
+        input: &InteractInput,
+        id: NodeId,
+        rect: Rect,
+        focus_target: &mut Option<NodeId>,
+    ) -> Vec<NodeId> {
+        self.inner
+            .interact(doc, painter, input, id, rect, focus_target)
+    }
+
+    fn children(&self) -> Vec<NodeId> {
+        self.inner.children()
+    }
+    fn kind(&self) -> &'static str {
+        self.inner.kind()
+    }
+    fn as_any(&self) -> &dyn Any {
+        self.inner.as_any()
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self.inner.as_any_mut()
+    }
+}
+
+fn counted(document: &mut Document, node: NodeId) -> (Rc<Cell<usize>>, Rc<Cell<usize>>) {
+    let layouts = Rc::new(Cell::new(0));
+    let paints = Rc::new(Cell::new(0));
+    let inner = document.arena.take(node);
+    document.arena.put_back(
+        node,
+        Box::new(Counted {
+            inner,
+            layouts: layouts.clone(),
+            paints: paints.clone(),
+        }),
+    );
+    (layouts, paints)
+}
+mod a_click_handler_can_mutate_the_tree_in_the_current_frame;
+mod caret_repaints_on_a_deadline_without_repeating_layout;
+mod hover_only_repaints_when_its_handler_changes_a_node;
+mod resizing_scaling_and_replacing_the_root_invalidate_the_cache;
+mod unchanged_input_reuses_layout_and_paint;

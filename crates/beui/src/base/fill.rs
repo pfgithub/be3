@@ -94,10 +94,14 @@ impl Document {
     }
 
     pub fn set_fill_child(&mut self, fill: NodeId, child: NodeId) {
-        self.arena.get_mut_as::<FillNode>(fill).child = Some(child);
+        if self.arena.get_as::<FillNode>(fill).child != Some(child) {
+            self.arena.get_mut_as::<FillNode>(fill).child = Some(child);
+        }
     }
 
     pub fn set_fill_color(&mut self, fill: NodeId, color: Color32) {
-        self.arena.get_mut_as::<FillNode>(fill).color = color;
+        if self.arena.get_as::<FillNode>(fill).color != color {
+            self.arena.get_mut_as::<FillNode>(fill).color = color;
+        }
     }
 }

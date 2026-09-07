@@ -3,6 +3,7 @@ use crate::context::Context;
 use crate::font::{FontId, Galley};
 use crate::geometry::{Pos2, Rect};
 
+#[derive(Clone, PartialEq)]
 pub enum Shape {
     Rect {
         rect: Rect,

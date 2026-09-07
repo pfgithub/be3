@@ -1,4 +1,6 @@
 use std::collections::HashMap;
+use std::rc::Rc;
+use std::time::Instant;
 
 use crate::context::Context;
 use crate::geometry::{pos2, Rect};
@@ -9,15 +11,21 @@ use crate::interact;
 use crate::layout;
 use crate::node::{Arena, NodeId};
 use crate::paint;
+use crate::painter::Shape;
 
 pub struct Document {
     pub(crate) arena: Arena,
     pub(crate) root: Option<NodeId>,
     pub(crate) focused: Option<NodeId>,
     pub(crate) activated: Option<NodeId>,
-    pub(crate) rects: HashMap<NodeId, Rect>,
+    pub(crate) rects: Rc<HashMap<NodeId, Rect>>,
     pub(crate) inspector: Option<Box<Inspector>>,
     pub(crate) inspectable: bool,
+    layout_revision: u64,
+    paint_revision: u64,
+    viewport: Option<(Context, Rect, f32)>,
+    shapes: Vec<Shape>,
+    next_paint: Option<Instant>,
 }
 
 impl Document {
@@ -27,14 +35,22 @@ impl Document {
             root: None,
             focused: None,
             activated: None,
-            rects: HashMap::new(),
+            rects: Rc::new(HashMap::new()),
             inspector: None,
             inspectable: true,
+            layout_revision: 0,
+            paint_revision: 0,
+            viewport: None,
+            shapes: Vec::new(),
+            next_paint: None,
         }
     }
 
     pub fn set_root(&mut self, id: NodeId) {
-        self.root = Some(id);
+        if self.root != Some(id) {
+            self.arena.invalidate();
+            self.root = Some(id);
+        }
     }
 
     pub fn root(&self) -> Option<NodeId> {
@@ -113,26 +129,56 @@ impl Document {
     }
 
     fn show_content(&mut self, ctx: &Context, rect: Rect, interactive: bool) {
-        let Some(root) = self.root else {
-            self.rects.clear();
-            return;
-        };
-        let painter = ctx.painter();
-        let mut rects = HashMap::new();
-        layout::layout(self, &painter, root, rect, &mut rects);
+        let scale = ctx.pixels_per_point();
+        if self
+            .viewport
+            .as_ref()
+            .is_none_or(|(old_ctx, old_rect, old_scale)| {
+                !ctx.same(old_ctx) || *old_rect != rect || *old_scale != scale
+            })
+        {
+            self.arena.invalidate();
+            self.viewport = Some((ctx.clone(), rect, scale));
+        }
+        self.update_layout(ctx, rect);
 
         if interactive {
-            interact::interact(self, ctx, &painter, &rects, root);
+            if let Some(root) = self.root {
+                let rects = Rc::clone(&self.rects);
+                interact::interact(self, ctx, &ctx.painter(), &rects, root);
+            }
         }
 
-        let Some(root) = self.root else {
-            self.rects.clear();
+        self.update_layout(ctx, rect);
+        let now = Instant::now();
+        if self.paint_revision != self.arena.revision
+            || self.next_paint.is_some_and(|deadline| deadline <= now)
+        {
+            let (shapes, delay) = ctx.capture(|| {
+                if let Some(root) = self.root {
+                    paint::paint(self, &ctx.painter(), &self.rects, root);
+                }
+            });
+            self.shapes = shapes;
+            self.next_paint = Instant::now().checked_add(delay);
+            self.paint_revision = self.arena.revision;
+        }
+        if let Some(deadline) = self.next_paint {
+            ctx.request_repaint_after(deadline.saturating_duration_since(Instant::now()));
+        }
+        ctx.extend(&self.shapes);
+    }
+
+    fn update_layout(&mut self, ctx: &Context, rect: Rect) {
+        if self.layout_revision == self.arena.revision {
             return;
-        };
+        }
         let mut rects = HashMap::new();
-        layout::layout(self, &painter, root, rect, &mut rects);
-        paint::paint(self, &painter, &rects, root);
-        self.rects = rects;
+        if let Some(root) = self.root {
+            layout::layout(self, &ctx.painter(), root, rect, &mut rects);
+        }
+        self.rects = Rc::new(rects);
+        self.layout_revision = self.arena.revision;
     }
 }
 

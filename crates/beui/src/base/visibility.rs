@@ -90,7 +90,9 @@ impl Document {
     }
 
     pub fn set_visibility_child(&mut self, visibility: NodeId, child: NodeId) {
-        self.arena.get_mut_as::<VisibilityNode>(visibility).child = Some(child);
+        if self.arena.get_as::<VisibilityNode>(visibility).child != Some(child) {
+            self.arena.get_mut_as::<VisibilityNode>(visibility).child = Some(child);
+        }
     }
 
     pub fn is_visible(&self, visibility: NodeId) -> bool {
@@ -98,6 +100,8 @@ impl Document {
     }
 
     pub fn set_visible(&mut self, visibility: NodeId, visible: bool) {
-        self.arena.get_mut_as::<VisibilityNode>(visibility).visible = visible;
+        if self.arena.get_as::<VisibilityNode>(visibility).visible != visible {
+            self.arena.get_mut_as::<VisibilityNode>(visibility).visible = visible;
+        }
     }
 }

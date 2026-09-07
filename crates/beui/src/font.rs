@@ -92,6 +92,12 @@ impl GalleyLine {
     }
 }
 
+impl PartialEq for Galley {
+    fn eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.inner, &other.inner)
+    }
+}
+
 impl Galley {
     pub fn size(&self) -> Vec2 {
         self.inner.size

@@ -106,14 +106,20 @@ impl Document {
     }
 
     pub fn set_outline_child(&mut self, outline: NodeId, child: NodeId) {
-        self.arena.get_mut_as::<OutlineNode>(outline).child = Some(child);
+        if self.arena.get_as::<OutlineNode>(outline).child != Some(child) {
+            self.arena.get_mut_as::<OutlineNode>(outline).child = Some(child);
+        }
     }
 
     pub fn set_outline_color(&mut self, outline: NodeId, color: Color32) {
-        self.arena.get_mut_as::<OutlineNode>(outline).color = color;
+        if self.arena.get_as::<OutlineNode>(outline).color != color {
+            self.arena.get_mut_as::<OutlineNode>(outline).color = color;
+        }
     }
 
     pub fn set_outline_visible(&mut self, outline: NodeId, visible: bool) {
-        self.arena.get_mut_as::<OutlineNode>(outline).visible = visible;
+        if self.arena.get_as::<OutlineNode>(outline).visible != visible {
+            self.arena.get_mut_as::<OutlineNode>(outline).visible = visible;
+        }
     }
 }

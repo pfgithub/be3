@@ -151,7 +151,9 @@ impl Document {
     }
 
     pub fn set_slot_child(&mut self, slot: NodeId, child: NodeId) {
-        self.arena.get_mut_as::<SlotNode>(slot).content = Some(child);
+        if self.arena.get_as::<SlotNode>(slot).content != Some(child) {
+            self.arena.get_mut_as::<SlotNode>(slot).content = Some(child);
+        }
     }
 
     pub fn set_shadow_child(&mut self, shadow: NodeId, child: NodeId) {
@@ -175,7 +177,10 @@ impl Document {
     }
 
     pub fn set_component_detail(&mut self, shadow: NodeId, detail: impl Into<String>) {
-        self.arena.get_mut_as::<ShadowNode>(shadow).detail = Some(detail.into());
+        let value = Some(detail.into());
+        if self.arena.get_as::<ShadowNode>(shadow).detail != value {
+            self.arena.get_mut_as::<ShadowNode>(shadow).detail = value;
+        }
     }
 
     pub fn component_state<T: 'static>(&self, shadow: NodeId) -> &T {

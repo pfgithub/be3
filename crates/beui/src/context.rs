@@ -1,5 +1,6 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::time::Duration;
 
 use crate::font::{FontId, FontSources, Fonts, Galley};
 use crate::geometry::Rect;
@@ -17,12 +18,16 @@ struct Inner {
     shapes: RefCell<Vec<Shape>>,
     cursor_icon: Cell<CursorIcon>,
     repaint: Cell<bool>,
+    repaint_after: Cell<Duration>,
+    previous: RefCell<Option<(Vec<Shape>, f32)>>,
 }
 
 pub struct FrameOutput {
     pub(crate) shapes: Vec<Shape>,
     pub cursor_icon: CursorIcon,
     pub repaint: bool,
+    pub repaint_after: Duration,
+    pub changed: bool,
 }
 
 impl FrameOutput {
@@ -44,6 +49,8 @@ impl Context {
                 shapes: RefCell::new(Vec::new()),
                 cursor_icon: Cell::new(CursorIcon::Default),
                 repaint: Cell::new(false),
+                repaint_after: Cell::new(Duration::MAX),
+                previous: RefCell::new(None),
             }),
         }
     }
@@ -53,11 +60,23 @@ impl Context {
         self.inner.shapes.borrow_mut().clear();
         self.inner.cursor_icon.set(CursorIcon::Default);
         self.inner.repaint.set(false);
+        self.inner.repaint_after.set(Duration::MAX);
     }
 
     pub fn end_frame(&self) -> FrameOutput {
+        let shapes = std::mem::take(&mut *self.inner.shapes.borrow_mut());
+        let scale = self.pixels_per_point();
+        let mut previous = self.inner.previous.borrow_mut();
+        let changed = previous
+            .as_ref()
+            .is_none_or(|(old, old_scale)| *old_scale != scale || *old != shapes);
+        if changed {
+            *previous = Some((shapes.clone(), scale));
+        }
         FrameOutput {
-            shapes: std::mem::take(&mut self.inner.shapes.borrow_mut()),
+            shapes,
+            changed,
+            repaint_after: self.inner.repaint_after.get(),
             cursor_icon: self.inner.cursor_icon.get(),
             repaint: self.inner.repaint.get(),
         }
@@ -83,6 +102,30 @@ impl Context {
 
     pub fn request_repaint(&self) {
         self.inner.repaint.set(true);
+        self.request_repaint_after(Duration::ZERO);
+    }
+
+    pub fn request_repaint_after(&self, delay: Duration) {
+        self.inner
+            .repaint_after
+            .set(self.inner.repaint_after.get().min(delay));
+    }
+
+    pub(crate) fn same(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.inner, &other.inner)
+    }
+
+    pub(crate) fn capture(&self, paint: impl FnOnce()) -> (Vec<Shape>, Duration) {
+        let previous_delay = self.inner.repaint_after.replace(Duration::MAX);
+        let start = self.inner.shapes.borrow().len();
+        paint();
+        let delay = self.inner.repaint_after.get();
+        self.request_repaint_after(previous_delay);
+        (self.inner.shapes.borrow_mut().split_off(start), delay)
+    }
+
+    pub(crate) fn extend(&self, shapes: &[Shape]) {
+        self.inner.shapes.borrow_mut().extend_from_slice(shapes);
     }
 
     pub fn pixels_per_point(&self) -> f32 {

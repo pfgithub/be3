@@ -236,7 +236,10 @@ impl Element for ScrollNode {
         }
         position.offset = position.offset.clamp(0.0, position.max_offset());
 
-        self.offset = position.offset;
+        if self.offset != position.offset {
+            doc.arena.invalidate();
+            self.offset = position.offset;
+        }
         self.realize(doc, painter, rect);
         if self.anchor.is_none() || position.offset != anchored_offset || self.items.is_empty() {
             self.remember_anchor(doc, painter, rect.width());
@@ -323,6 +326,10 @@ impl Document {
     }
 
     pub fn set_scroll_offset(&mut self, scroll: NodeId, offset: f32) {
+        let node = self.arena.get_as::<ScrollNode>(scroll);
+        if node.offset == offset && node.anchor.is_none() {
+            return;
+        }
         let node = self.arena.get_mut_as::<ScrollNode>(scroll);
         node.offset = offset;
         node.anchor = None;

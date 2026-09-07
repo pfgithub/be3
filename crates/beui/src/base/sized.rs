@@ -112,14 +112,20 @@ impl Document {
     }
 
     pub fn set_sized_child(&mut self, sized: NodeId, child: NodeId) {
-        self.arena.get_mut_as::<SizedNode>(sized).child = Some(child);
+        if self.arena.get_as::<SizedNode>(sized).child != Some(child) {
+            self.arena.get_mut_as::<SizedNode>(sized).child = Some(child);
+        }
     }
 
     pub fn set_sized_width(&mut self, sized: NodeId, width: Option<f32>) {
-        self.arena.get_mut_as::<SizedNode>(sized).width = width;
+        if self.arena.get_as::<SizedNode>(sized).width != width {
+            self.arena.get_mut_as::<SizedNode>(sized).width = width;
+        }
     }
 
     pub fn set_sized_height(&mut self, sized: NodeId, height: Option<f32>) {
-        self.arena.get_mut_as::<SizedNode>(sized).height = height;
+        if self.arena.get_as::<SizedNode>(sized).height != height {
+            self.arena.get_mut_as::<SizedNode>(sized).height = height;
+        }
     }
 }

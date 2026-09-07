@@ -249,7 +249,9 @@ impl Document {
     }
 
     pub fn set_list_align(&mut self, list: NodeId, align: Align) {
-        self.arena.get_mut_as::<ListNode>(list).align = align;
+        if self.arena.get_as::<ListNode>(list).align != align {
+            self.arena.get_mut_as::<ListNode>(list).align = align;
+        }
     }
 
     pub fn append_child(&mut self, parent: NodeId, child: NodeId, size: ItemSize) {
@@ -260,6 +262,15 @@ impl Document {
     }
 
     pub fn remove_child(&mut self, parent: NodeId, child: NodeId) {
+        if !self
+            .arena
+            .get_as::<ListNode>(parent)
+            .items
+            .iter()
+            .any(|item| item.child == child)
+        {
+            return;
+        }
         self.arena
             .get_mut_as::<ListNode>(parent)
             .items
@@ -267,6 +278,15 @@ impl Document {
     }
 
     pub fn set_child_size(&mut self, parent: NodeId, child: NodeId, size: ItemSize) {
+        if self
+            .arena
+            .get_as::<ListNode>(parent)
+            .items
+            .iter()
+            .any(|item| item.child == child && item.size == size)
+        {
+            return;
+        }
         let item = self
             .arena
             .get_mut_as::<ListNode>(parent)

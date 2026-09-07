@@ -1,4 +1,4 @@
-use block_plugin_api::{EditorInstanceId, ScreenLayout, ScreenPlacement};
+use block_plugin_api::{EditorInstanceId, ScreenId, ScreenLayout, ScreenPlacement};
 use eframe::{egui, egui_wgpu, egui_wgpu::wgpu};
 use std::{
     collections::HashMap,
@@ -228,6 +228,7 @@ impl egui_wgpu::CallbackTrait for Punch {
 }
 
 pub(crate) struct Panes {
+    generation: Option<u64>,
     format: wgpu::TextureFormat,
     panes: HashMap<EditorInstanceId, Pane>,
     painting: Arc<AtomicBool>,
@@ -335,7 +336,7 @@ impl EguiPane {
 fn paint_beui(
     renderer: &mut beui::Renderer,
     target: &Target<'_>,
-    session: &mut crate::editor_session::EditorSession,
+    outputs: &HashMap<ScreenId, beui::FrameOutput>,
     placements: &[ScreenPlacement],
     instance: EditorInstanceId,
     cleared: bool,
@@ -350,14 +351,12 @@ fn paint_beui(
         .iter()
         .filter(|placement| placement.instance == instance)
     {
-        let Some(output) = session.run_beui(placement.region, layout.generation) else {
+        let Some(output) = outputs.get(&placement.screen) else {
             continue;
         };
-        if output.repaint {
-            drawn.repaint = Duration::ZERO;
-        }
-        let scale = session.scale_factor(placement.region);
-        renderer.prepare(target.device, target.queue, &output, screen, scale);
+        drawn.repaint = drawn.repaint.min(output.repaint_after);
+        let scale = placement.scale_factor();
+        renderer.prepare(target.device, target.queue, output, screen, scale);
         let mut encoder = target
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
@@ -409,6 +408,7 @@ impl Panes {
         Self {
             format,
             panes: HashMap::new(),
+            generation: None,
             painting: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -424,7 +424,30 @@ impl Panes {
     ) -> Painted {
         let mut cleared = false;
         let mut repaint = Duration::MAX;
+        let mut changed = self.generation != Some(layout.generation);
+        self.generation = Some(layout.generation);
         let placements = layout.screens.clone();
+        let mut outputs = HashMap::new();
+        for placement in &placements {
+            let Some(session) = screens.session(placement.instance) else {
+                continue;
+            };
+            if !session.is_beui() {
+                changed = true;
+                continue;
+            }
+            if let Some(output) = session.run_beui(placement.region, layout.generation) {
+                changed |= output.changed;
+                repaint = repaint.min(output.repaint_after);
+                outputs.insert(placement.screen, output);
+            }
+        }
+        self.panes.retain(|instance, _| screens.is_open(*instance));
+        if !changed {
+            return Painted {
+                repaint: (repaint < Duration::MAX).then_some(repaint),
+            };
+        }
         let mut instances = Vec::new();
         for placement in &placements {
             if !instances.contains(&placement.instance) {
@@ -457,7 +480,7 @@ impl Panes {
                     pane.paint(&target, session, &placements, instance, time, cleared)
                 }
                 Pane::Beui(renderer) => {
-                    paint_beui(renderer, &target, session, &placements, instance, cleared)
+                    paint_beui(renderer, &target, &outputs, &placements, instance, cleared)
                 }
             };
             cleared |= painted.cleared;
