@@ -2,16 +2,15 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 
-use block_editor_plugin::beui::styled::theme::{
+use crate::styled::theme::{
     ACCENT, ACCENT_SOFT, BACKGROUND, RADIUS, SCROLLBAR_WIDTH, SEPARATOR_HEIGHT, SURFACE,
     SURFACE_RAISED, TEXT_MUTED,
 };
-use block_editor_plugin::beui::styled::{self, ButtonVariant};
-use block_editor_plugin::beui::{
-    unstyled, Color32, Context, CursorIcon, Document, ItemSize, NodeId, Rect, TextAlign,
-};
+use crate::styled::{self, ButtonVariant};
+use crate::{unstyled, Color32, Context, CursorIcon, Document, ItemSize, NodeId, Rect, TextAlign};
 
-use crate::app::BlockCounter;
+#[cfg(test)]
+mod tests;
 
 const HEADER_HEIGHT: f32 = 64.0;
 const HEADER_PADDING: f32 = 20.0;
@@ -23,6 +22,36 @@ const COMPACT_ROW_HEIGHT: f32 = 25.0;
 const ROW_PADDING_HORIZONTAL: f32 = 12.0;
 const ROW_PADDING_VERTICAL: f32 = 9.0;
 const COMPACT_ROW_PADDING_VERTICAL: f32 = 4.0;
+
+pub trait Counter {
+    fn value(&self) -> i64;
+    fn increment(&self);
+    fn decrement(&self);
+    fn reset(&self);
+}
+
+#[derive(Default)]
+pub struct LocalCounter {
+    value: Cell<i64>,
+}
+
+impl Counter for LocalCounter {
+    fn value(&self) -> i64 {
+        self.value.get()
+    }
+
+    fn increment(&self) {
+        self.value.set(self.value.get().saturating_add(1));
+    }
+
+    fn decrement(&self) {
+        self.value.set(self.value.get().saturating_sub(1));
+    }
+
+    fn reset(&self) {
+        self.value.set(0);
+    }
+}
 
 pub struct Demo {
     document: Document,
@@ -38,7 +67,7 @@ pub struct Buttons {
 }
 
 impl Demo {
-    pub fn new(counter: Rc<BlockCounter>) -> Self {
+    pub fn new(counter: Rc<dyn Counter>) -> Self {
         let mut document = Document::new();
         let shown = counter.value();
         let value = styled::display(&mut document, shown.to_string());
@@ -73,6 +102,10 @@ impl Demo {
 
     pub fn buttons(&self) -> Buttons {
         self.buttons
+    }
+
+    pub fn background(&self) -> Color32 {
+        BACKGROUND
     }
 
     pub fn set_value(&mut self, value: i64) {
@@ -229,7 +262,7 @@ fn install_rows(document: &mut Document, scroll: NodeId, rows: &Rc<Rows>, compac
 
 fn build_header(
     document: &mut Document,
-    counter: &Rc<BlockCounter>,
+    counter: &Rc<dyn Counter>,
     value: NodeId,
 ) -> (NodeId, Buttons) {
     let title = styled::title(document, "beui");

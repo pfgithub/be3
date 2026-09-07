@@ -2,10 +2,9 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use block_client::blocks::counter::{Counter as CounterBlock, CounterOperation};
+use block_editor_plugin::beui::demo::{Counter, Demo};
 use block_editor_plugin::beui::{Context, Rect};
 use block_editor_plugin::EditorHost;
-
-use crate::demo::Demo;
 
 mod count_changes;
 
@@ -25,7 +24,7 @@ impl CounterApp {
     }
 }
 
-pub struct BlockCounter {
+struct BlockCounter {
     block: block_client::BlockHandle<CounterBlock>,
     host: EditorHost,
 }
@@ -36,20 +35,22 @@ impl BlockCounter {
             self.block.operate(operation);
         }
     }
+}
 
-    pub fn value(&self) -> i64 {
+impl Counter for BlockCounter {
+    fn value(&self) -> i64 {
         self.block.read().map_or(0, |counter| counter.count())
     }
 
-    pub fn increment(&self) {
+    fn increment(&self) {
         self.operate(CounterOperation::Increment);
     }
 
-    pub fn decrement(&self) {
+    fn decrement(&self) {
         self.operate(CounterOperation::Decrement);
     }
 
-    pub fn reset(&self) {
+    fn reset(&self) {
         self.operate(CounterOperation::Reset);
     }
 }

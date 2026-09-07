@@ -21,3 +21,7 @@ winit = { version = "0.30", optional = true }
 
 [lints]
 workspace = true
+
+[[example]]
+name = "demo"
+required-features = ["window"]

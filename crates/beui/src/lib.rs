@@ -3,6 +3,7 @@ mod app;
 mod base;
 mod color;
 mod context;
+pub mod demo;
 mod document;
 mod font;
 mod geometry;
