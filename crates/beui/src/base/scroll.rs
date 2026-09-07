@@ -103,9 +103,16 @@ impl ScrollNode {
                 doc.remove_node(item);
             }
         } else if first < items.first {
-            let mut head: Vec<NodeId> = (first..items.first)
-                .map(|index| (items.build)(doc, index))
-                .collect();
+            let mut head = Vec::new();
+            let mut bottom = first as f32 * items.estimated - self.offset;
+            for index in first..items.first {
+                if bottom >= rect.height() {
+                    break;
+                }
+                let item = (items.build)(doc, index);
+                bottom += height(doc, painter, item, width);
+                head.push(item);
+            }
             head.append(&mut self.items);
             self.items = head;
         }
