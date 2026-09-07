@@ -6,10 +6,15 @@ use block_editor_plugin::beui::demo::{Counter, Demo};
 use block_editor_plugin::beui::{Context, Rect};
 use block_editor_plugin::EditorHost;
 
+mod count_changes;
+
+use count_changes::CountChanges;
+
 #[derive(Default)]
 pub struct CounterApp {
     demo: Option<Demo>,
     counter: Option<Rc<BlockCounter>>,
+    changes: Option<CountChanges>,
     creation: Option<Arc<block_client::BlockClient>>,
 }
 
@@ -50,13 +55,6 @@ impl Counter for BlockCounter {
     }
 }
 
-fn open(counter: Option<&Rc<BlockCounter>>) -> Option<Demo> {
-    let counter = counter?;
-    counter.block.read()?;
-    let counter: Rc<dyn Counter> = counter.clone();
-    Some(Demo::new(counter))
-}
-
 impl block_editor_plugin::BeuiApp for CounterApp {
     fn connect(
         &mut self,
@@ -64,10 +62,10 @@ impl block_editor_plugin::BeuiApp for CounterApp {
         client: Arc<block_client::BlockClient>,
         block_id: uuid::Uuid,
     ) {
-        self.counter = Some(Rc::new(BlockCounter {
-            block: client.get_block(block_id),
-            host,
-        }));
+        let block = client.get_block(block_id);
+        self.changes = Some(CountChanges::new(block.clone(), host.waker()));
+        self.counter = Some(Rc::new(BlockCounter { block, host }));
+        self.demo = None;
     }
 
     fn connect_creation(&mut self, _host: EditorHost, client: Arc<block_client::BlockClient>) {
@@ -83,8 +81,15 @@ impl block_editor_plugin::BeuiApp for CounterApp {
     }
 
     fn frame(&mut self, context: &Context, rect: Rect) {
-        if self.demo.is_none() {
-            self.demo = open(self.counter.as_ref());
+        if let Some(value) = self.changes.as_mut().and_then(CountChanges::take) {
+            if self.demo.is_none() {
+                if let Some(counter) = &self.counter {
+                    self.demo = Some(Demo::new(counter.clone()));
+                }
+            }
+            if let Some(demo) = &mut self.demo {
+                demo.set_value(value);
+            }
         }
         let Some(demo) = &mut self.demo else {
             return;

@@ -11,4 +11,16 @@ fn the_counter_shows_what_the_block_holds() {
     editor.run();
 
     assert_eq!(shown(&mut editor), "\"3\"");
+
+    block.operate(CounterOperation::Decrement);
+    editor.run();
+    assert_eq!(shown(&mut editor), "\"2\"");
+
+    block.operate(CounterOperation::Reset);
+    editor.run();
+    assert_eq!(shown(&mut editor), "\"0\"");
+
+    block.operate(CounterOperation::Increment);
+    editor.run();
+    assert_eq!(shown(&mut editor), "\"1\"");
 }

@@ -9,6 +9,9 @@ use crate::styled::theme::{
 use crate::styled::{self, ButtonVariant};
 use crate::{unstyled, Color32, Context, CursorIcon, Document, ItemSize, NodeId, Rect, TextAlign};
 
+#[cfg(test)]
+mod tests;
+
 const HEADER_HEIGHT: f32 = 64.0;
 const HEADER_PADDING: f32 = 20.0;
 const BODY_PADDING: f32 = 20.0;
@@ -52,10 +55,8 @@ impl Counter for LocalCounter {
 
 pub struct Demo {
     document: Document,
-    counter: Rc<dyn Counter>,
     value: NodeId,
     buttons: Buttons,
-    shown: i64,
 }
 
 #[derive(Clone, Copy)]
@@ -86,10 +87,8 @@ impl Demo {
 
         Self {
             document,
-            counter,
             value,
             buttons,
-            shown,
         }
     }
 
@@ -109,14 +108,12 @@ impl Demo {
         BACKGROUND
     }
 
+    pub fn set_value(&mut self, value: i64) {
+        self.document.set_text(self.value, value.to_string());
+    }
+
     pub fn show(&mut self, context: &Context, rect: Rect) {
-        let value = self.counter.value();
-        if value != self.shown {
-            self.shown = value;
-            self.document.set_text(self.value, value.to_string());
-        }
         self.document.show(context, rect);
-        self.shown = self.counter.value();
     }
 }
 
