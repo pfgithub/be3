@@ -2,6 +2,12 @@ use super::*;
 
 #[test]
 fn flipping_a_switch_can_replace_the_items_of_a_scroll() {
+    for inset in [7.0, 17.0] {
+        check_compact_rows(inset);
+    }
+}
+
+fn check_compact_rows(inset: f32) {
     let built = Rc::new(RefCell::new(Vec::new()));
     let mut document = Document::new();
     let scroll = document.create_scroll();
@@ -25,15 +31,41 @@ fn flipping_a_switch_can_replace_the_items_of_a_scroll() {
 
     let mut harness = Harness::new(document);
     harness.frame(Vec::new());
-    let before = built.borrow().len();
+    let index = 120;
+    harness
+        .document
+        .set_scroll_offset(scroll, index as f32 * VIRTUAL_ITEM_HEIGHT + inset);
+    harness.frame(Vec::new());
+    let top = harness.rect(harness.document.children(scroll)[0]).top();
+    built.borrow_mut().clear();
 
     harness.click(harness.center(switch));
     harness.frame(Vec::new());
 
     assert!(styled::switch_on(harness.document(), switch));
-    assert!(
-        built.borrow().len() > before,
-        "the scroll never rebuilt its items"
+    let skipped = (inset / (VIRTUAL_ITEM_HEIGHT / 2.0)) as usize;
+    assert_eq!(built.borrow().first(), Some(&(index + skipped)));
+    assert_eq!(
+        harness.rect(harness.document.children(scroll)[0]).top(),
+        top + skipped as f32 * VIRTUAL_ITEM_HEIGHT / 2.0
+    );
+    assert_eq!(
+        harness.document.scroll_offset(scroll),
+        index as f32 * VIRTUAL_ITEM_HEIGHT / 2.0 + inset
+    );
+
+    built.borrow_mut().clear();
+    harness.click(harness.center(switch));
+    harness.frame(Vec::new());
+
+    assert_eq!(built.borrow().first(), Some(&index));
+    assert_eq!(
+        harness.rect(harness.document.children(scroll)[0]).top(),
+        top
+    );
+    assert_eq!(
+        harness.document.scroll_offset(scroll),
+        index as f32 * VIRTUAL_ITEM_HEIGHT + inset
     );
 }
 

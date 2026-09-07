@@ -30,10 +30,16 @@ pub(crate) struct VirtualItems {
     pub(crate) first: usize,
 }
 
+enum ScrollAnchor {
+    Node { id: NodeId, top: f32 },
+    VirtualItem { index: usize, top: f32 },
+}
+
 pub(crate) struct ScrollNode {
     pub(crate) items: Vec<NodeId>,
     pub(crate) virtual_items: Option<VirtualItems>,
     pub(crate) offset: f32,
+    anchor: Option<ScrollAnchor>,
     pub(crate) on_change: Option<ScrollHandler>,
     pub(crate) reported: Option<ScrollPosition>,
 }
@@ -44,6 +50,7 @@ impl ScrollNode {
             items: Vec::new(),
             virtual_items: None,
             offset: 0.0,
+            anchor: None,
             on_change: None,
             reported: None,
         }
@@ -70,19 +77,51 @@ impl ScrollNode {
         }
     }
 
+    fn anchored_offset(&self, heights: &[f32]) -> f32 {
+        match &self.anchor {
+            Some(ScrollAnchor::Node { id, top }) => self
+                .items
+                .iter()
+                .position(|item| item == id)
+                .map_or(self.offset, |index| {
+                    heights[..index].iter().sum::<f32>() - top
+                }),
+            Some(ScrollAnchor::VirtualItem { index, top }) => self
+                .virtual_items
+                .as_ref()
+                .map_or(self.offset, |items| *index as f32 * items.estimated - top),
+            None => self.offset,
+        }
+    }
+
+    fn remember_anchor(&mut self, doc: &Document, painter: &Painter, width: f32) {
+        if let Some(items) = &self.virtual_items {
+            self.anchor = (items.count > 0).then_some(ScrollAnchor::VirtualItem {
+                index: items.first,
+                top: items.first as f32 * items.estimated - self.offset,
+            });
+            return;
+        }
+        let mut top = -self.offset;
+        self.anchor = None;
+        for (&id, height) in self.items.iter().zip(self.heights(doc, painter, width)) {
+            if top + height > 0.0 {
+                self.anchor = Some(ScrollAnchor::Node { id, top });
+                break;
+            }
+            top += height;
+        }
+    }
+
     fn position(&self, doc: &Document, painter: &Painter, rect: Rect) -> ScrollPosition {
-        let measured = match self.virtual_items {
-            Some(_) => 0.0,
-            None => self.heights(doc, painter, rect.width()).iter().sum(),
-        };
-        let position = ScrollPosition {
-            offset: self.offset,
-            content: self.content(measured),
-            viewport: rect.height(),
+        let heights = match self.virtual_items {
+            Some(_) => Vec::new(),
+            None => self.heights(doc, painter, rect.width()),
         };
         ScrollPosition {
-            offset: position.offset.clamp(0.0, position.max_offset()),
-            ..position
+            offset: self.anchored_offset(&heights),
+            content: self.content(heights.iter().sum()),
+            viewport: rect.height(),
         }
     }
 
@@ -155,7 +194,9 @@ impl Element for ScrollNode {
     ) {
         let heights = self.heights(doc, painter, rect.width());
         let content = self.content(heights.iter().sum());
-        let offset = self.offset.clamp(0.0, (content - rect.height()).max(0.0));
+        let offset = self
+            .anchored_offset(&heights)
+            .clamp(0.0, (content - rect.height()).max(0.0));
         let mut cursor = rect.top() + self.top(offset);
         for (&item, height) in self.items.iter().zip(&heights) {
             if cursor >= rect.bottom() {
@@ -188,13 +229,18 @@ impl Element for ScrollNode {
         rect: Rect,
         _focus_target: &mut Option<NodeId>,
     ) -> Vec<NodeId> {
+        let mut position = self.position(doc, painter, rect);
+        let anchored_offset = position.offset;
         if input.scroll_delta != 0.0 && input.pointer_pos.is_some_and(|pos| rect.contains(pos)) {
-            self.offset -= input.scroll_delta;
+            position.offset -= input.scroll_delta;
         }
+        position.offset = position.offset.clamp(0.0, position.max_offset());
 
-        let position = self.position(doc, painter, rect);
         self.offset = position.offset;
         self.realize(doc, painter, rect);
+        if self.anchor.is_none() || position.offset != anchored_offset || self.items.is_empty() {
+            self.remember_anchor(doc, painter, rect.width());
+        }
         if self.on_change.is_some() && self.reported != Some(position) {
             self.reported = Some(position);
             if let Some(mut handler) = self.on_change.take() {
@@ -256,7 +302,11 @@ impl Document {
         estimated_height: f32,
         build: impl FnMut(&mut Document, usize) -> NodeId + 'static,
     ) {
-        let items = std::mem::take(&mut self.arena.get_mut_as::<ScrollNode>(scroll).items);
+        let node = self.arena.get_mut_as::<ScrollNode>(scroll);
+        if matches!(node.anchor, Some(ScrollAnchor::Node { .. })) {
+            node.anchor = None;
+        }
+        let items = std::mem::take(&mut node.items);
         for item in items {
             self.remove_node(item);
         }
@@ -273,7 +323,9 @@ impl Document {
     }
 
     pub fn set_scroll_offset(&mut self, scroll: NodeId, offset: f32) {
-        self.arena.get_mut_as::<ScrollNode>(scroll).offset = offset;
+        let node = self.arena.get_mut_as::<ScrollNode>(scroll);
+        node.offset = offset;
+        node.anchor = None;
     }
 
     pub fn set_scroll_on_change(
