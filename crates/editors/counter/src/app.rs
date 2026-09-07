@@ -2,25 +2,26 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use block_client::blocks::counter::{Counter as CounterBlock, CounterOperation};
-use block_editor_plugin::beui::demo::{Counter, Demo};
 use block_editor_plugin::beui::{Context, Rect};
 use block_editor_plugin::EditorHost;
 
 mod count_changes;
+mod ui;
 
 use count_changes::CountChanges;
+use ui::{Counter, CounterUi};
 
 #[derive(Default)]
 pub struct CounterApp {
-    demo: Option<Demo>,
+    ui: Option<CounterUi>,
     counter: Option<Rc<BlockCounter>>,
     changes: Option<CountChanges>,
     creation: Option<Arc<block_client::BlockClient>>,
 }
 
 impl CounterApp {
-    pub fn demo(&self) -> Option<&Demo> {
-        self.demo.as_ref()
+    pub fn ui(&self) -> Option<&CounterUi> {
+        self.ui.as_ref()
     }
 }
 
@@ -65,7 +66,7 @@ impl block_editor_plugin::BeuiApp for CounterApp {
         let block = client.get_block(block_id);
         self.changes = Some(CountChanges::new(block.clone(), host.waker()));
         self.counter = Some(Rc::new(BlockCounter { block, host }));
-        self.demo = None;
+        self.ui = None;
     }
 
     fn connect_creation(&mut self, _host: EditorHost, client: Arc<block_client::BlockClient>) {
@@ -82,18 +83,18 @@ impl block_editor_plugin::BeuiApp for CounterApp {
 
     fn frame(&mut self, context: &Context, rect: Rect) {
         if let Some(value) = self.changes.as_mut().and_then(CountChanges::take) {
-            if self.demo.is_none() {
+            if self.ui.is_none() {
                 if let Some(counter) = &self.counter {
-                    self.demo = Some(Demo::new(counter.clone()));
+                    self.ui = Some(CounterUi::new(counter.clone()));
                 }
             }
-            if let Some(demo) = &mut self.demo {
-                demo.set_value(value);
+            if let Some(ui) = &mut self.ui {
+                ui.set_value(value);
             }
         }
-        let Some(demo) = &mut self.demo else {
+        let Some(ui) = &mut self.ui else {
             return;
         };
-        demo.show(context, rect);
+        ui.show(context, rect);
     }
 }

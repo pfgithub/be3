@@ -27,9 +27,9 @@ fn click(editor: &mut BeuiTest<CounterApp>, node: impl Fn(&CounterApp) -> NodeId
     let app = editor.app();
     let target = node(app);
     let rect = app
-        .demo()
-        .and_then(|demo| demo.document().node_rect(target))
-        .expect("the demo has not laid that node out");
+        .ui()
+        .and_then(|ui| ui.document().node_rect(target))
+        .expect("the ui has not laid that node out");
     let center = rect.center();
     editor.click_at(pos2(center.x, center.y));
     editor.run();
@@ -37,8 +37,8 @@ fn click(editor: &mut BeuiTest<CounterApp>, node: impl Fn(&CounterApp) -> NodeId
 
 fn shown(editor: &mut BeuiTest<CounterApp>) -> String {
     let app = editor.app();
-    let demo = app.demo().expect("the demo is not open yet");
-    demo.document()
-        .node_detail(demo.value_node())
+    let ui = app.ui().expect("the ui is not open yet");
+    ui.document()
+        .node_detail(ui.value_node())
         .expect("the value node has no text")
 }
