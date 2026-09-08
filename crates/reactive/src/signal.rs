@@ -1,8 +1,6 @@
 use std::cell::{Cell, RefCell};
-use std::marker::PhantomData;
 use std::rc::{Rc, Weak};
 
-use crate::arena::{self, SlotId};
 use crate::computation::{Computation, State};
 use crate::runtime::{batch, RUNTIME};
 
@@ -47,58 +45,46 @@ pub(crate) struct Value<T> {
 }
 
 pub struct ReadSignal<T> {
-    id: SlotId,
-    _marker: PhantomData<fn() -> T>,
+    pub(crate) inner: Rc<Value<T>>,
 }
 
 pub struct WriteSignal<T> {
-    id: SlotId,
-    _marker: PhantomData<fn(T)>,
+    inner: Rc<Value<T>>,
 }
 
-pub fn create_signal<T: 'static>(value: T) -> (ReadSignal<T>, WriteSignal<T>) {
-    let id = arena::insert(Value {
+pub fn create_signal<T>(value: T) -> (ReadSignal<T>, WriteSignal<T>) {
+    let inner = Rc::new(Value {
         value: RefCell::new(value),
         source: Rc::new(Source::default()),
     });
     (
         ReadSignal {
-            id,
-            _marker: PhantomData,
+            inner: inner.clone(),
         },
-        WriteSignal {
-            id,
-            _marker: PhantomData,
-        },
+        WriteSignal { inner },
     )
 }
 
 impl<T> Clone for ReadSignal<T> {
     fn clone(&self) -> Self {
-        *self
+        Self {
+            inner: self.inner.clone(),
+        }
     }
 }
-
-impl<T> Copy for ReadSignal<T> {}
 
 impl<T> Clone for WriteSignal<T> {
     fn clone(&self) -> Self {
-        *self
+        Self {
+            inner: self.inner.clone(),
+        }
     }
 }
 
-impl<T> Copy for WriteSignal<T> {}
-
-impl<T: 'static> ReadSignal<T> {
-    pub(crate) fn inner(&self) -> Rc<Value<T>> {
-        arena::get::<Value<T>>(self.id)
-    }
-
+impl<T> ReadSignal<T> {
     pub fn with<R>(&self, f: impl FnOnce(&T) -> R) -> R {
-        let inner = self.inner();
-        inner.source.track();
-        let result = f(&inner.value.borrow());
-        result
+        self.inner.source.track();
+        f(&self.inner.value.borrow())
     }
 
     pub fn get(&self) -> T
@@ -112,45 +98,37 @@ impl<T: 'static> ReadSignal<T> {
     where
         T: Clone,
     {
-        self.inner().value.borrow().clone()
+        self.inner.value.borrow().clone()
     }
 
     pub fn with_untracked<R>(&self, f: impl FnOnce(&T) -> R) -> R {
-        let inner = self.inner();
-        let result = f(&inner.value.borrow());
-        result
+        f(&self.inner.value.borrow())
     }
 }
 
-impl<T: 'static> WriteSignal<T> {
-    fn inner(&self) -> Rc<Value<T>> {
-        arena::get::<Value<T>>(self.id)
-    }
-
+impl<T> WriteSignal<T> {
     pub fn set(&self, value: T)
     where
         T: PartialEq,
     {
         assert_writable();
-        let inner = self.inner();
         batch(|| {
-            let mut current = inner.value.borrow_mut();
+            let mut current = self.inner.value.borrow_mut();
             if *current != value {
                 *current = value;
                 drop(current);
-                inner.source.changed();
+                self.inner.source.changed();
             }
         });
     }
 
     pub fn update<R>(&self, f: impl FnOnce(&mut T) -> R) -> R {
         assert_writable();
-        let inner = self.inner();
         batch(|| {
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                f(&mut inner.value.borrow_mut())
+                f(&mut self.inner.value.borrow_mut())
             }));
-            inner.source.changed();
+            self.inner.source.changed();
             match result {
                 Ok(value) => value,
                 Err(error) => std::panic::resume_unwind(error),

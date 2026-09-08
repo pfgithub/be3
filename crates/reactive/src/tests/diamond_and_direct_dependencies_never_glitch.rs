@@ -6,8 +6,14 @@ fn diamond_and_direct_dependencies_never_glitch() {
     let (value, set_value) = create_signal(1);
     let seen = Rc::new(RefCell::new(Vec::new()));
     scope.run(|| {
-        let left = create_memo(move || value.get() * 2);
-        let right = create_memo(move || value.get() * 3);
+        let left = create_memo({
+            let value = value.clone();
+            move || value.get() * 2
+        });
+        let right = create_memo({
+            let value = value.clone();
+            move || value.get() * 3
+        });
         let sum = create_memo(move || left.get() + right.get());
         let seen = seen.clone();
         create_effect(move || seen.borrow_mut().push((value.get(), sum.get())));

@@ -222,23 +222,23 @@ pub fn column(
     column
 }
 
-fn boxed_show_then(then: impl Fn() -> NodeId + 'static) -> Box<dyn Fn() -> NodeId> {
+fn boxed_show_then(then: impl FnOnce() -> NodeId + 'static) -> Box<dyn FnOnce() -> NodeId> {
     Box::new(then)
 }
 
 #[component]
 pub fn show(
     condition: Prop<bool>,
-    #[prop(with = |then: impl Fn() -> NodeId + 'static| boxed_show_then(then))] then: Option<
-        Box<dyn Fn() -> NodeId>,
+    #[prop(with = |then: impl FnOnce() -> NodeId + 'static| boxed_show_then(then))] then: Option<
+        Box<dyn FnOnce() -> NodeId>,
     >,
 ) -> NodeId {
-    let then = then.expect("show requires a `then` callback");
+    let mut then = then;
     let visibility = with_document(|document| document.create_visibility(false));
     let built: Rc<Cell<Option<NodeId>>> = Rc::new(Cell::new(None));
     condition.apply(move |visible| {
         if visible && built.get().is_none() {
-            let child = then();
+            let child = then.take().expect("show requires a `then` callback")();
             built.set(Some(child));
             with_document(|document| document.set_visibility_child(visibility, child));
         }

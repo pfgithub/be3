@@ -19,8 +19,47 @@ fn app() -> NodeId {
     let (history, set_history) = create_signal(Vec::<(u64, i64)>::new());
     let (next_id, set_next_id) = create_signal(0u64);
 
-    let is_zero = create_memo(move || count.get() <= 0);
-    let is_nonzero = create_memo(move || count.get() != 0);
+    let is_zero = {
+        let count = count.clone();
+        create_memo(move || count.get() <= 0)
+    };
+    let is_nonzero = {
+        let count = count.clone();
+        create_memo(move || count.get() != 0)
+    };
+
+    let decrement_click = {
+        let set_count = set_count.clone();
+        let set_history = set_history.clone();
+        let count = count.clone();
+        let next_id = next_id.clone();
+        let set_next_id = set_next_id.clone();
+        move || {
+            set_count.update(|value| *value -= 1);
+            let id = next_id.get();
+            set_next_id.set(id + 1);
+            set_history.update(|entries| entries.push((id, count.get())));
+        }
+    };
+
+    let increment_click = {
+        let set_count = set_count.clone();
+        let set_history = set_history.clone();
+        let count = count.clone();
+        let next_id = next_id.clone();
+        let set_next_id = set_next_id.clone();
+        move || {
+            set_count.update(|value| *value += 1);
+            let id = next_id.get();
+            set_next_id.set(id + 1);
+            set_history.update(|entries| entries.push((id, count.get())));
+        }
+    };
+
+    let reset_click = move || {
+        set_count.set(0);
+        set_history.set(Vec::new());
+    };
 
     let log = column()
         .spacing(4.0)
@@ -40,30 +79,17 @@ fn app() -> NodeId {
             } [
                 button {
                     disabled: is_zero,
-                    on_click: move || {
-                        set_count.update(|value| *value -= 1);
-                        let id = next_id.get();
-                        set_next_id.set(id + 1);
-                        set_history.update(|entries| entries.push((id, count.get())));
-                    },
+                    on_click: decrement_click,
                 } [ text { string: "-" } ],
                 text { string: count },
                 button {
-                    on_click: move || {
-                        set_count.update(|value| *value += 1);
-                        let id = next_id.get();
-                        set_next_id.set(id + 1);
-                        set_history.update(|entries| entries.push((id, count.get())));
-                    },
+                    on_click: increment_click,
                 } [ text { string: "+" } ],
                 show {
                     condition: is_nonzero,
                     then: move || view! {
                         button {
-                            on_click: move || {
-                                set_count.set(0);
-                                set_history.set(Vec::new());
-                            },
+                            on_click: reset_click,
                         } [ text { string: "reset" } ]
                     },
                 }

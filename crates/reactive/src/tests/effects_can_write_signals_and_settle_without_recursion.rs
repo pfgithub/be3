@@ -4,7 +4,7 @@ use super::*;
 fn effects_can_write_signals_and_settle_without_recursion() {
     let scope = Scope::new();
     let (value, set_value) = create_signal(0);
-    let observed = value;
+    let observed = value.clone();
     scope.run(|| {
         create_effect(move || {
             let value = observed.get();
