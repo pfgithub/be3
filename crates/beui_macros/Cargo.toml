@@ -1,0 +1,17 @@
+[package]
+name = "beui_macros"
+description = "Attribute macros for beui::reactive components"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[lib]
+proc-macro = true
+
+[dependencies]
+proc-macro2 = "1"
+quote = "1"
+syn = { version = "2", features = ["full"] }
+
+[lints]
+workspace = true

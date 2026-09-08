@@ -112,9 +112,16 @@ fn children(target: &Document, key: Key) -> Vec<Key> {
     match key {
         Key::Placeholder(_) => Vec::new(),
         Key::Internals(shadow) => vec![child_key(target, target.shadow_root(shadow))],
-        Key::Node(id) if target.as_shadow(id).is_some() => std::iter::once(Key::Internals(id))
-            .chain(target.shadow_slots(id).into_iter().map(Key::Node))
-            .collect(),
+        Key::Node(id) if target.as_shadow(id).is_some() => {
+            let slots = target.shadow_slots(id);
+            if slots.is_empty() {
+                vec![child_key(target, target.shadow_root(id))]
+            } else {
+                std::iter::once(Key::Internals(id))
+                    .chain(slots.into_iter().map(Key::Node))
+                    .collect()
+            }
+        }
         Key::Node(id) => target
             .children(id)
             .into_iter()

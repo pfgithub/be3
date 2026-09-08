@@ -1,5 +1,6 @@
 use super::*;
 
+mod a_component_function_appears_in_the_inspector_tree_without_hiding_its_children;
 mod a_disabled_button_prop_tracks_a_signal_and_blocks_clicks_while_true;
 mod a_reactive_tree_can_nest_builder_calls_without_threading_the_document;
 mod a_signal_write_from_a_click_handler_updates_its_bound_text_in_the_same_frame;

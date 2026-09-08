@@ -10,6 +10,8 @@ render = ["dep:bytemuck", "dep:wgpu", "wgpu/std", "wgpu/wgsl"]
 window = ["render", "dep:arboard", "dep:pollster", "dep:winit", "wgpu/default"]
 
 [dependencies]
+beui_macros = { path = "../beui_macros" }
+bon = "3"
 bytemuck = { version = "1", features = ["derive"], optional = true }
 freetype = "0.7"
 harfbuzz_rs = "2"

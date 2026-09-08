@@ -1,5 +1,6 @@
 use beui::reactive::{
-    build, button, column, create_memo, create_signal, for_each, intrinsic, row, show, text,
+    build, button, column, component, create_memo, create_signal, for_each, intrinsic, row, show,
+    text,
 };
 use beui::{App, Color32, Context, Document, NodeId, Rect};
 
@@ -7,6 +8,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     beui::run("beui counter", CounterApp::new())
 }
 
+#[component]
+fn history_entry(value: i64) -> NodeId {
+    text(value.to_string())
+}
+
+#[component]
 fn app() -> NodeId {
     let (count, set_count) = create_signal(0i64);
     let (history, set_history) = create_signal(Vec::<(u64, i64)>::new());
@@ -71,7 +78,7 @@ fn app() -> NodeId {
         log,
         history,
         |(id, _)| *id,
-        |(_, value)| intrinsic(text(value.to_string())),
+        |(_, value)| intrinsic(history_entry(*value)),
     );
 
     column(

@@ -1,3 +1,5 @@
+extern crate self as beui;
+
 #[cfg(feature = "window")]
 mod app;
 mod base;

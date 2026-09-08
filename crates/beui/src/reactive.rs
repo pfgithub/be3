@@ -10,6 +10,7 @@ use crate::document::Document;
 use crate::node::{ClickHandler, NodeId};
 use crate::unstyled;
 
+pub use beui_macros::component;
 pub use reactive::{batch, create_memo, create_signal, on_cleanup, untrack, Memo, Scope};
 
 thread_local! {
@@ -56,6 +57,11 @@ pub fn build(f: impl FnOnce() -> NodeId) -> Document {
 
 pub fn bind(mut effect: impl FnMut(&mut Document) + 'static) {
     create_effect(move || with_document(&mut effect));
+}
+
+pub fn component(name: &'static str, f: impl FnOnce() -> NodeId) -> NodeId {
+    let root = f();
+    with_document(|document| document.create_shadow(name, root, Vec::new()))
 }
 
 pub enum Prop<T> {
@@ -223,57 +229,28 @@ pub fn for_each<T, K>(
     });
 }
 
-pub struct Button {
+fn boxed_click_handler(mut handler: impl FnMut() + 'static) -> ClickHandler {
+    Box::new(move |_document| handler())
+}
+
+#[component]
+#[bon::builder(finish_fn = build)]
+pub fn button(
     label: Option<NodeId>,
+    #[builder(with = |disabled: impl IntoProp<bool>| disabled.into_prop(), default = Prop::Static(false))]
     disabled: Prop<bool>,
+    #[builder(with = |handler: impl FnMut() + 'static| boxed_click_handler(handler))]
     on_click: Option<ClickHandler>,
-}
-
-impl Button {
-    pub fn new() -> Self {
-        Self {
-            label: None,
-            disabled: Prop::Static(false),
-            on_click: None,
-        }
+) -> NodeId {
+    let button = with_document(unstyled::button);
+    if let Some(label) = label {
+        with_document(|document| unstyled::set_button_child(document, button, label));
     }
-
-    pub fn label(mut self, node: NodeId) -> Self {
-        self.label = Some(node);
-        self
+    if let Some(on_click) = on_click {
+        with_document(|document| unstyled::set_button_on_click(document, button, on_click));
     }
-
-    pub fn disabled(mut self, disabled: impl IntoProp<bool>) -> Self {
-        self.disabled = disabled.into_prop();
-        self
-    }
-
-    pub fn on_click(mut self, mut handler: impl FnMut() + 'static) -> Self {
-        self.on_click = Some(Box::new(move |_document| handler()));
-        self
-    }
-
-    pub fn build(self) -> NodeId {
-        let button = with_document(unstyled::button);
-        if let Some(label) = self.label {
-            with_document(|document| unstyled::set_button_child(document, button, label));
-        }
-        if let Some(on_click) = self.on_click {
-            with_document(|document| unstyled::set_button_on_click(document, button, on_click));
-        }
-        self.disabled.apply(move |disabled| {
-            with_document(|document| unstyled::set_button_disabled(document, button, disabled))
-        });
-        button
-    }
-}
-
-impl Default for Button {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-pub fn button() -> Button {
-    Button::new()
+    disabled.apply(move |disabled| {
+        with_document(|document| unstyled::set_button_disabled(document, button, disabled))
+    });
+    button
 }
