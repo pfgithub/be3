@@ -25,6 +25,7 @@ mod enter_activates_the_focused_button;
 mod enter_confirms_the_highlighted_select_option_and_closes_the_popup;
 mod enter_toggles_the_focused_checkbox;
 mod escape_closes_an_open_select_popup_and_returns_focus_to_the_trigger;
+mod finding_a_node_by_its_test_id;
 mod flipping_a_switch_can_replace_the_items_of_a_scroll;
 mod hovering_a_row_highlights_the_node_it_lists;
 mod jumping_up_a_virtual_scroll_only_builds_the_items_in_view;
@@ -184,6 +185,12 @@ impl Harness {
         self.document
             .node_rect(id)
             .expect("the node was not laid out")
+    }
+
+    pub(crate) fn find(&self, test_id: &str) -> NodeId {
+        self.document
+            .find_test_id(test_id)
+            .unwrap_or_else(|| panic!("no node with test id {test_id:?}"))
     }
 
     pub(crate) fn center(&self, id: NodeId) -> Pos2 {

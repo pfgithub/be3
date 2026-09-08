@@ -23,6 +23,7 @@ pub struct Document {
     pub(crate) inspector: Option<Box<Inspector>>,
     pub(crate) inspectable: bool,
     pub(crate) overlay_stack: Vec<NodeId>,
+    test_ids: HashMap<String, NodeId>,
     layout_revision: u64,
     paint_revision: u64,
     viewport: Option<(Context, Rect, f32)>,
@@ -43,6 +44,7 @@ impl Document {
             inspector: None,
             inspectable: true,
             overlay_stack: Vec::new(),
+            test_ids: HashMap::new(),
             layout_revision: 0,
             paint_revision: 0,
             viewport: None,
@@ -77,6 +79,14 @@ impl Document {
 
     pub fn node_rect(&self, id: NodeId) -> Option<Rect> {
         self.rects.get(&id).copied()
+    }
+
+    pub fn set_test_id(&mut self, id: NodeId, test_id: impl Into<String>) {
+        self.test_ids.insert(test_id.into(), id);
+    }
+
+    pub fn find_test_id(&self, test_id: &str) -> Option<NodeId> {
+        self.test_ids.get(test_id).copied()
     }
 
     pub fn contains(&self, id: NodeId) -> bool {
@@ -147,6 +157,11 @@ impl Document {
             self.viewport = Some((ctx.clone(), rect, scale));
         }
         self.update_layout(ctx, rect);
+        for (test_id, id) in &self.test_ids {
+            if let Some(node_rect) = self.rects.get(id) {
+                ctx.publish_test_id(test_id, *node_rect);
+            }
+        }
 
         if interactive {
             if let Some(root) = self.root {

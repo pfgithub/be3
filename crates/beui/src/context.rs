@@ -1,4 +1,5 @@
 use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -16,6 +17,7 @@ struct Inner {
     fonts: RefCell<Fonts>,
     input: RefCell<InputState>,
     shapes: RefCell<Vec<Shape>>,
+    test_ids: RefCell<HashMap<String, Rect>>,
     copied_text: RefCell<Option<String>>,
     cursor_icon: Cell<CursorIcon>,
     repaint: Cell<bool>,
@@ -25,6 +27,7 @@ struct Inner {
 
 pub struct FrameOutput {
     pub(crate) shapes: Vec<Shape>,
+    test_ids: HashMap<String, Rect>,
     pub cursor_icon: CursorIcon,
     pub copied_text: Option<String>,
     pub repaint: bool,
@@ -35,6 +38,10 @@ pub struct FrameOutput {
 impl FrameOutput {
     pub fn shapes(&self) -> &[Shape] {
         &self.shapes
+    }
+
+    pub fn test_id_rect(&self, test_id: &str) -> Option<Rect> {
+        self.test_ids.get(test_id).copied()
     }
 }
 
@@ -49,6 +56,7 @@ impl Context {
                 fonts: RefCell::new(Fonts::new(sources)),
                 input: RefCell::new(InputState::default()),
                 shapes: RefCell::new(Vec::new()),
+                test_ids: RefCell::new(HashMap::new()),
                 copied_text: RefCell::new(None),
                 cursor_icon: Cell::new(CursorIcon::Default),
                 repaint: Cell::new(false),
@@ -61,6 +69,7 @@ impl Context {
     pub fn begin_frame(&self, raw: RawInput) {
         self.inner.input.borrow_mut().begin_frame(raw);
         self.inner.shapes.borrow_mut().clear();
+        self.inner.test_ids.borrow_mut().clear();
         self.inner.copied_text.borrow_mut().take();
         self.inner.cursor_icon.set(CursorIcon::Default);
         self.inner.repaint.set(false);
@@ -79,6 +88,7 @@ impl Context {
         }
         FrameOutput {
             shapes,
+            test_ids: std::mem::take(&mut *self.inner.test_ids.borrow_mut()),
             copied_text: self.inner.copied_text.borrow_mut().take(),
             changed,
             repaint_after: self.inner.repaint_after.get(),
@@ -135,6 +145,13 @@ impl Context {
 
     pub(crate) fn extend(&self, shapes: &[Shape]) {
         self.inner.shapes.borrow_mut().extend_from_slice(shapes);
+    }
+
+    pub(crate) fn publish_test_id(&self, test_id: &str, rect: Rect) {
+        self.inner
+            .test_ids
+            .borrow_mut()
+            .insert(test_id.to_owned(), rect);
     }
 
     pub fn pixels_per_point(&self) -> f32 {

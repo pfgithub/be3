@@ -65,6 +65,22 @@ impl<A: BeuiApp> BeuiTest<A> {
         self.events.push(Event::PointerMoved(pos));
     }
 
+    pub fn rect_of(&self, test_id: &str) -> Rect {
+        self.output
+            .as_ref()
+            .expect("the editor has not drawn a frame yet")
+            .test_id_rect(test_id)
+            .unwrap_or_else(|| panic!("no element with test id {test_id:?}"))
+    }
+
+    pub fn hover(&mut self, test_id: &str) {
+        self.hover_at(self.rect_of(test_id).center());
+    }
+
+    pub fn click(&mut self, test_id: &str) {
+        self.click_at(self.rect_of(test_id).center());
+    }
+
     pub fn click_at(&mut self, pos: Pos2) {
         self.hover_at(pos);
         self.events.push(Event::PointerButton {

@@ -17,14 +17,6 @@ pub trait Counter {
 pub struct CounterUi {
     document: Document,
     value: NodeId,
-    buttons: Buttons,
-}
-
-#[derive(Clone, Copy)]
-pub struct Buttons {
-    pub reset: NodeId,
-    pub decrement: NodeId,
-    pub increment: NodeId,
 }
 
 impl CounterUi {
@@ -35,6 +27,10 @@ impl CounterUi {
         let reset = styled::button(&mut document, "Reset", ButtonVariant::Secondary);
         let decrement = styled::button(&mut document, "-", ButtonVariant::Primary);
         let increment = styled::button(&mut document, "+", ButtonVariant::Primary);
+        document.set_test_id(value, "counter.value");
+        document.set_test_id(reset, "counter.reset");
+        document.set_test_id(decrement, "counter.decrement");
+        document.set_test_id(increment, "counter.increment");
 
         let reset_counter = counter.clone();
         styled::set_button_on_click(&mut document, reset, move |document| {
@@ -69,27 +65,11 @@ impl CounterUi {
         document.set_fill_child(background, padding);
         document.set_root(background);
 
-        Self {
-            document,
-            value,
-            buttons: Buttons {
-                reset,
-                decrement,
-                increment,
-            },
-        }
+        Self { document, value }
     }
 
     pub fn document(&self) -> &Document {
         &self.document
-    }
-
-    pub fn value_node(&self) -> NodeId {
-        self.value
-    }
-
-    pub fn buttons(&self) -> Buttons {
-        self.buttons
     }
 
     pub fn background(&self) -> Color32 {
