@@ -20,6 +20,7 @@ pub const FONT_BODY: f32 = 14.0;
 pub const FONT_HEADING: f32 = 16.0;
 pub const FONT_TITLE: f32 = 21.0;
 pub const FONT_DISPLAY: f32 = 46.0;
+pub const ICON_SIZE: f32 = 18.0;
 
 pub const RADIUS: u8 = 6;
 pub const CARD_RADIUS: u8 = 10;

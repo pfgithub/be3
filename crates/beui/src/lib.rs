@@ -6,6 +6,7 @@ mod context;
 mod document;
 mod font;
 mod geometry;
+pub mod icons;
 mod input;
 mod inspector;
 mod interact;
@@ -24,7 +25,9 @@ pub use base::{Align, Direction, ItemSize, ScrollPosition, TextAlign};
 pub use color::Color32;
 pub use context::{Context, FrameOutput};
 pub use document::Document;
-pub use font::{FontFamily, FontId, FontSource, FontSources, Galley, Glyph, GlyphId, GlyphImage};
+pub use font::{
+    FontFamily, FontId, FontSource, FontSources, Galley, Glyph, GlyphId, GlyphImage, ICONS_FONT,
+};
 pub use geometry::{pos2, vec2, Pos2, Rect, Vec2};
 pub use input::{
     CursorIcon, Event, InputState, Key, KeyPress, Modifiers, PointerButton, PointerPress, RawInput,

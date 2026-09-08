@@ -47,6 +47,7 @@ pub fn beui_fonts() -> beui::FontSources {
         fallback: vec![beui::FontSource::Memory(
             epaint_default_fonts::NOTO_EMOJI_REGULAR,
         )],
+        icons: vec![beui::FontSource::Memory(beui::ICONS_FONT)],
     }
 }
 

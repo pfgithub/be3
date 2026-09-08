@@ -15,6 +15,7 @@ use crate::geometry::{pos2, vec2, Pos2, Rect, Vec2};
 pub enum FontFamily {
     Proportional,
     Monospace,
+    Icons,
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -35,6 +36,13 @@ impl FontId {
         Self {
             size,
             family: FontFamily::Monospace,
+        }
+    }
+
+    pub fn icons(size: f32) -> Self {
+        Self {
+            size,
+            family: FontFamily::Icons,
         }
     }
 }
@@ -192,6 +200,7 @@ pub struct FontSources {
     pub proportional: Vec<FontSource>,
     pub monospace: Vec<FontSource>,
     pub fallback: Vec<FontSource>,
+    pub icons: Vec<FontSource>,
 }
 
 impl FontSources {
@@ -200,6 +209,7 @@ impl FontSources {
             proportional: files(PROPORTIONAL_CANDIDATES),
             monospace: files(MONOSPACE_CANDIDATES),
             fallback: files(FALLBACK_CANDIDATES),
+            icons: vec![FontSource::Memory(ICONS_FONT)],
         }
     }
 }
@@ -242,6 +252,7 @@ pub(crate) struct Fonts {
     faces: Vec<FaceData>,
     proportional: Vec<usize>,
     monospace: Vec<usize>,
+    icons: Vec<usize>,
     glyphs: HashMap<GlyphId, Rc<GlyphImage>>,
     galleys: HashMap<GalleyKey, Galley>,
     pixels_per_point: f32,
@@ -256,6 +267,7 @@ impl Fonts {
             faces: Vec::new(),
             proportional: Vec::new(),
             monospace: Vec::new(),
+            icons: Vec::new(),
             glyphs: HashMap::new(),
             galleys: HashMap::new(),
             pixels_per_point: 1.0,
@@ -285,6 +297,7 @@ impl Fonts {
         let fallback = self.load_chain(&sources.fallback);
         self.proportional = chain(&proportional, &[&monospace, &fallback]);
         self.monospace = chain(&monospace, &[&proportional, &fallback]);
+        self.icons = self.load_chain(&sources.icons);
     }
 
     fn load_chain(&mut self, sources: &[FontSource]) -> Vec<usize> {
@@ -343,6 +356,7 @@ impl Fonts {
         match family {
             FontFamily::Proportional => &self.proportional,
             FontFamily::Monospace => &self.monospace,
+            FontFamily::Icons => &self.icons,
         }
     }
 
@@ -711,6 +725,8 @@ fn pixels(bitmap: &ft::FT_Bitmap) -> Vec<u8> {
     }
     pixels
 }
+
+pub const ICONS_FONT: &[u8] = include_bytes!("../assets/icons/MaterialSymbolsRounded-Filled.ttf");
 
 const PROPORTIONAL_CANDIDATES: &[&str] = &[
     "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",

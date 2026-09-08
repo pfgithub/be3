@@ -35,7 +35,7 @@ pub use shortcut::shortcut;
 pub use slider::{set_slider_on_change, set_slider_value, slider, slider_value};
 pub use switch::{set_switch_on, set_switch_on_change, switch, switch_on};
 pub use tabs::{focus_tabs, set_tabs_on_change, set_tabs_selected, tabs, tabs_selected};
-pub use text::{body, caption, code, display, heading, paragraph, title};
+pub use text::{body, caption, code, display, heading, icon, icon_sized, paragraph, title};
 pub use text_input::{
     focus_text_input, set_text_input_on_change, set_text_input_on_submit,
     set_text_input_placeholder, set_text_input_value, text_input, text_input_value,

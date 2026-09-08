@@ -4,7 +4,7 @@ use crate::base::TextAlign;
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::styled::theme::{
-    FONT_BODY, FONT_DISPLAY, FONT_HEADING, FONT_SMALL, FONT_TITLE, TEXT, TEXT_MUTED,
+    FONT_BODY, FONT_DISPLAY, FONT_HEADING, FONT_SMALL, FONT_TITLE, ICON_SIZE, TEXT, TEXT_MUTED,
 };
 
 pub fn display(document: &mut Document, content: impl Into<String>) -> NodeId {
@@ -38,6 +38,17 @@ pub fn paragraph(document: &mut Document, content: impl Into<String>) -> NodeId 
     let paragraph = document.create_text(content, FONT_BODY, TEXT_MUTED);
     document.set_text_wrap(paragraph, true);
     paragraph
+}
+
+pub fn icon(document: &mut Document, glyph: &str) -> NodeId {
+    icon_sized(document, glyph, ICON_SIZE, TEXT)
+}
+
+pub fn icon_sized(document: &mut Document, glyph: &str, font_size: f32, color: Color32) -> NodeId {
+    let icon = document.create_text(glyph, font_size, color);
+    document.set_text_icon(icon, true);
+    document.set_text_align(icon, TextAlign::Center, TextAlign::Center);
+    icon
 }
 
 fn line(

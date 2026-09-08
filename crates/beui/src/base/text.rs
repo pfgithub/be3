@@ -41,6 +41,7 @@ pub(crate) struct TextNode {
     vertical: TextAlign,
     wrap: bool,
     monospace: bool,
+    icon: bool,
     clip: bool,
     caret: Option<usize>,
     selection: Vec<Range<usize>>,
@@ -51,7 +52,9 @@ pub(crate) struct TextNode {
 
 impl TextNode {
     fn font(&self) -> FontId {
-        if self.monospace {
+        if self.icon {
+            FontId::icons(self.font_size)
+        } else if self.monospace {
             FontId::monospace(self.font_size)
         } else {
             FontId::proportional(self.font_size)
@@ -259,6 +262,7 @@ impl Document {
             vertical: TextAlign::Start,
             wrap: false,
             monospace: false,
+            icon: false,
             clip: false,
             caret: None,
             selection: Vec::new(),
@@ -304,6 +308,12 @@ impl Document {
     pub fn set_text_monospace(&mut self, text: NodeId, monospace: bool) {
         if self.arena.get_as::<TextNode>(text).monospace != monospace {
             self.arena.get_mut_as::<TextNode>(text).monospace = monospace;
+        }
+    }
+
+    pub fn set_text_icon(&mut self, text: NodeId, icon: bool) {
+        if self.arena.get_as::<TextNode>(text).icon != icon {
+            self.arena.get_mut_as::<TextNode>(text).icon = icon;
         }
     }
 
