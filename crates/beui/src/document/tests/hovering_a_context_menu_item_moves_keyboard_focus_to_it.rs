@@ -1,19 +1,18 @@
 use super::*;
 
 #[test]
-fn tab_is_trapped_inside_an_open_context_menu() {
+fn hovering_a_context_menu_item_moves_keyboard_focus_to_it() {
     let mut document = Document::new();
     let region = document.create_sized(Some(120.0), Some(60.0));
     let fill = document.create_fill(Color32::from_gray(80), 4);
     document.set_sized_child(region, fill);
-    let before = labelled_button(&mut document, "Before");
     let items = vec![
         unstyled::MenuItem::new("Copy"),
         unstyled::MenuItem::new("Paste"),
+        unstyled::MenuItem::new("Delete"),
     ];
     let menu = styled::context_menu(&mut document, region, items);
-    let after = labelled_button(&mut document, "After");
-    toolbar(&mut document, &[before, menu, after]);
+    toolbar(&mut document, &[menu]);
     let mut harness = Harness::new(document);
     harness.frame(Vec::new());
 
@@ -29,18 +28,16 @@ fn tab_is_trapped_inside_an_open_context_menu() {
 
     let inner = harness.document().shadow_root(menu);
     let content = unstyled::context_menu_menu(harness.document(), inner);
-    let root_focusable = unstyled::menu_list_root_focusable(harness.document(), content);
-    let before_focusable = unstyled::button_focusable(harness.document(), before);
-    let after_focusable = unstyled::button_focusable(harness.document(), after);
+    let paste = unstyled::menu_list_row_button(harness.document(), content, 1);
+    let delete = unstyled::menu_list_row_button(harness.document(), content, 2);
 
-    assert_eq!(harness.document().focused_node(), Some(root_focusable));
+    let paste_pos = harness.center(paste);
+    harness.frame(vec![Event::PointerMoved(paste_pos)]);
 
-    for _ in 0..3 {
-        harness.key(Key::Tab, Modifiers::NONE);
-        harness.frame(Vec::new());
-        let focused = harness.document().focused_node();
-        assert_eq!(focused, Some(root_focusable));
-        assert_ne!(focused, Some(before_focusable));
-        assert_ne!(focused, Some(after_focusable));
-    }
+    assert!(unstyled::button_focused(harness.document(), paste));
+
+    harness.key(Key::ArrowDown, Modifiers::NONE);
+    harness.frame(Vec::new());
+
+    assert!(unstyled::button_focused(harness.document(), delete));
 }

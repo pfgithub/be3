@@ -71,6 +71,9 @@ fn style_menu_rows(document: &mut Document, menu: NodeId, items: &[MenuItem]) {
         unstyled::set_button_child(document, button, fill);
 
         unstyled::set_button_on_hover_change(document, button, move |document, hovered| {
+            if hovered {
+                unstyled::hover_menu_list_row(document, menu, index);
+            }
             let focused = unstyled::button_focused(document, button);
             document.set_fill_color(fill, row_background(focused, hovered));
         });

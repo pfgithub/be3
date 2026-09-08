@@ -210,6 +210,10 @@ pub fn select_highlighted(document: &Document, select: NodeId) -> Option<usize> 
     document.component_state::<State>(select).highlighted
 }
 
+pub fn set_select_highlighted(document: &mut Document, select: NodeId, highlighted: Option<usize>) {
+    set_highlighted(document, select, highlighted);
+}
+
 pub fn set_select_on_highlight_change(
     document: &mut Document,
     select: NodeId,

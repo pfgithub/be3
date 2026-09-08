@@ -34,11 +34,18 @@ fn arrow_keys_move_a_visible_highlight_through_an_open_context_menu() {
             })
             .count()
     };
-    assert_eq!(highlights(&opened), 1, "first item should open highlighted");
+    assert_eq!(highlights(&opened), 0, "nothing should be highlighted yet");
 
     let moved = harness.frame(vec![key_event(Key::ArrowDown, true, Modifiers::NONE)]);
     assert_eq!(
         highlights(&moved),
+        1,
+        "first arrow press should highlight an item"
+    );
+
+    let moved_again = harness.frame(vec![key_event(Key::ArrowDown, true, Modifiers::NONE)]);
+    assert_eq!(
+        highlights(&moved_again),
         1,
         "highlight should move rather than disappear"
     );

@@ -98,6 +98,9 @@ pub fn select(document: &mut Document, options: &[String], selected: Option<usiz
         row_fills.push(row_fill);
 
         unstyled::set_button_on_hover_change(document, button, move |document, hovered| {
+            if hovered {
+                unstyled::set_select_highlighted(document, inner, Some(index));
+            }
             let highlighted = unstyled::select_highlighted(document, inner) == Some(index);
             document.set_fill_color(row_fill, option_background(highlighted, hovered));
         });

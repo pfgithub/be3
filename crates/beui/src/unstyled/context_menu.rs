@@ -41,7 +41,7 @@ pub fn context_menu(document: &mut Document, region: NodeId, items: Vec<MenuItem
         document.set_overlay_anchor(overlay, OverlayAnchor::Point(press.pos));
         document.open_overlay(overlay);
         let content = document.component_state::<State>(context_menu).content;
-        menu::focus_menu_list(document, content);
+        menu::focus_menu_list_root(document, content);
     });
 
     context_menu

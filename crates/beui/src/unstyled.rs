@@ -31,8 +31,8 @@ pub use disclosure::{
 };
 pub use layout::{centered_row, column, row, spacer};
 pub use menu::{
-    menu_list_len, menu_list_row_button, menu_list_row_submenu_content,
-    menu_list_row_submenu_overlay, MenuItem,
+    hover_menu_list_row, menu_list_len, menu_list_root_focusable, menu_list_row_button,
+    menu_list_row_submenu_content, menu_list_row_submenu_overlay, MenuItem,
 };
 pub use pressable::{
     focus_pressable, pressable, pressable_active, pressable_focused, pressable_hovered,
@@ -42,8 +42,8 @@ pub use pressable::{
 pub use select::{
     focus_select, select, select_highlighted, select_open, select_option_button,
     select_option_count, select_option_label_node, select_overlay, select_search, select_selected,
-    select_trigger, set_select_on_change, set_select_on_highlight_change, set_select_open,
-    set_select_options, set_select_selected,
+    select_trigger, set_select_highlighted, set_select_on_change, set_select_on_highlight_change,
+    set_select_open, set_select_options, set_select_selected,
 };
 pub use slider::{
     focus_slider, set_slider_child, set_slider_on_change, set_slider_on_drag_change,

@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn selecting_a_leaf_item_in_a_nested_context_menu_closes_the_whole_menu_stack() {
+fn hovering_a_menu_item_with_children_opens_its_submenu_without_a_click() {
     let mut document = Document::new();
     let region = document.create_sized(Some(120.0), Some(60.0));
     let fill = document.create_fill(Color32::from_gray(80), 4);
@@ -14,11 +14,6 @@ fn selecting_a_leaf_item_in_a_nested_context_menu_closes_the_whole_menu_stack() 
         ],
     )];
     let menu = styled::context_menu(&mut document, region, items);
-    let selected = Rc::new(RefCell::new(Vec::new()));
-    let sink = selected.clone();
-    styled::set_context_menu_on_select(&mut document, menu, move |_document, path| {
-        sink.borrow_mut().push(path);
-    });
     toolbar(&mut document, &[menu]);
     let mut harness = Harness::new(document);
     harness.frame(Vec::new());
@@ -34,17 +29,17 @@ fn selecting_a_leaf_item_in_a_nested_context_menu_closes_the_whole_menu_stack() 
     harness.frame(Vec::new());
 
     let inner = harness.document().shadow_root(menu);
-    let overlay = unstyled::context_menu_overlay(harness.document(), inner);
+    let content = unstyled::context_menu_menu(harness.document(), inner);
+    let share_button = unstyled::menu_list_row_button(harness.document(), content, 0);
+    let submenu = unstyled::menu_list_row_submenu_content(harness.document(), content, 0)
+        .expect("share has a submenu");
+    let email_button = unstyled::menu_list_row_button(harness.document(), submenu, 0);
 
-    harness.key(Key::ArrowDown, Modifiers::NONE);
-    harness.frame(Vec::new());
-    harness.key(Key::ArrowRight, Modifiers::NONE);
-    harness.frame(Vec::new());
-    harness.key(Key::ArrowDown, Modifiers::NONE);
-    harness.frame(Vec::new());
-    harness.key(Key::Enter, Modifiers::NONE);
-    harness.frame(Vec::new());
+    assert!(harness.document().node_rect(email_button).is_none());
 
-    assert_eq!(selected.borrow().as_slice(), &[vec![0usize, 1usize]]);
-    assert!(!harness.document().is_overlay_open(overlay));
+    let share_pos = harness.center(share_button);
+    harness.frame(vec![Event::PointerMoved(share_pos)]);
+
+    assert!(harness.document().node_rect(email_button).is_some());
+    assert!(unstyled::button_focused(harness.document(), email_button));
 }

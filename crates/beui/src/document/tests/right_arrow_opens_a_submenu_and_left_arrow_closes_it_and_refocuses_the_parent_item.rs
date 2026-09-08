@@ -34,6 +34,11 @@ fn right_arrow_opens_a_submenu_and_left_arrow_closes_it_and_refocuses_the_parent
     let submenu = unstyled::menu_list_row_submenu_content(harness.document(), content, 0)
         .expect("share has a submenu");
 
+    assert!(!unstyled::button_focused(harness.document(), share_button));
+
+    harness.key(Key::ArrowDown, Modifiers::NONE);
+    harness.frame(Vec::new());
+
     assert!(unstyled::button_focused(harness.document(), share_button));
 
     harness.key(Key::ArrowRight, Modifiers::NONE);

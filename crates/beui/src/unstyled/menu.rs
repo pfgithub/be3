@@ -39,6 +39,7 @@ struct Row {
 
 struct State {
     rows: Vec<Row>,
+    root: NodeId,
     on_select: Option<Handler<Vec<usize>>>,
 }
 
@@ -52,18 +53,25 @@ fn build_menu_list(
     parent: Option<(NodeId, NodeId)>,
 ) -> NodeId {
     let column = unstyled::column(document, 2.0);
-    let menu = document.create_shadow("menu", column, Vec::new());
+    let root = document.create_focusable();
+    document.set_focusable_tab_stop(root, true);
+    let wrapper = unstyled::column(document, 0.0);
+    document.append_child(wrapper, root, ItemSize::Intrinsic);
+    document.append_child(wrapper, column, ItemSize::Intrinsic);
+    let menu = document.create_shadow("menu", wrapper, Vec::new());
     document.set_component_state(
         menu,
         State {
             rows: Vec::new(),
+            root,
             on_select: None,
         },
     );
+    document.set_focusable_on_key(root, move |document, press| root_key(document, menu, press));
 
     for (index, item) in items.iter().enumerate() {
         let button = unstyled::button(document);
-        unstyled::set_button_tab_stop(document, button, index == 0);
+        unstyled::set_button_tab_stop(document, button, false);
         document.append_child(column, button, ItemSize::Intrinsic);
 
         let (submenu, submenu_content) = if item.children.is_empty() {
@@ -101,12 +109,8 @@ fn build_menu_list(
             }
         });
         unstyled::set_button_on_hover_change(document, button, move |document, hovered| {
-            if !hovered {
-                return;
-            }
-            close_sibling_submenus(document, menu, index);
-            if let Some(overlay) = document.component_state::<State>(menu).rows[index].submenu {
-                document.open_overlay(overlay);
+            if hovered {
+                hover_menu_list_row(document, menu, index);
             }
         });
         unstyled::set_button_on_key(document, button, move |document, press| {
@@ -155,6 +159,15 @@ pub(crate) fn focus_menu_list(document: &mut Document, menu: NodeId) {
     }
 }
 
+pub(crate) fn focus_menu_list_root(document: &mut Document, menu: NodeId) {
+    let root = document.component_state::<State>(menu).root;
+    document.focus_focusable(root);
+}
+
+pub fn menu_list_root_focusable(document: &Document, menu: NodeId) -> NodeId {
+    document.component_state::<State>(menu).root
+}
+
 fn open_submenu(document: &mut Document, menu: NodeId, index: usize) -> bool {
     let row = &document.component_state::<State>(menu).rows[index];
     if row.disabled {
@@ -184,8 +197,18 @@ fn close_sibling_submenus(document: &mut Document, menu: NodeId, index: usize) {
     }
 }
 
+pub fn hover_menu_list_row(document: &mut Document, menu: NodeId, index: usize) {
+    close_sibling_submenus(document, menu, index);
+    if open_submenu(document, menu, index) {
+        return;
+    }
+    focus_row(document, menu, index);
+}
+
 fn focus_row(document: &mut Document, menu: NodeId, index: usize) {
     close_sibling_submenus(document, menu, index);
+    let root = document.component_state::<State>(menu).root;
+    document.set_focusable_tab_stop(root, false);
     let buttons: Vec<NodeId> = document
         .component_state::<State>(menu)
         .rows
@@ -196,6 +219,31 @@ fn focus_row(document: &mut Document, menu: NodeId, index: usize) {
         unstyled::set_button_tab_stop(document, button, i == index);
     }
     unstyled::focus_button(document, buttons[index]);
+}
+
+fn root_key(document: &mut Document, menu: NodeId, press: KeyPress) -> bool {
+    if press.modifiers.ctrl || press.modifiers.alt {
+        return false;
+    }
+    let count = menu_list_len(document, menu);
+    if count == 0 {
+        return false;
+    }
+    match press.key {
+        Key::ArrowDown | Key::Home => {
+            if press.pressed {
+                focus_row(document, menu, 0);
+            }
+            true
+        }
+        Key::ArrowUp | Key::End => {
+            if press.pressed {
+                focus_row(document, menu, count - 1);
+            }
+            true
+        }
+        _ => false,
+    }
 }
 
 fn key(
