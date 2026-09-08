@@ -207,11 +207,20 @@ fn expand(item: TokenStream, shadowed: bool) -> TokenStream {
         quote! { #block }
     };
 
+    let prop_idents: Vec<_> = props.iter().map(|prop| prop.ident.clone()).collect();
+
     quote! {
         #(#attrs)*
-        #[derive(Default)]
         #vis struct #builder_ident #generics #where_clause {
             #(#fields,)*
+        }
+
+        impl #generics ::core::default::Default for #builder_ident #generics #where_clause {
+            fn default() -> Self {
+                Self {
+                    #(#prop_idents: ::core::default::Default::default(),)*
+                }
+            }
         }
 
         impl #generics #builder_ident #generics #where_clause {

@@ -11,13 +11,11 @@ fn for_each_reuses_nodes_for_keys_that_persist_across_an_update() {
     let document = build(move || {
         let (items, set_items) = create_signal(vec![1i64, 2, 3]);
 
-        let list = column()
+        let list = for_each()
             .spacing(0.0)
-            .children(for_each(
-                items,
-                |value| *value,
-                |value| intrinsic(text().string(value.to_string()).build()),
-            ))
+            .items(items)
+            .key(|value| *value)
+            .view(|value| intrinsic(text().string(value.to_string()).build()))
             .build();
         sink_list.set(Some(list));
 
@@ -37,6 +35,7 @@ fn for_each_reuses_nodes_for_keys_that_persist_across_an_update() {
     let shuffle = shuffle_id.get().expect("the shuffle button was created");
     let mut harness = Harness::new(document);
     harness.frame(Vec::new());
+    let list = harness.document().shadow_root(list);
 
     let before = harness.document().children(list);
     assert_eq!(

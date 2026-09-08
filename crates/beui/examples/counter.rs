@@ -61,15 +61,6 @@ fn app() -> NodeId {
         set_history.set(Vec::new());
     };
 
-    let log = column()
-        .spacing(4.0)
-        .children(for_each(
-            history,
-            |(id, _)| *id,
-            |(_, value)| intrinsic(history_entry().value(*value).build()),
-        ))
-        .build();
-
     view! {
         column {
             spacing: 8.0,
@@ -94,7 +85,12 @@ fn app() -> NodeId {
                     },
                 }
             ],
-            log
+            for_each {
+                spacing: 4.0,
+                items: history,
+                key: |(id, _)| *id,
+                view: |(_, value)| intrinsic(history_entry().value(*value).build()),
+            }
         ]
     }
 }

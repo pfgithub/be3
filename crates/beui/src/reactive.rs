@@ -247,41 +247,64 @@ pub fn show(
     visibility
 }
 
-pub fn for_each<T, K>(
-    items: impl IntoProp<Vec<T>> + 'static,
-    key: impl Fn(&T) -> K + 'static,
+fn boxed_for_each_key<T, K>(key: impl Fn(&T) -> K + 'static) -> Box<dyn Fn(&T) -> K>
+where
+    T: 'static,
+    K: 'static,
+{
+    Box::new(key)
+}
+
+type ForEachView<T> = Box<dyn Fn(&T) -> (NodeId, ItemSize)>;
+
+fn boxed_for_each_view<T: 'static>(
     view: impl Fn(&T) -> (NodeId, ItemSize) + 'static,
-) -> Children
+) -> ForEachView<T> {
+    Box::new(view)
+}
+
+#[component]
+pub fn for_each<T, K>(
+    spacing: f32,
+    items: Prop<Vec<T>>,
+    #[prop(with = |key: impl Fn(&T) -> K + 'static| boxed_for_each_key(key))] key: Option<
+        Box<dyn Fn(&T) -> K>,
+    >,
+    #[prop(with = |view: impl Fn(&T) -> (NodeId, ItemSize) + 'static| boxed_for_each_view(view))]
+    view: Option<ForEachView<T>>,
+) -> NodeId
 where
     T: 'static,
     K: Hash + Eq + 'static,
 {
-    Children(Box::new(move |parent| {
-        let existing: Rc<RefCell<HashMap<K, (NodeId, ItemSize)>>> =
-            Rc::new(RefCell::new(HashMap::new()));
-        items.into_prop().apply(move |items| {
-            let mut existing = existing.borrow_mut();
-            let mut next = Vec::with_capacity(items.len());
-            for item in &items {
-                let entry = existing.remove(&key(item)).unwrap_or_else(|| view(item));
-                next.push((key(item), entry));
+    let key = key.expect("for_each requires a `key` callback");
+    let view = view.expect("for_each requires a `view` callback");
+    let parent = with_document(|document| unstyled::column(document, spacing));
+    let existing: Rc<RefCell<HashMap<K, (NodeId, ItemSize)>>> =
+        Rc::new(RefCell::new(HashMap::new()));
+    items.apply(move |items| {
+        let mut existing = existing.borrow_mut();
+        let mut next = Vec::with_capacity(items.len());
+        for item in &items {
+            let entry = existing.remove(&key(item)).unwrap_or_else(|| view(item));
+            next.push((key(item), entry));
+        }
+        with_document(|document| {
+            for (removed, _) in existing.values() {
+                document.remove_child(parent, *removed);
+                document.remove_node(*removed);
             }
-            with_document(|document| {
-                for (removed, _) in existing.values() {
-                    document.remove_child(parent, *removed);
-                    document.remove_node(*removed);
-                }
-                for (_, (child, _)) in &next {
-                    document.remove_child(parent, *child);
-                }
-                for (_, (child, size)) in &next {
-                    document.append_child(parent, *child, *size);
-                }
-            });
-            existing.clear();
-            existing.extend(next);
+            for (_, (child, _)) in &next {
+                document.remove_child(parent, *child);
+            }
+            for (_, (child, size)) in &next {
+                document.append_child(parent, *child, *size);
+            }
         });
-    }))
+        existing.clear();
+        existing.extend(next);
+    });
+    parent
 }
 
 fn boxed_click_handler(mut handler: impl FnMut() + 'static) -> ClickHandler {
