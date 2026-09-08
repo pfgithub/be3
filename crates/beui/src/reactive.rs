@@ -160,24 +160,45 @@ pub fn percent(node: NodeId, weight: f32) -> (NodeId, ItemSize) {
     (node, ItemSize::Percent(weight))
 }
 
-pub fn row(spacing: f32, children: impl IntoIterator<Item = (NodeId, ItemSize)>) -> NodeId {
-    with_document(|document| {
-        let row = unstyled::row(document, spacing);
-        for (child, size) in children {
-            document.append_child(row, child, size);
-        }
-        row
-    })
+pub struct Children(Box<dyn FnOnce(NodeId)>);
+
+impl Children {
+    fn mount(self, parent: NodeId) {
+        (self.0)(parent)
+    }
 }
 
-pub fn column(spacing: f32, children: impl IntoIterator<Item = (NodeId, ItemSize)>) -> NodeId {
-    with_document(|document| {
-        let column = unstyled::column(document, spacing);
-        for (child, size) in children {
-            document.append_child(column, child, size);
-        }
-        column
-    })
+impl<I: IntoIterator<Item = (NodeId, ItemSize)>> From<I> for Children {
+    fn from(children: I) -> Self {
+        let children: Vec<_> = children.into_iter().collect();
+        Children(Box::new(move |parent| {
+            with_document(|document| {
+                for (child, size) in children {
+                    document.append_child(parent, child, size);
+                }
+            });
+        }))
+    }
+}
+
+#[bon::builder(finish_fn = build)]
+pub fn row(
+    spacing: f32,
+    #[builder(with = |children: impl Into<Children>| children.into())] children: Children,
+) -> NodeId {
+    let row = with_document(|document| unstyled::row(document, spacing));
+    children.mount(row);
+    row
+}
+
+#[bon::builder(finish_fn = build)]
+pub fn column(
+    spacing: f32,
+    #[builder(with = |children: impl Into<Children>| children.into())] children: Children,
+) -> NodeId {
+    let column = with_document(|document| unstyled::column(document, spacing));
+    children.mount(column);
+    column
 }
 
 pub fn show(condition: impl IntoProp<bool>, then: impl Fn() -> NodeId + 'static) -> NodeId {
@@ -195,38 +216,40 @@ pub fn show(condition: impl IntoProp<bool>, then: impl Fn() -> NodeId + 'static)
 }
 
 pub fn for_each<T, K>(
-    parent: NodeId,
-    items: impl IntoProp<Vec<T>>,
+    items: impl IntoProp<Vec<T>> + 'static,
     key: impl Fn(&T) -> K + 'static,
     view: impl Fn(&T) -> (NodeId, ItemSize) + 'static,
-) where
+) -> Children
+where
     T: 'static,
     K: Hash + Eq + 'static,
 {
-    let existing: Rc<RefCell<HashMap<K, (NodeId, ItemSize)>>> =
-        Rc::new(RefCell::new(HashMap::new()));
-    items.into_prop().apply(move |items| {
-        let mut existing = existing.borrow_mut();
-        let mut next = Vec::with_capacity(items.len());
-        for item in &items {
-            let entry = existing.remove(&key(item)).unwrap_or_else(|| view(item));
-            next.push((key(item), entry));
-        }
-        with_document(|document| {
-            for (removed, _) in existing.values() {
-                document.remove_child(parent, *removed);
-                document.remove_node(*removed);
+    Children(Box::new(move |parent| {
+        let existing: Rc<RefCell<HashMap<K, (NodeId, ItemSize)>>> =
+            Rc::new(RefCell::new(HashMap::new()));
+        items.into_prop().apply(move |items| {
+            let mut existing = existing.borrow_mut();
+            let mut next = Vec::with_capacity(items.len());
+            for item in &items {
+                let entry = existing.remove(&key(item)).unwrap_or_else(|| view(item));
+                next.push((key(item), entry));
             }
-            for (_, (child, _)) in &next {
-                document.remove_child(parent, *child);
-            }
-            for (_, (child, size)) in &next {
-                document.append_child(parent, *child, *size);
-            }
+            with_document(|document| {
+                for (removed, _) in existing.values() {
+                    document.remove_child(parent, *removed);
+                    document.remove_node(*removed);
+                }
+                for (_, (child, _)) in &next {
+                    document.remove_child(parent, *child);
+                }
+                for (_, (child, size)) in &next {
+                    document.append_child(parent, *child, *size);
+                }
+            });
+            existing.clear();
+            existing.extend(next);
         });
-        existing.clear();
-        existing.extend(next);
-    });
+    }))
 }
 
 fn boxed_click_handler(mut handler: impl FnMut() + 'static) -> ClickHandler {

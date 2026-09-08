@@ -11,13 +11,14 @@ fn for_each_reuses_nodes_for_keys_that_persist_across_an_update() {
     let document = build(move || {
         let (items, set_items) = create_signal(vec![1i64, 2, 3]);
 
-        let list = column(0.0, []);
-        for_each(
-            list,
-            items,
-            |value| *value,
-            |value| intrinsic(text(value.to_string())),
-        );
+        let list = column()
+            .spacing(0.0)
+            .children(for_each(
+                items,
+                |value| *value,
+                |value| intrinsic(text(value.to_string())),
+            ))
+            .build();
         sink_list.set(Some(list));
 
         let shuffle = button()
@@ -26,7 +27,10 @@ fn for_each_reuses_nodes_for_keys_that_persist_across_an_update() {
             .build();
         sink_shuffle.set(Some(shuffle));
 
-        column(0.0, [intrinsic(shuffle), intrinsic(list)])
+        column()
+            .spacing(0.0)
+            .children([intrinsic(shuffle), intrinsic(list)])
+            .build()
     });
 
     let list = list_id.get().expect("the list container was created");

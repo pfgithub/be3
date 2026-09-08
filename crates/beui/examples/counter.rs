@@ -73,29 +73,32 @@ fn app() -> NodeId {
             .build()
     });
 
-    let log = column(4.0, []);
-    for_each(
-        log,
-        history,
-        |(id, _)| *id,
-        |(_, value)| intrinsic(history_entry(*value)),
-    );
+    let log = column()
+        .spacing(4.0)
+        .children(for_each(
+            history,
+            |(id, _)| *id,
+            |(_, value)| intrinsic(history_entry(*value)),
+        ))
+        .build();
 
-    column(
-        8.0,
-        [
-            intrinsic(row(
-                8.0,
-                [
-                    intrinsic(decrement),
-                    intrinsic(text(count)),
-                    intrinsic(increment),
-                    intrinsic(reset),
-                ],
-            )),
+    column()
+        .spacing(8.0)
+        .children([
+            intrinsic(
+                row()
+                    .spacing(8.0)
+                    .children([
+                        intrinsic(decrement),
+                        intrinsic(text(count)),
+                        intrinsic(increment),
+                        intrinsic(reset),
+                    ])
+                    .build(),
+            ),
             intrinsic(log),
-        ],
-    )
+        ])
+        .build()
 }
 
 struct CounterApp {

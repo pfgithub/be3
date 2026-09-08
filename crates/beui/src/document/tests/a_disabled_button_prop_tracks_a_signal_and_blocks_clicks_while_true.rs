@@ -26,7 +26,10 @@ fn a_disabled_button_prop_tracks_a_signal_and_blocks_clicks_while_true() {
             .build();
         sink_go.set(Some(go));
 
-        column(0.0, [intrinsic(toggle), intrinsic(go)])
+        column()
+            .spacing(0.0)
+            .children([intrinsic(toggle), intrinsic(go)])
+            .build()
     });
 
     let toggle = toggle_id.get().expect("toggle button was created");

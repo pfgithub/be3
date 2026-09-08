@@ -25,7 +25,10 @@ fn show_lazily_builds_and_toggles_its_child_when_the_condition_changes() {
         });
         sink_panel.set(Some(panel));
 
-        column(0.0, [intrinsic(toggle), intrinsic(panel)])
+        column()
+            .spacing(0.0)
+            .children([intrinsic(toggle), intrinsic(panel)])
+            .build()
     });
 
     let toggle = toggle_id.get().expect("toggle button was created");

@@ -17,13 +17,15 @@ fn a_reactive_tree_can_nest_builder_calls_without_threading_the_document() {
             .build();
         sink_value.set(Some(value_node));
         sink_increment.set(Some(increment_node));
-        column(
-            8.0,
-            [intrinsic(row(
-                8.0,
-                [intrinsic(increment_node), intrinsic(value_node)],
-            ))],
-        )
+        column()
+            .spacing(8.0)
+            .children([intrinsic(
+                row()
+                    .spacing(8.0)
+                    .children([intrinsic(increment_node), intrinsic(value_node)])
+                    .build(),
+            )])
+            .build()
     });
 
     let value = value.get().expect("text node was created");

@@ -3,12 +3,17 @@ use crate::reactive::{build, column, component, intrinsic, row};
 
 #[component]
 fn widget() -> NodeId {
-    row(0.0, [])
+    row().spacing(0.0).children([]).build()
 }
 
 #[test]
 fn a_component_function_appears_in_the_inspector_tree_without_hiding_its_children() {
-    let document = build(|| column(0.0, [intrinsic(widget())]));
+    let document = build(|| {
+        column()
+            .spacing(0.0)
+            .children([intrinsic(widget())])
+            .build()
+    });
     let mut harness = Harness::new(document);
 
     harness.toggle_inspector();
