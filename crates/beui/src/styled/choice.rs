@@ -1,35 +1,16 @@
-use std::time::{Duration, Instant};
-
-use crate::base::{ItemSize, TextAlign};
+use crate::base::ItemSize;
+use crate::base::TextAlign;
 use crate::color::Color32;
 use crate::document::Document;
-use crate::input::{Key, KeyPress};
 use crate::node::{Handler, NodeId};
 use crate::styled::theme::{
     ACCENT, ACCENT_SOFT, BORDER, FONT_BODY, RADIUS, SURFACE_RAISED, TEXT, TEXT_MUTED,
 };
 use crate::unstyled;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(super) enum Kind {
-    Tabs,
-    Radio,
-    Listbox,
-}
-
-struct OptionParts {
-    button: NodeId,
-    fill: NodeId,
-    label: NodeId,
-    mark: Option<NodeId>,
-}
+pub(super) use crate::unstyled::ChoiceKind as Kind;
 
 struct State {
-    options: Vec<OptionParts>,
-    selected: Option<usize>,
-    kind: Kind,
-    search: String,
-    typed_at: Option<Instant>,
     on_change: Option<Handler<Option<usize>>>,
 }
 
@@ -39,38 +20,26 @@ pub(super) fn choice(
     selected: Option<usize>,
     kind: Kind,
 ) -> NodeId {
-    let selected = selected.filter(|index| *index < labels.len());
-    let line = if kind == Kind::Tabs {
-        unstyled::row(document, 6.0)
-    } else {
-        unstyled::column(document, 6.0)
-    };
-    let name = match kind {
-        Kind::Tabs => "tabs",
-        Kind::Radio => "radio-group",
-        Kind::Listbox => "listbox",
-    };
-    let choice = document.create_shadow(name, line, Vec::new());
-    document.set_component_detail(choice, selected.map_or("", |index| labels[index]));
-    document.set_component_state(
-        choice,
-        State {
-            options: Vec::new(),
-            selected,
-            kind,
-            search: String::new(),
-            typed_at: None,
-            on_change: None,
-        },
-    );
-    for (index, title) in labels.iter().enumerate() {
-        let active = selected == Some(index);
-        let button = unstyled::button(document);
-        unstyled::set_button_tab_stop(document, button, index == selected.unwrap_or(0));
-        let label = document.create_text(*title, FONT_BODY, if active { TEXT } else { TEXT_MUTED });
+    let inner = unstyled::choice(document, labels, selected, kind);
+    let selected = unstyled::choice_selected(document, inner);
+    let label_strings: Vec<String> = labels.iter().map(|label| (*label).to_owned()).collect();
+
+    let mut fills = Vec::new();
+    let mut label_nodes = Vec::new();
+    let mut marks: Vec<Option<NodeId>> = Vec::new();
+    let mut rings = Vec::new();
+
+    for index in 0..unstyled::choice_option_count(document, inner) {
+        let button = unstyled::choice_option_button(document, inner, index);
+        let label = unstyled::choice_option_label_node(document, inner, index);
+        let active = unstyled::choice_selected(document, inner) == Some(index);
+
+        document.set_text_font_size(label, FONT_BODY);
+        document.set_text_color(label, if active { TEXT } else { TEXT_MUTED });
         if kind == Kind::Tabs {
             document.set_text_align(label, TextAlign::Center, TextAlign::Center);
         }
+
         let mut mark = None;
         let content = if kind == Kind::Radio {
             let dot = document.create_fill(ACCENT, 9);
@@ -104,86 +73,55 @@ pub(super) fn choice(
         let ring = document.create_outline(ACCENT, 2.0, RADIUS, 1.0);
         document.set_outline_child(ring, fill);
         unstyled::set_button_child(document, button, ring);
-        unstyled::set_button_on_click(document, button, move |document| {
-            set_selected(document, choice, Some(index));
-        });
+
         unstyled::set_button_on_hover_change(document, button, move |document, hovered| {
-            let active = selected_index(document, choice) == Some(index);
+            let active = unstyled::choice_selected(document, inner) == Some(index);
             document.set_fill_color(fill, background(active, hovered));
         });
-        unstyled::set_button_on_focus_change(document, button, move |document, focused| {
-            document.set_outline_visible(ring, focused);
-            if !focused {
-                let state = document.component_state_mut::<State>(choice);
-                state.search.clear();
-                state.typed_at = None;
-            }
-        });
-        unstyled::set_button_on_key(document, button, move |document, press| {
-            key(document, choice, index, press)
-        });
-        if kind == Kind::Listbox {
-            let focusable = unstyled::button_focusable(document, button);
-            document.set_focusable_on_text(focusable, move |document, text| {
-                typeahead(document, choice, index, &text);
-            });
-        }
-        document.append_child(line, button, ItemSize::Intrinsic);
-        document
-            .component_state_mut::<State>(choice)
-            .options
-            .push(OptionParts {
-                button,
-                fill,
-                label,
-                mark,
-            });
+
+        fills.push(fill);
+        label_nodes.push(label);
+        marks.push(mark);
+        rings.push(ring);
     }
+
+    unstyled::set_choice_on_focus_change(document, inner, move |document, (index, focused)| {
+        document.set_outline_visible(rings[index], focused);
+    });
+
+    let choice = document.create_shadow(kind_name(kind), inner, Vec::new());
+    document.set_component_detail(choice, selected.map_or("", |index| labels[index]));
+    document.set_component_state(choice, State { on_change: None });
+
+    unstyled::set_choice_on_change(document, inner, move |document, selected| {
+        for (index, &fill) in fills.iter().enumerate() {
+            let active = selected == Some(index);
+            let button = unstyled::choice_option_button(document, inner, index);
+            let hovered = unstyled::button_hovered(document, button);
+            document.set_fill_color(fill, background(active, hovered));
+            document.set_text_color(label_nodes[index], if active { TEXT } else { TEXT_MUTED });
+            if let Some(mark) = marks[index] {
+                document.set_visible(mark, active);
+            }
+        }
+        let detail = selected
+            .map(|index| label_strings[index].clone())
+            .unwrap_or_default();
+        document.set_component_detail(choice, detail);
+        document.call_component_handler(choice, selected, |state: &mut State| &mut state.on_change);
+    });
+
     choice
 }
 
 pub(super) fn selected_index(document: &Document, choice: NodeId) -> Option<usize> {
-    document.component_state::<State>(choice).selected
+    let inner = document.shadow_root(choice);
+    unstyled::choice_selected(document, inner)
 }
 
 pub(super) fn set_selected(document: &mut Document, choice: NodeId, selected: Option<usize>) {
-    let state = document.component_state::<State>(choice);
-    if selected.is_some_and(|index| index >= state.options.len()) || state.selected == selected {
-        return;
-    }
-    let focused = state
-        .options
-        .iter()
-        .any(|option| unstyled::button_focused(document, option.button));
-    let parts: Vec<_> = state
-        .options
-        .iter()
-        .map(|option| (option.button, option.fill, option.label, option.mark))
-        .collect();
-    document.component_state_mut::<State>(choice).selected = selected;
-    let mut detail = String::new();
-    for (index, (button, fill, label, mark)) in parts.iter().copied().enumerate() {
-        let active = selected == Some(index);
-        unstyled::set_button_tab_stop(document, button, index == selected.unwrap_or(0));
-        document.set_fill_color(
-            fill,
-            background(active, unstyled::button_hovered(document, button)),
-        );
-        document.set_text_color(label, if active { TEXT } else { TEXT_MUTED });
-        if let Some(mark) = mark {
-            document.set_visible(mark, active);
-        }
-        if active {
-            detail = document.text(label).to_owned();
-        }
-    }
-    document.set_component_detail(choice, detail);
-    if focused {
-        if let Some((button, ..)) = parts.get(selected.unwrap_or(0)) {
-            unstyled::focus_button(document, *button);
-        }
-    }
-    document.call_component_handler(choice, selected, |state: &mut State| &mut state.on_change);
+    let inner = document.shadow_root(choice);
+    unstyled::set_choice_selected(document, inner, selected);
 }
 
 pub(super) fn set_on_change(
@@ -195,83 +133,15 @@ pub(super) fn set_on_change(
 }
 
 pub(super) fn focus(document: &mut Document, choice: NodeId) {
-    let state = document.component_state::<State>(choice);
-    if let Some(option) = state.options.get(state.selected.unwrap_or(0)) {
-        let button = option.button;
-        unstyled::focus_button(document, button);
-    }
+    let inner = document.shadow_root(choice);
+    unstyled::focus_choice(document, inner);
 }
 
-fn key(document: &mut Document, choice: NodeId, index: usize, press: KeyPress) -> bool {
-    if press.modifiers.ctrl || press.modifiers.alt {
-        return false;
-    }
-    let state = document.component_state::<State>(choice);
-    let count = state.options.len();
-    let next = match press.key {
-        Key::ArrowLeft if state.kind != Kind::Listbox => (index + count - 1) % count,
-        Key::ArrowRight if state.kind != Kind::Listbox => (index + 1) % count,
-        Key::ArrowUp if state.kind == Kind::Radio => (index + count - 1) % count,
-        Key::ArrowDown if state.kind == Kind::Radio => (index + 1) % count,
-        Key::ArrowUp if state.kind == Kind::Listbox => index.saturating_sub(1),
-        Key::ArrowDown if state.kind == Kind::Listbox => (index + 1).min(count - 1),
-        Key::Home => 0,
-        Key::End => count - 1,
-        _ => return false,
-    };
-    if press.pressed {
-        let button = state.options[next].button;
-        unstyled::focus_button(document, button);
-        set_selected(document, choice, Some(next));
-    }
-    true
-}
-
-fn typeahead(document: &mut Document, choice: NodeId, index: usize, text: &str) {
-    if text.is_empty() || text.chars().any(char::is_control) || text == " " {
-        return;
-    }
-    let state = document.component_state_mut::<State>(choice);
-    let now = Instant::now();
-    if state
-        .typed_at
-        .is_none_or(|last| now.duration_since(last) > Duration::from_secs(1))
-    {
-        state.search.clear();
-    }
-    state.typed_at = Some(now);
-    state.search.push_str(&text.to_lowercase());
-    let search = state.search.clone();
-    let repeated = search.chars().all(|c| search.starts_with(c));
-    let prefix = if repeated {
-        text.to_lowercase()
-    } else {
-        search.clone()
-    };
-    let start = if repeated || search == text.to_lowercase() {
-        index + 1
-    } else {
-        index
-    };
-    let labels: Vec<_> = state
-        .options
-        .iter()
-        .map(|option| (option.button, option.label))
-        .collect();
-    let matched = (0..labels.len())
-        .map(|offset| (start + offset) % labels.len())
-        .find(|&i| {
-            document
-                .text(labels[i].1)
-                .to_lowercase()
-                .starts_with(&prefix)
-        });
-    if let Some(next) = matched {
-        unstyled::focus_button(document, labels[next].0);
-        set_selected(document, choice, Some(next));
-        let state = document.component_state_mut::<State>(choice);
-        state.search = search;
-        state.typed_at = Some(now);
+fn kind_name(kind: Kind) -> &'static str {
+    match kind {
+        Kind::Tabs => "tabs",
+        Kind::Radio => "radio-group",
+        Kind::Listbox => "listbox",
     }
 }
 

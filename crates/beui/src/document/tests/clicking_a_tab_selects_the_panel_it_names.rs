@@ -15,7 +15,8 @@ fn clicking_a_tab_selects_the_panel_it_names() {
 
     assert_eq!(styled::tabs_selected(harness.document(), tabs), 0);
 
-    let row = harness.document().shadow_root(tabs);
+    let root = harness.document().shadow_root(tabs);
+    let row = harness.document().shadow_root(root);
     let second = harness.document().children(row)[1];
     harness.click(harness.center(second));
     harness.frame(Vec::new());

@@ -1,4 +1,5 @@
 mod button;
+mod choice;
 mod context_menu;
 mod disclosure;
 mod layout;
@@ -13,6 +14,11 @@ pub use button::{
     button, button_active, button_focusable, button_focused, button_hovered, focus_button,
     set_button_child, set_button_on_active_change, set_button_on_click, set_button_on_focus_change,
     set_button_on_hover_change, set_button_on_key, set_button_tab_stop,
+};
+pub use choice::{
+    choice, choice_option_button, choice_option_count, choice_option_label_node, choice_selected,
+    focus_choice, set_choice_on_change, set_choice_on_focus_change, set_choice_selected,
+    ChoiceKind,
 };
 pub use context_menu::{
     context_menu, context_menu_menu, context_menu_overlay, set_context_menu_items,
