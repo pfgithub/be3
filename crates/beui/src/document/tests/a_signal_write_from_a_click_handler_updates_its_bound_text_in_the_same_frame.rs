@@ -1,5 +1,5 @@
 use super::*;
-use crate::reactive::{self, button, create_signal, on_click, text};
+use crate::reactive::{self, button, create_signal, text};
 
 #[test]
 fn a_signal_write_from_a_click_handler_updates_its_bound_text_in_the_same_frame() {
@@ -7,10 +7,10 @@ fn a_signal_write_from_a_click_handler_updates_its_bound_text_in_the_same_frame(
 
     let (count, set_count) = create_signal(0i64);
     let (increment, value) = reactive::enter(&mut document, || {
-        let increment = button(
-            text("+"),
-            on_click(move || set_count.update(|count| *count += 1)),
-        );
+        let increment = button()
+            .label(text("+"))
+            .on_click(move || set_count.update(|count| *count += 1))
+            .build();
         let value = text(count);
         (increment, value)
     });

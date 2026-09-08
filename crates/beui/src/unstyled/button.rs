@@ -8,6 +8,7 @@ struct State {
     hovered: bool,
     active: bool,
     focused: bool,
+    disabled: bool,
     on_click: Option<ClickHandler>,
     on_hover_change: Option<Handler<bool>>,
     on_active_change: Option<Handler<bool>>,
@@ -29,6 +30,7 @@ pub fn button(document: &mut Document) -> NodeId {
             hovered: false,
             active: false,
             focused: false,
+            disabled: false,
             on_click: None,
             on_hover_change: None,
             on_active_change: None,
@@ -37,6 +39,9 @@ pub fn button(document: &mut Document) -> NodeId {
     );
 
     document.set_click_catcher_on_click(click_catcher, move |document| {
+        if document.component_state::<State>(button).disabled {
+            return;
+        }
         document.call_component_click::<State>(button, |state| &mut state.on_click);
     });
     document.set_click_catcher_on_hover_change(click_catcher, move |document, hovered| {
@@ -81,6 +86,16 @@ pub fn button_active(document: &Document, button: NodeId) -> bool {
 
 pub fn button_focused(document: &Document, button: NodeId) -> bool {
     document.component_state::<State>(button).focused
+}
+
+pub fn button_disabled(document: &Document, button: NodeId) -> bool {
+    document.component_state::<State>(button).disabled
+}
+
+pub fn set_button_disabled(document: &mut Document, button: NodeId, disabled: bool) {
+    document.component_state_mut::<State>(button).disabled = disabled;
+    let focusable = button_focusable(document, button);
+    document.set_focusable_tab_stop(focusable, !disabled);
 }
 
 pub fn set_button_on_click(

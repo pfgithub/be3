@@ -11,9 +11,10 @@ mod text_input;
 mod toggle;
 
 pub use button::{
-    button, button_active, button_focusable, button_focused, button_hovered, focus_button,
-    set_button_child, set_button_on_active_change, set_button_on_click, set_button_on_focus_change,
-    set_button_on_hover_change, set_button_on_key, set_button_tab_stop,
+    button, button_active, button_disabled, button_focusable, button_focused, button_hovered,
+    focus_button, set_button_child, set_button_disabled, set_button_on_active_change,
+    set_button_on_click, set_button_on_focus_change, set_button_on_hover_change, set_button_on_key,
+    set_button_tab_stop,
 };
 pub use choice::{
     choice, choice_option_button, choice_option_count, choice_option_label_node, choice_selected,

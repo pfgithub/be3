@@ -1,4 +1,7 @@
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
+use std::hash::Hash;
+use std::rc::Rc;
 
 use reactive::{create_effect, ReadSignal};
 
@@ -55,6 +58,51 @@ pub fn bind(mut effect: impl FnMut(&mut Document) + 'static) {
     create_effect(move || with_document(&mut effect));
 }
 
+pub enum Prop<T> {
+    Static(T),
+    Dynamic(Box<dyn Fn() -> T>),
+}
+
+impl<T: 'static> Prop<T> {
+    pub fn apply(self, mut set: impl FnMut(T) + 'static) {
+        match self {
+            Prop::Static(value) => set(value),
+            Prop::Dynamic(read) => {
+                create_effect(move || set(read()));
+            }
+        }
+    }
+
+    pub fn map<U: 'static>(self, f: impl Fn(T) -> U + 'static) -> Prop<U> {
+        match self {
+            Prop::Static(value) => Prop::Static(f(value)),
+            Prop::Dynamic(read) => Prop::Dynamic(Box::new(move || f(read()))),
+        }
+    }
+}
+
+pub trait IntoProp<T> {
+    fn into_prop(self) -> Prop<T>;
+}
+
+impl<T: 'static> IntoProp<T> for T {
+    fn into_prop(self) -> Prop<T> {
+        Prop::Static(self)
+    }
+}
+
+impl<T: Clone + 'static> IntoProp<T> for ReadSignal<T> {
+    fn into_prop(self) -> Prop<T> {
+        Prop::Dynamic(Box::new(move || self.get()))
+    }
+}
+
+impl<T: Clone + PartialEq + 'static> IntoProp<T> for Memo<T> {
+    fn into_prop(self) -> Prop<T> {
+        Prop::Dynamic(Box::new(move || self.get()))
+    }
+}
+
 pub trait IntoTextValue {
     fn bind_into(self, node: NodeId);
 }
@@ -71,21 +119,19 @@ impl IntoTextValue for String {
     }
 }
 
-impl<T> IntoTextValue for ReadSignal<T>
-where
-    T: ToString + Clone + 'static,
-{
+impl<T: ToString + Clone + 'static> IntoTextValue for ReadSignal<T> {
     fn bind_into(self, node: NodeId) {
-        bind(move |document| document.set_text(node, self.get().to_string()));
+        Prop::Dynamic(Box::new(move || self.get()))
+            .map(|value| value.to_string())
+            .apply(move |value| with_document(|document| document.set_text(node, value)));
     }
 }
 
-impl<T> IntoTextValue for Memo<T>
-where
-    T: ToString + Clone + PartialEq + 'static,
-{
+impl<T: ToString + Clone + PartialEq + 'static> IntoTextValue for Memo<T> {
     fn bind_into(self, node: NodeId) {
-        bind(move |document| document.set_text(node, self.get().to_string()));
+        Prop::Dynamic(Box::new(move || self.get()))
+            .map(|value| value.to_string())
+            .apply(move |value| with_document(|document| document.set_text(node, value)));
     }
 }
 
@@ -128,15 +174,106 @@ pub fn column(spacing: f32, children: impl IntoIterator<Item = (NodeId, ItemSize
     })
 }
 
-pub fn button(child: NodeId, on_click: impl FnMut(&mut Document) + 'static) -> NodeId {
-    with_document(|document| {
-        let button = unstyled::button(document);
-        unstyled::set_button_child(document, button, child);
-        unstyled::set_button_on_click(document, button, on_click);
-        button
-    })
+pub fn show(condition: impl IntoProp<bool>, then: impl Fn() -> NodeId + 'static) -> NodeId {
+    let visibility = with_document(|document| document.create_visibility(false));
+    let built: Rc<Cell<Option<NodeId>>> = Rc::new(Cell::new(None));
+    condition.into_prop().apply(move |visible| {
+        if visible && built.get().is_none() {
+            let child = then();
+            built.set(Some(child));
+            with_document(|document| document.set_visibility_child(visibility, child));
+        }
+        with_document(|document| document.set_visible(visibility, visible));
+    });
+    visibility
 }
 
-pub fn on_click(mut handler: impl FnMut() + 'static) -> ClickHandler {
-    Box::new(move |_document| handler())
+pub fn for_each<T, K>(
+    parent: NodeId,
+    items: impl IntoProp<Vec<T>>,
+    key: impl Fn(&T) -> K + 'static,
+    view: impl Fn(&T) -> (NodeId, ItemSize) + 'static,
+) where
+    T: 'static,
+    K: Hash + Eq + 'static,
+{
+    let existing: Rc<RefCell<HashMap<K, (NodeId, ItemSize)>>> =
+        Rc::new(RefCell::new(HashMap::new()));
+    items.into_prop().apply(move |items| {
+        let mut existing = existing.borrow_mut();
+        let mut next = Vec::with_capacity(items.len());
+        for item in &items {
+            let entry = existing.remove(&key(item)).unwrap_or_else(|| view(item));
+            next.push((key(item), entry));
+        }
+        with_document(|document| {
+            for (removed, _) in existing.values() {
+                document.remove_child(parent, *removed);
+                document.remove_node(*removed);
+            }
+            for (_, (child, _)) in &next {
+                document.remove_child(parent, *child);
+            }
+            for (_, (child, size)) in &next {
+                document.append_child(parent, *child, *size);
+            }
+        });
+        existing.clear();
+        existing.extend(next);
+    });
+}
+
+pub struct Button {
+    label: Option<NodeId>,
+    disabled: Prop<bool>,
+    on_click: Option<ClickHandler>,
+}
+
+impl Button {
+    pub fn new() -> Self {
+        Self {
+            label: None,
+            disabled: Prop::Static(false),
+            on_click: None,
+        }
+    }
+
+    pub fn label(mut self, node: NodeId) -> Self {
+        self.label = Some(node);
+        self
+    }
+
+    pub fn disabled(mut self, disabled: impl IntoProp<bool>) -> Self {
+        self.disabled = disabled.into_prop();
+        self
+    }
+
+    pub fn on_click(mut self, mut handler: impl FnMut() + 'static) -> Self {
+        self.on_click = Some(Box::new(move |_document| handler()));
+        self
+    }
+
+    pub fn build(self) -> NodeId {
+        let button = with_document(unstyled::button);
+        if let Some(label) = self.label {
+            with_document(|document| unstyled::set_button_child(document, button, label));
+        }
+        if let Some(on_click) = self.on_click {
+            with_document(|document| unstyled::set_button_on_click(document, button, on_click));
+        }
+        self.disabled.apply(move |disabled| {
+            with_document(|document| unstyled::set_button_disabled(document, button, disabled))
+        });
+        button
+    }
+}
+
+impl Default for Button {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+pub fn button() -> Button {
+    Button::new()
 }
