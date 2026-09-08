@@ -14,6 +14,7 @@ bytemuck = { version = "1", features = ["derive"], optional = true }
 freetype = "0.7"
 harfbuzz_rs = "2"
 pollster = { version = "0.4", optional = true }
+reactive = { path = "../reactive" }
 text-editor-core = { path = "../text-editor-core" }
 unicode-script = "0.5"
 wgpu = { version = "29", default-features = false, optional = true }
@@ -27,4 +28,8 @@ workspace = true
 
 [[example]]
 name = "demo"
+required-features = ["window"]
+
+[[example]]
+name = "counter"
 required-features = ["window"]

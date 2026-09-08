@@ -2,8 +2,9 @@
 
 `crates/reactive` provides a dependency-free, single-threaded reactive graph. It
 is intended for retained UI bindings: create a node once, then use an effect to
-update its properties when the values it reads change. The crate does not yet
-connect to beui's `Document` or change its rendering/event loop.
+update its properties when the values it reads change. `beui::reactive` (in
+`crates/beui/src/reactive.rs`) is the adapter that connects it to beui's
+`Document`; see "beui integration" below.
 
 ## Example
 
@@ -88,14 +89,47 @@ A batch that panics does not flush effects while unwinding; pending work runs at
 the next successful outer batch or write. A panicking `update` invalidates its
 value because it may already have mutated it. There is no transaction rollback.
 
-## Future beui integration
+## beui integration
 
-A beui adapter can associate scopes with retained view lifetimes, capture node
-IDs in effects, apply property changes, and request repaint through `Context`.
-Dispose a view's scope when its nodes are removed.
+`beui::reactive` (re-exporting `create_signal`, `create_effect`, `create_memo`,
+`Scope`, `batch`, `untrack`, and `on_cleanup` from this crate) binds signals and
+memos directly to `Document` nodes:
 
-Beui event handlers borrow `&mut Document`. Wrap the entire event dispatch in a
-`batch` and release the document borrow before the batch returns, so effects can
-apply their updates safely. Alternatively, have effects enqueue document patches
-and drain them once event dispatch releases the borrow. Batching only the signal
-write while an outer document borrow remains active is insufficient.
+```rust
+use beui::reactive::{button, column, create_signal, fixed, intrinsic, on_click, row, text};
+
+let (count, set_count) = create_signal(0i64);
+let decrement = button(&mut document, text(&mut document, "-"), on_click({
+    let set_count = set_count.clone();
+    move || set_count.update(|count| *count -= 1)
+}));
+let value = text(&mut document, count); // updates itself when `count` changes
+let increment = button(&mut document, text(&mut document, "+"),
+    on_click(move || set_count.update(|count| *count += 1)));
+let controls = row(&mut document, 8.0, [
+    fixed(decrement, 32.0),
+    intrinsic(value),
+    fixed(increment, 32.0),
+]);
+```
+
+`text(document, value)` accepts a plain `&str`/`String` or a `ReadSignal<T>`/
+`Memo<T>` (`T: ToString`); the reactive forms create an effect that keeps the
+node's content in sync. `bind(document, |document| { ... })` is the general
+form for driving other node properties (fill color, visibility, and so on)
+from an effect. `intrinsic`/`fixed`/`percent` pair a node with an `ItemSize`
+for `row`/`column`. See `crates/beui/examples/counter.rs` for a full example
+and `crates/beui/src/document/tests/a_signal_write_from_a_click_handler_updates_its_bound_text_in_the_same_frame.rs`
+for the underlying behavior it relies on.
+
+Each `Document` owns a root `reactive::Scope` (`Document::reactive_scope`);
+bindings created through `beui::reactive` are owned by it and live for as long
+as the document does. Effects do not have access to `&mut Document` directly:
+each one reads it back out of a thread-local installed by
+`beui::reactive::with_document`. `Document::show` installs itself before
+dispatching interaction events and flushes queued effects immediately after,
+before the frame's paint check, so a signal write from a click handler is
+visible in the same frame. Reactive bindings built outside of `show` (typically
+while constructing the initial tree) install the document themselves for the
+duration of their own `create_effect` call, so their first run also has
+`&mut Document` available.

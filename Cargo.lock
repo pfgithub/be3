@@ -695,6 +695,7 @@ dependencies = [
  "freetype",
  "harfbuzz_rs",
  "pollster 0.4.0",
+ "reactive",
  "text-editor-core",
  "unicode-script",
  "wgpu",

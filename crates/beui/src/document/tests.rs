@@ -1,5 +1,6 @@
 use super::*;
 
+mod a_signal_write_from_a_click_handler_updates_its_bound_text_in_the_same_frame;
 mod a_virtual_scroll_only_builds_the_items_in_view;
 mod arrow_down_on_a_closed_select_trigger_opens_it_and_highlights_the_first_option;
 mod arrow_keys_in_a_select_search_box_move_the_highlighted_option_without_editing_the_search_text;

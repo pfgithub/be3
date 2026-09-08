@@ -14,6 +14,7 @@ mod layout;
 mod node;
 mod paint;
 mod painter;
+pub mod reactive;
 #[cfg(feature = "render")]
 mod renderer;
 pub mod styled;

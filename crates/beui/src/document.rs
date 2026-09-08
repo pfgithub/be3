@@ -30,6 +30,7 @@ pub struct Document {
     shapes: Vec<Shape>,
     pub(crate) copied_text: Option<String>,
     next_paint: Option<Instant>,
+    reactive_scope: ::reactive::Scope,
 }
 
 impl Document {
@@ -51,6 +52,7 @@ impl Document {
             shapes: Vec::new(),
             copied_text: None,
             next_paint: None,
+            reactive_scope: ::reactive::Scope::new(),
         }
     }
 
@@ -63,6 +65,10 @@ impl Document {
 
     pub fn root(&self) -> Option<NodeId> {
         self.root
+    }
+
+    pub(crate) fn reactive_scope(&self) -> &::reactive::Scope {
+        &self.reactive_scope
     }
 
     pub fn children(&self, id: NodeId) -> Vec<NodeId> {
@@ -166,7 +172,11 @@ impl Document {
         if interactive {
             if let Some(root) = self.root {
                 let rects = Rc::clone(&self.rects);
-                interact::interact(self, ctx, &ctx.painter(), &rects, root);
+                let painter = ctx.painter();
+                let _guard = crate::reactive::install(self);
+                crate::reactive::batch(|| {
+                    interact::interact(self, ctx, &painter, &rects, root);
+                });
             }
         }
 
