@@ -9,6 +9,7 @@ struct Prop {
     ident: Ident,
     ty: Type,
     inner_ty: Option<Type>,
+    reactive_inner_ty: Option<Type>,
     with: Option<ExprClosure>,
     default: Option<Expr>,
 }
@@ -25,12 +26,12 @@ fn pascal_case(name: &str) -> String {
         .collect()
 }
 
-fn option_inner(ty: &Type) -> Option<Type> {
+fn generic_inner(ty: &Type, name: &str) -> Option<Type> {
     let Type::Path(path) = ty else {
         return None;
     };
     let segment = path.path.segments.last()?;
-    if segment.ident != "Option" {
+    if segment.ident != name {
         return None;
     }
     let PathArguments::AngleBracketed(args) = &segment.arguments else {
@@ -101,11 +102,13 @@ fn expand(item: TokenStream, shadowed: bool) -> TokenStream {
                 _ => panic!("#[component] props must be simple identifiers"),
             };
             let (with, default) = take_prop_attr(attrs);
-            let inner_ty = option_inner(ty);
+            let inner_ty = generic_inner(ty, "Option");
+            let reactive_inner_ty = generic_inner(ty, "Prop");
             Prop {
                 ident,
                 ty: (**ty).clone(),
                 inner_ty,
+                reactive_inner_ty,
                 with,
                 default,
             }
@@ -147,6 +150,13 @@ fn expand(item: TokenStream, shadowed: bool) -> TokenStream {
                     self
                 }
             }
+        } else if let Some(inner_ty) = &prop.reactive_inner_ty {
+            quote! {
+                pub fn #ident(mut self, value: impl ::beui::reactive::IntoProp<#inner_ty>) -> Self {
+                    self.#ident = Some(::beui::reactive::IntoProp::into_prop(value));
+                    self
+                }
+            }
         } else {
             let ty = &prop.ty;
             quote! {
@@ -165,6 +175,12 @@ fn expand(item: TokenStream, shadowed: bool) -> TokenStream {
             quote! { self.#ident.unwrap_or_else(|| #default) }
         } else if prop.inner_ty.is_some() {
             quote! { self.#ident.unwrap_or(None) }
+        } else if prop.reactive_inner_ty.is_some() {
+            quote! {
+                self.#ident.unwrap_or_else(|| {
+                    ::beui::reactive::Prop::Static(::core::default::Default::default())
+                })
+            }
         } else {
             quote! {
                 self.#ident.unwrap_or_else(|| {

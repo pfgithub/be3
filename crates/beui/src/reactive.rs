@@ -259,7 +259,6 @@ fn boxed_click_handler(mut handler: impl FnMut() + 'static) -> ClickHandler {
 #[component]
 pub fn button(
     label: Option<NodeId>,
-    #[prop(with = |disabled: impl IntoProp<bool>| disabled.into_prop(), default = Prop::Static(false))]
     disabled: Prop<bool>,
     #[prop(with = |handler: impl FnMut() + 'static| boxed_click_handler(handler))] on_click: Option<
         ClickHandler,
