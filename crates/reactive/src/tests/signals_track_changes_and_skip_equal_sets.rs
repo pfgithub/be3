@@ -7,7 +7,6 @@ fn signals_track_changes_and_skip_equal_sets() {
     let seen = Rc::new(RefCell::new(Vec::new()));
     scope.run(|| {
         let seen = seen.clone();
-        let value = value.clone();
         create_effect(move || seen.borrow_mut().push(value.get()));
     });
     set_value.set(1);

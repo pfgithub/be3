@@ -4,8 +4,8 @@ use super::*;
 fn non_clone_values_can_be_read_and_updated() {
     struct Value(usize);
     let (read, write) = create_signal(Value(1));
-    let copied_handle = read.clone();
-    let copied_writer = write.clone();
+    let copied_handle = read;
+    let copied_writer = write;
     assert_eq!(
         copied_writer.update(|value| {
             value.0 += 1;

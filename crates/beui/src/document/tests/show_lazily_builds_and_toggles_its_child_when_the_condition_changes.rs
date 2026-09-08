@@ -19,10 +19,13 @@ fn show_lazily_builds_and_toggles_its_child_when_the_condition_changes() {
             .build();
         sink_toggle.set(Some(toggle));
 
-        let panel = show(visible, move || {
-            sink.set(sink.get() + 1);
-            text().string("panel").build()
-        });
+        let panel = show()
+            .condition(visible)
+            .then(move || {
+                sink.set(sink.get() + 1);
+                text().string("panel").build()
+            })
+            .build();
         sink_panel.set(Some(panel));
 
         column()
@@ -35,9 +38,10 @@ fn show_lazily_builds_and_toggles_its_child_when_the_condition_changes() {
     let panel = panel_id.get().expect("show() node was created");
     let mut harness = Harness::new(document);
     harness.frame(Vec::new());
+    let visibility = harness.document().shadow_root(panel);
 
     assert_eq!(builds.get(), 0, "a hidden show() must not build its child");
-    assert!(!harness.document().is_visible(panel));
+    assert!(!harness.document().is_visible(visibility));
 
     harness.click(harness.center(toggle));
     harness.frame(Vec::new());
@@ -46,18 +50,18 @@ fn show_lazily_builds_and_toggles_its_child_when_the_condition_changes() {
         1,
         "showing it for the first time must build it"
     );
-    assert!(harness.document().is_visible(panel));
-    let child = harness.document().children(panel)[0];
+    assert!(harness.document().is_visible(visibility));
+    let child = harness.document().children(visibility)[0];
     assert_eq!(text_of(harness.document(), child), "panel");
 
     harness.click(harness.center(toggle));
     harness.frame(Vec::new());
-    assert!(!harness.document().is_visible(panel));
+    assert!(!harness.document().is_visible(visibility));
     assert_eq!(builds.get(), 1, "hiding it again must not rebuild it");
 
     harness.click(harness.center(toggle));
     harness.frame(Vec::new());
-    assert!(harness.document().is_visible(panel));
+    assert!(harness.document().is_visible(visibility));
     assert_eq!(
         builds.get(),
         1,

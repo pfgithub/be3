@@ -1,3 +1,4 @@
+mod arena;
 mod computation;
 mod memo;
 mod runtime;

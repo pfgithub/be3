@@ -17,64 +17,10 @@ fn history_entry(value: i64) -> NodeId {
 fn app() -> NodeId {
     let (count, set_count) = create_signal(0i64);
     let (history, set_history) = create_signal(Vec::<(u64, i64)>::new());
-    let next_id = std::rc::Rc::new(std::cell::Cell::new(0u64));
+    let (next_id, set_next_id) = create_signal(0u64);
 
-    let is_zero = {
-        let count = count.clone();
-        create_memo(move || count.get() <= 0)
-    };
-    let is_nonzero = {
-        let count = count.clone();
-        create_memo(move || count.get() != 0)
-    };
-
-    let decrement = {
-        let set_count = set_count.clone();
-        let set_history = set_history.clone();
-        let count = count.clone();
-        let next_id = next_id.clone();
-        view! {
-            button {
-                disabled: is_zero,
-                on_click: move || {
-                    set_count.update(|value| *value -= 1);
-                    let id = next_id.get();
-                    next_id.set(id + 1);
-                    set_history.update(|entries| entries.push((id, count.get())));
-                },
-            } [ text { string: "-" } ]
-        }
-    };
-
-    let increment = {
-        let set_count = set_count.clone();
-        let set_history = set_history.clone();
-        let count = count.clone();
-        let next_id = next_id.clone();
-        view! {
-            button {
-                on_click: move || {
-                    set_count.update(|value| *value += 1);
-                    let id = next_id.get();
-                    next_id.set(id + 1);
-                    set_history.update(|entries| entries.push((id, count.get())));
-                },
-            } [ text { string: "+" } ]
-        }
-    };
-
-    let reset = show(is_nonzero, move || {
-        let set_count = set_count.clone();
-        let set_history = set_history.clone();
-        view! {
-            button {
-                on_click: move || {
-                    set_count.set(0);
-                    set_history.set(Vec::new());
-                },
-            } [ text { string: "reset" } ]
-        }
-    });
+    let is_zero = create_memo(move || count.get() <= 0);
+    let is_nonzero = create_memo(move || count.get() != 0);
 
     let log = column()
         .spacing(4.0)
@@ -91,7 +37,37 @@ fn app() -> NodeId {
         } [
             row {
                 spacing: 8.0,
-            } [ decrement, text { string: count }, increment, reset ],
+            } [
+                button {
+                    disabled: is_zero,
+                    on_click: move || {
+                        set_count.update(|value| *value -= 1);
+                        let id = next_id.get();
+                        set_next_id.set(id + 1);
+                        set_history.update(|entries| entries.push((id, count.get())));
+                    },
+                } [ text { string: "-" } ],
+                text { string: count },
+                button {
+                    on_click: move || {
+                        set_count.update(|value| *value += 1);
+                        let id = next_id.get();
+                        set_next_id.set(id + 1);
+                        set_history.update(|entries| entries.push((id, count.get())));
+                    },
+                } [ text { string: "+" } ],
+                show {
+                    condition: is_nonzero,
+                    then: move || view! {
+                        button {
+                            on_click: move || {
+                                set_count.set(0);
+                                set_history.set(Vec::new());
+                            },
+                        } [ text { string: "reset" } ]
+                    },
+                }
+            ],
             log
         ]
     }
