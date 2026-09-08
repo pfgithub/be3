@@ -2,6 +2,7 @@ use proc_macro::TokenStream;
 use quote::{format_ident, quote};
 use syn::braced;
 use syn::bracketed;
+use syn::parenthesized;
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
 use syn::{
@@ -243,18 +244,61 @@ impl Parse for ViewProp {
     }
 }
 
-enum ViewChild {
+enum ViewSizing {
+    Intrinsic,
+    Fixed(Expr),
+    Percent(Expr),
+}
+
+impl Parse for ViewSizing {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let ident: Ident = input.parse()?;
+        match ident.to_string().as_str() {
+            "intrinsic" => Ok(ViewSizing::Intrinsic),
+            "fixed" => {
+                let args;
+                parenthesized!(args in input);
+                Ok(ViewSizing::Fixed(args.parse()?))
+            }
+            "percent" => {
+                let args;
+                parenthesized!(args in input);
+                Ok(ViewSizing::Percent(args.parse()?))
+            }
+            other => Err(syn::Error::new(
+                ident.span(),
+                format!("unknown sizing `@{other}`, expected `@intrinsic`, `@fixed(size)`, or `@percent(weight)`"),
+            )),
+        }
+    }
+}
+
+enum ViewChildKind {
     Node(ViewNode),
     Expr(Expr),
 }
 
+struct ViewChild {
+    sizing: Option<ViewSizing>,
+    kind: ViewChildKind,
+}
+
 impl Parse for ViewChild {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        if input.peek(Ident) && input.peek2(syn::token::Brace) {
-            Ok(ViewChild::Node(input.parse()?))
+        let sizing = if input.peek(Token![@]) {
+            input.parse::<Token![@]>()?;
+            Some(input.parse()?)
         } else {
-            Ok(ViewChild::Expr(input.parse()?))
-        }
+            None
+        };
+
+        let kind = if input.peek(Ident) && input.peek2(syn::token::Brace) {
+            ViewChildKind::Node(input.parse()?)
+        } else {
+            ViewChildKind::Expr(input.parse()?)
+        };
+
+        Ok(ViewChild { sizing, kind })
     }
 }
 
@@ -305,11 +349,21 @@ fn expand_view_node(node: &ViewNode) -> proc_macro2::TokenStream {
         None => quote! { #tag() #(#setters)* .build() },
         Some(children) => {
             let items = children.iter().map(|child| {
-                let child = match child {
-                    ViewChild::Node(node) => expand_view_node(node),
-                    ViewChild::Expr(expr) => quote! { #expr },
+                let node = match &child.kind {
+                    ViewChildKind::Node(node) => expand_view_node(node),
+                    ViewChildKind::Expr(expr) => quote! { #expr },
                 };
-                quote! { ::beui::reactive::intrinsic(#child) }
+                match &child.sizing {
+                    None | Some(ViewSizing::Intrinsic) => {
+                        quote! { ::beui::reactive::intrinsic(#node) }
+                    }
+                    Some(ViewSizing::Fixed(size)) => {
+                        quote! { ::beui::reactive::fixed(#node, #size) }
+                    }
+                    Some(ViewSizing::Percent(weight)) => {
+                        quote! { ::beui::reactive::percent(#node, #weight) }
+                    }
+                }
             });
             quote! {
                 #tag() #(#setters)* .children([#(#items),*]) .build()

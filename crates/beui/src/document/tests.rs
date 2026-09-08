@@ -66,6 +66,7 @@ mod typing_in_a_select_search_box_filters_options_case_insensitively;
 mod typing_into_a_focused_text_input_inserts_the_text;
 mod typing_into_an_empty_field_does_not_pick_up_its_placeholder;
 mod typing_past_the_end_of_a_narrow_text_input_scrolls_the_caret_into_view;
+mod view_children_can_pick_fixed_and_percent_sizing;
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
