@@ -26,9 +26,12 @@ where
     thread::Builder::new()
         .name("block-client".into())
         .spawn(move || {
-            let runtime = tokio::runtime::Runtime::new().unwrap_or_else(|error| {
-                fatal(format!("failed to create block client runtime: {error}"))
-            });
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap_or_else(|error| {
+                    fatal(format!("failed to create block client runtime: {error}"))
+                });
             runtime.block_on(future);
         })
         .unwrap_or_else(|error| fatal(format!("failed to spawn block client worker: {error}")));

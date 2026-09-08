@@ -70,14 +70,38 @@ impl CommandSender {
 #[derive(Clone)]
 struct Shutdown(Arc<AtomicBool>);
 
-static LIVE_SHUTDOWNS: Mutex<Vec<Weak<AtomicBool>>> = Mutex::new(Vec::new());
+struct ShutdownRegistry(Mutex<Vec<Weak<AtomicBool>>>);
+
+impl ShutdownRegistry {
+    const fn new() -> Self {
+        Self(Mutex::new(Vec::new()))
+    }
+
+    fn register(&self, flag: &Arc<AtomicBool>) {
+        let mut live = self.0.lock();
+        live.retain(|entry| entry.strong_count() > 0);
+        live.push(Arc::downgrade(flag));
+    }
+
+    fn shut_down_all(&self) {
+        for entry in self.0.lock().iter() {
+            if let Some(flag) = entry.upgrade() {
+                flag.store(true, Ordering::SeqCst);
+            }
+        }
+    }
+}
+
+static LIVE_SHUTDOWNS: ShutdownRegistry = ShutdownRegistry::new();
 
 impl Shutdown {
     fn new() -> Self {
+        Self::in_registry(&LIVE_SHUTDOWNS)
+    }
+
+    fn in_registry(registry: &ShutdownRegistry) -> Self {
         let flag = Arc::new(AtomicBool::new(false));
-        let mut live = LIVE_SHUTDOWNS.lock();
-        live.retain(|entry| entry.strong_count() > 0);
-        live.push(Arc::downgrade(&flag));
+        registry.register(&flag);
         Self(flag)
     }
 
@@ -91,11 +115,7 @@ impl Shutdown {
 }
 
 pub fn shut_down_clients() {
-    for entry in LIVE_SHUTDOWNS.lock().iter() {
-        if let Some(flag) = entry.upgrade() {
-            flag.store(true, Ordering::SeqCst);
-        }
-    }
+    LIVE_SHUTDOWNS.shut_down_all();
 }
 
 const TOKEN_PARAMETER: &str = "token";
