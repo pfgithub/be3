@@ -136,11 +136,13 @@ closure. `Document::show` installs itself before dispatching interaction
 events and flushes queued effects immediately after, before the frame's paint
 check, so a signal write from a click handler is visible in the same frame.
 
-The ambient functions are only safe to call while no other code on the stack
-already holds a real `&mut Document` to the same document — which is true
-inside `build`'s closure and inside any effect body (effects always run after
-the batch that queued them has released its borrow), but is not true inside a
-click handler, which is handed a real `&mut Document` directly. Handlers that
-need to touch the document should use that parameter (or the explicit,
-document-taking `unstyled`/`styled`/`Document` APIs), not `with_document` or
-the ambient builders.
+The ambient functions borrow the installed document out of thread-local
+storage for the duration of their callback, so calling one while another is
+already on the stack panics instead of aliasing. That only happens if code
+that already holds a real `&mut Document` (a click handler, which is handed
+one directly) also calls `with_document` or an ambient builder instead of
+using that parameter — do not do this; use the parameter (or the explicit,
+document-taking `unstyled`/`styled`/`Document` APIs) instead. Ambient calls
+nest safely everywhere else, including inside `build`'s closure and inside
+any effect body, because effects always run after the batch that queued them
+has released its borrow.

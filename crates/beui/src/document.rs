@@ -175,7 +175,9 @@ impl Document {
                 let painter = ctx.painter();
                 let _guard = crate::reactive::install(self);
                 crate::reactive::batch(|| {
-                    interact::interact(self, ctx, &painter, &rects, root);
+                    crate::reactive::with_document(|document| {
+                        interact::interact(document, ctx, &painter, &rects, root)
+                    });
                 });
             }
         }

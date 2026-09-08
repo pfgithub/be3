@@ -79,6 +79,23 @@ impl Scope {
     pub fn is_disposed(&self) -> bool {
         self.owner.disposed.get()
     }
+
+    pub fn context(&self) -> ScopeContext {
+        ScopeContext(Rc::downgrade(&self.owner))
+    }
+}
+
+#[derive(Clone)]
+pub struct ScopeContext(Weak<Owner>);
+
+impl ScopeContext {
+    pub fn run<T>(&self, f: impl FnOnce() -> T) -> T {
+        if let Some(owner) = self.0.upgrade() {
+            assert!(!owner.disposed.get(), "reactive scope was disposed");
+        }
+        let _context = Context::enter(Weak::new(), self.0.clone());
+        batch(f)
+    }
 }
 
 impl Default for Scope {

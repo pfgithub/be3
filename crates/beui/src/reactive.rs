@@ -14,38 +14,48 @@ pub use beui_macros::{builder, component};
 pub use reactive::{batch, create_memo, create_signal, on_cleanup, untrack, Memo, Scope};
 
 thread_local! {
-    static CURRENT_DOCUMENT: Cell<*mut Document> = const { Cell::new(std::ptr::null_mut()) };
+    static CURRENT_DOCUMENT: RefCell<Option<Document>> = const { RefCell::new(None) };
 }
 
-pub(crate) struct DocumentGuard {
-    previous: *mut Document,
+pub(crate) struct DocumentGuard<'a> {
+    document: &'a mut Document,
 }
 
-impl Drop for DocumentGuard {
+impl Drop for DocumentGuard<'_> {
     fn drop(&mut self) {
-        CURRENT_DOCUMENT.with(|cell| cell.set(self.previous));
+        let restored = CURRENT_DOCUMENT.with(|cell| cell.borrow_mut().take());
+        *self.document =
+            restored.expect("beui::reactive document guard dropped without an installed document");
     }
 }
 
-pub(crate) fn install(document: &mut Document) -> DocumentGuard {
-    let ptr: *mut Document = document;
-    let previous = CURRENT_DOCUMENT.with(|cell| cell.replace(ptr));
-    DocumentGuard { previous }
+pub(crate) fn install(document: &mut Document) -> DocumentGuard<'_> {
+    let taken = std::mem::take(document);
+    CURRENT_DOCUMENT.with(|cell| {
+        let previous = cell.borrow_mut().replace(taken);
+        assert!(
+            previous.is_none(),
+            "beui::reactive: a document is already installed on this thread"
+        );
+    });
+    DocumentGuard { document }
 }
 
 pub(crate) fn enter<R>(document: &mut Document, f: impl FnOnce() -> R) -> R {
+    let context = document.reactive_scope().context();
     let _guard = install(document);
-    document.reactive_scope().run(f)
+    context.run(f)
 }
 
 pub fn with_document<R>(f: impl FnOnce(&mut Document) -> R) -> R {
-    let ptr = CURRENT_DOCUMENT.with(Cell::get);
-    assert!(
-        !ptr.is_null(),
-        "beui::reactive binding used without an active document; \
-         call it from inside build(), or from inside event dispatch"
-    );
-    f(unsafe { &mut *ptr })
+    CURRENT_DOCUMENT.with(|cell| {
+        let mut slot = cell.borrow_mut();
+        let document = slot.as_mut().expect(
+            "beui::reactive binding used without an active document; \
+             call it from inside build(), or from inside event dispatch",
+        );
+        f(document)
+    })
 }
 
 pub fn build(f: impl FnOnce() -> NodeId) -> Document {
