@@ -1,8 +1,12 @@
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
+use syn::braced;
+use syn::bracketed;
+use syn::parse::{Parse, ParseStream};
+use syn::punctuated::Punctuated;
 use syn::{
     parse_macro_input, Attribute, Expr, ExprClosure, FnArg, GenericArgument, Ident, ItemFn, Pat,
-    PatType, PathArguments, Type,
+    PatType, PathArguments, Token, Type,
 };
 
 struct Prop {
@@ -223,4 +227,100 @@ fn expand(item: TokenStream, shadowed: bool) -> TokenStream {
         }
     }
     .into()
+}
+
+struct ViewProp {
+    key: Ident,
+    value: Expr,
+}
+
+impl Parse for ViewProp {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let key: Ident = input.parse()?;
+        input.parse::<Token![:]>()?;
+        let value: Expr = input.parse()?;
+        Ok(ViewProp { key, value })
+    }
+}
+
+enum ViewChild {
+    Node(ViewNode),
+    Expr(Expr),
+}
+
+impl Parse for ViewChild {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        if input.peek(Ident) && input.peek2(syn::token::Brace) {
+            Ok(ViewChild::Node(input.parse()?))
+        } else {
+            Ok(ViewChild::Expr(input.parse()?))
+        }
+    }
+}
+
+struct ViewNode {
+    tag: Ident,
+    props: Vec<ViewProp>,
+    children: Option<Vec<ViewChild>>,
+}
+
+impl Parse for ViewNode {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let tag: Ident = input.parse()?;
+
+        let props_input;
+        braced!(props_input in input);
+        let props = Punctuated::<ViewProp, Token![,]>::parse_terminated(&props_input)?
+            .into_iter()
+            .collect();
+
+        let children = if input.peek(syn::token::Bracket) {
+            let children_input;
+            bracketed!(children_input in input);
+            let children = Punctuated::<ViewChild, Token![,]>::parse_terminated(&children_input)?
+                .into_iter()
+                .collect();
+            Some(children)
+        } else {
+            None
+        };
+
+        Ok(ViewNode {
+            tag,
+            props,
+            children,
+        })
+    }
+}
+
+fn expand_view_node(node: &ViewNode) -> proc_macro2::TokenStream {
+    let tag = &node.tag;
+    let setters = node.props.iter().map(|prop| {
+        let key = &prop.key;
+        let value = &prop.value;
+        quote! { .#key(#value) }
+    });
+
+    match &node.children {
+        None => quote! { #tag() #(#setters)* .build() },
+        Some(children) => {
+            let items = children.iter().map(|child| {
+                let child = match child {
+                    ViewChild::Node(node) => expand_view_node(node),
+                    ViewChild::Expr(expr) => quote! { #expr },
+                };
+                quote! { ::beui::reactive::intrinsic(#child) }
+            });
+            quote! {
+                #tag() #(#setters)* .children([#(#items),*]) .build()
+            }
+        }
+    }
+}
+
+#[proc_macro]
+pub fn view(item: TokenStream) -> TokenStream {
+    let node = parse_macro_input!(item as ViewNode);
+    let expanded = expand_view_node(&node);
+    quote! { { #expanded } }.into()
 }

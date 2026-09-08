@@ -16,13 +16,13 @@ fn for_each_reuses_nodes_for_keys_that_persist_across_an_update() {
             .children(for_each(
                 items,
                 |value| *value,
-                |value| intrinsic(text(value.to_string())),
+                |value| intrinsic(text().string(value.to_string()).build()),
             ))
             .build();
         sink_list.set(Some(list));
 
         let shuffle = button()
-            .label(text("shuffle"))
+            .children([intrinsic(text().string("shuffle").build())])
             .on_click(move || set_items.set(vec![3, 2, 4]))
             .build();
         sink_shuffle.set(Some(shuffle));
@@ -42,7 +42,7 @@ fn for_each_reuses_nodes_for_keys_that_persist_across_an_update() {
     assert_eq!(
         before
             .iter()
-            .map(|&id| harness.document().text(id).to_owned())
+            .map(|&id| text_of(harness.document(), id).to_owned())
             .collect::<Vec<_>>(),
         vec!["1", "2", "3"]
     );
@@ -56,7 +56,7 @@ fn for_each_reuses_nodes_for_keys_that_persist_across_an_update() {
     assert_eq!(
         after
             .iter()
-            .map(|&id| harness.document().text(id).to_owned())
+            .map(|&id| text_of(harness.document(), id).to_owned())
             .collect::<Vec<_>>(),
         vec!["3", "2", "4"],
         "surviving and new items must appear in the new order"

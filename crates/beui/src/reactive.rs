@@ -10,7 +10,7 @@ use crate::document::Document;
 use crate::node::{ClickHandler, NodeId};
 use crate::unstyled;
 
-pub use beui_macros::{builder, component};
+pub use beui_macros::{builder, component, view};
 pub use reactive::{batch, create_memo, create_signal, on_cleanup, untrack, Memo, Scope};
 
 thread_local! {
@@ -151,10 +151,21 @@ impl<T: ToString + Clone + PartialEq + 'static> IntoTextValue for Memo<T> {
     }
 }
 
-pub fn text(value: impl IntoTextValue) -> NodeId {
+fn boxed_text_binder(value: impl IntoTextValue + 'static) -> Box<dyn FnOnce(NodeId)> {
+    Box::new(move |node| value.bind_into(node))
+}
+
+#[component]
+pub fn text(
+    #[prop(with = |value: impl IntoTextValue + 'static| boxed_text_binder(value))] string: Option<
+        Box<dyn FnOnce(NodeId)>,
+    >,
+) -> NodeId {
     let node =
         with_document(|document| document.create_text(String::new(), 14.0, crate::Color32::WHITE));
-    value.bind_into(node);
+    if let Some(bind) = string {
+        bind(node);
+    }
     node
 }
 
@@ -266,17 +277,26 @@ fn boxed_click_handler(mut handler: impl FnMut() + 'static) -> ClickHandler {
     Box::new(move |_document| handler())
 }
 
+fn first_child(children: impl IntoIterator<Item = (NodeId, ItemSize)>) -> NodeId {
+    children
+        .into_iter()
+        .next()
+        .expect("button requires a child")
+        .0
+}
+
 #[component]
 pub fn button(
-    label: Option<NodeId>,
+    #[prop(with = |children: impl IntoIterator<Item = (NodeId, ItemSize)>| first_child(children))]
+    children: Option<NodeId>,
     disabled: Prop<bool>,
     #[prop(with = |handler: impl FnMut() + 'static| boxed_click_handler(handler))] on_click: Option<
         ClickHandler,
     >,
 ) -> NodeId {
     let button = with_document(unstyled::button);
-    if let Some(label) = label {
-        with_document(|document| unstyled::set_button_child(document, button, label));
+    if let Some(children) = children {
+        with_document(|document| unstyled::set_button_child(document, button, children));
     }
     if let Some(on_click) = on_click {
         with_document(|document| unstyled::set_button_on_click(document, button, on_click));

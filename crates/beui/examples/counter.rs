@@ -1,6 +1,6 @@
 use beui::reactive::{
     build, button, column, component, create_memo, create_signal, for_each, intrinsic, row, show,
-    text,
+    text, view,
 };
 use beui::{App, Color32, Context, Document, NodeId, Rect};
 
@@ -10,7 +10,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 #[component]
 fn history_entry(value: i64) -> NodeId {
-    text(value.to_string())
+    view! { text { string: value.to_string() } }
 }
 
 #[component]
@@ -33,16 +33,17 @@ fn app() -> NodeId {
         let set_history = set_history.clone();
         let count = count.clone();
         let next_id = next_id.clone();
-        button()
-            .label(text("-"))
-            .disabled(is_zero)
-            .on_click(move || {
-                set_count.update(|value| *value -= 1);
-                let id = next_id.get();
-                next_id.set(id + 1);
-                set_history.update(|entries| entries.push((id, count.get())));
-            })
-            .build()
+        view! {
+            button {
+                disabled: is_zero,
+                on_click: move || {
+                    set_count.update(|value| *value -= 1);
+                    let id = next_id.get();
+                    next_id.set(id + 1);
+                    set_history.update(|entries| entries.push((id, count.get())));
+                },
+            } [ text { string: "-" } ]
+        }
     };
 
     let increment = {
@@ -50,27 +51,29 @@ fn app() -> NodeId {
         let set_history = set_history.clone();
         let count = count.clone();
         let next_id = next_id.clone();
-        button()
-            .label(text("+"))
-            .on_click(move || {
-                set_count.update(|value| *value += 1);
-                let id = next_id.get();
-                next_id.set(id + 1);
-                set_history.update(|entries| entries.push((id, count.get())));
-            })
-            .build()
+        view! {
+            button {
+                on_click: move || {
+                    set_count.update(|value| *value += 1);
+                    let id = next_id.get();
+                    next_id.set(id + 1);
+                    set_history.update(|entries| entries.push((id, count.get())));
+                },
+            } [ text { string: "+" } ]
+        }
     };
 
     let reset = show(is_nonzero, move || {
         let set_count = set_count.clone();
         let set_history = set_history.clone();
-        button()
-            .label(text("reset"))
-            .on_click(move || {
-                set_count.set(0);
-                set_history.set(Vec::new());
-            })
-            .build()
+        view! {
+            button {
+                on_click: move || {
+                    set_count.set(0);
+                    set_history.set(Vec::new());
+                },
+            } [ text { string: "reset" } ]
+        }
     });
 
     let log = column()
@@ -82,23 +85,16 @@ fn app() -> NodeId {
         ))
         .build();
 
-    column()
-        .spacing(8.0)
-        .children([
-            intrinsic(
-                row()
-                    .spacing(8.0)
-                    .children([
-                        intrinsic(decrement),
-                        intrinsic(text(count)),
-                        intrinsic(increment),
-                        intrinsic(reset),
-                    ])
-                    .build(),
-            ),
-            intrinsic(log),
-        ])
-        .build()
+    view! {
+        column {
+            spacing: 8.0,
+        } [
+            row {
+                spacing: 8.0,
+            } [ decrement, text { string: count }, increment, reset ],
+            log
+        ]
+    }
 }
 
 struct CounterApp {

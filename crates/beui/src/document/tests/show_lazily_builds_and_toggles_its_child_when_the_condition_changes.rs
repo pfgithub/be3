@@ -14,14 +14,14 @@ fn show_lazily_builds_and_toggles_its_child_when_the_condition_changes() {
         let (visible, set_visible) = create_signal(false);
 
         let toggle = button()
-            .label(text("toggle"))
+            .children([intrinsic(text().string("toggle").build())])
             .on_click(move || set_visible.update(|visible| *visible = !*visible))
             .build();
         sink_toggle.set(Some(toggle));
 
         let panel = show(visible, move || {
             sink.set(sink.get() + 1);
-            text("panel")
+            text().string("panel").build()
         });
         sink_panel.set(Some(panel));
 
@@ -48,7 +48,7 @@ fn show_lazily_builds_and_toggles_its_child_when_the_condition_changes() {
     );
     assert!(harness.document().is_visible(panel));
     let child = harness.document().children(panel)[0];
-    assert_eq!(harness.document().text(child), "panel");
+    assert_eq!(text_of(harness.document(), child), "panel");
 
     harness.click(harness.center(toggle));
     harness.frame(Vec::new());

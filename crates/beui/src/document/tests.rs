@@ -296,6 +296,10 @@ pub(crate) fn virtual_list(built: &Rc<RefCell<Vec<usize>>>) -> (Document, NodeId
     (document, scroll)
 }
 
+pub(crate) fn text_of(document: &Document, id: NodeId) -> &str {
+    document.text(document.shadow_root(id))
+}
+
 pub(crate) fn toolbar(document: &mut Document, buttons: &[NodeId]) -> NodeId {
     let list = document.create_list(Direction::Vertical, 8.0);
     for button in buttons {
