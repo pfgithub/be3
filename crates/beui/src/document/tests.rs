@@ -1,5 +1,6 @@
 use super::*;
 
+mod a_reactive_tree_can_nest_builder_calls_without_threading_the_document;
 mod a_signal_write_from_a_click_handler_updates_its_bound_text_in_the_same_frame;
 mod a_virtual_scroll_only_builds_the_items_in_view;
 mod arrow_down_on_a_closed_select_trigger_opens_it_and_highlights_the_first_option;
