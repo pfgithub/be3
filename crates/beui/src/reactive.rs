@@ -10,7 +10,7 @@ use crate::document::Document;
 use crate::node::{ClickHandler, NodeId};
 use crate::unstyled;
 
-pub use beui_macros::component;
+pub use beui_macros::{builder, component};
 pub use reactive::{batch, create_memo, create_signal, on_cleanup, untrack, Memo, Scope};
 
 thread_local! {
@@ -181,20 +181,20 @@ impl<I: IntoIterator<Item = (NodeId, ItemSize)>> From<I> for Children {
     }
 }
 
-#[bon::builder(finish_fn = build)]
+#[builder]
 pub fn row(
     spacing: f32,
-    #[builder(with = |children: impl Into<Children>| children.into())] children: Children,
+    #[prop(with = |children: impl Into<Children>| children.into())] children: Children,
 ) -> NodeId {
     let row = with_document(|document| unstyled::row(document, spacing));
     children.mount(row);
     row
 }
 
-#[bon::builder(finish_fn = build)]
+#[builder]
 pub fn column(
     spacing: f32,
-    #[builder(with = |children: impl Into<Children>| children.into())] children: Children,
+    #[prop(with = |children: impl Into<Children>| children.into())] children: Children,
 ) -> NodeId {
     let column = with_document(|document| unstyled::column(document, spacing));
     children.mount(column);
@@ -257,13 +257,13 @@ fn boxed_click_handler(mut handler: impl FnMut() + 'static) -> ClickHandler {
 }
 
 #[component]
-#[bon::builder(finish_fn = build)]
 pub fn button(
     label: Option<NodeId>,
-    #[builder(with = |disabled: impl IntoProp<bool>| disabled.into_prop(), default = Prop::Static(false))]
+    #[prop(with = |disabled: impl IntoProp<bool>| disabled.into_prop(), default = Prop::Static(false))]
     disabled: Prop<bool>,
-    #[builder(with = |handler: impl FnMut() + 'static| boxed_click_handler(handler))]
-    on_click: Option<ClickHandler>,
+    #[prop(with = |handler: impl FnMut() + 'static| boxed_click_handler(handler))] on_click: Option<
+        ClickHandler,
+    >,
 ) -> NodeId {
     let button = with_document(unstyled::button);
     if let Some(label) = label {

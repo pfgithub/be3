@@ -11,7 +11,7 @@ fn a_component_function_appears_in_the_inspector_tree_without_hiding_its_childre
     let document = build(|| {
         column()
             .spacing(0.0)
-            .children([intrinsic(widget())])
+            .children([intrinsic(widget().build())])
             .build()
     });
     let mut harness = Harness::new(document);

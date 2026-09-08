@@ -78,7 +78,7 @@ fn app() -> NodeId {
         .children(for_each(
             history,
             |(id, _)| *id,
-            |(_, value)| intrinsic(history_entry(*value)),
+            |(_, value)| intrinsic(history_entry().value(*value).build()),
         ))
         .build();
 
@@ -108,7 +108,7 @@ struct CounterApp {
 impl CounterApp {
     fn new() -> Self {
         Self {
-            document: build(app),
+            document: build(|| app().build()),
         }
     }
 }
