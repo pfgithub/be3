@@ -1,16 +1,21 @@
 use super::*;
+use crate::reactive::{view, with_reactive_scope};
+use crate::styled::RadioGroupBuilder;
 
 #[test]
 fn radio_groups_select_with_space_and_arrows_without_leaving_the_group() {
     let mut document = Document::new();
-    let group = styled::radio_group(&mut document, &["One", "Two", "Three"], None);
-    let after = labelled_button(&mut document, "After");
-    let after_focus = focus_flag(&mut document, after);
     let changes = Rc::new(RefCell::new(Vec::new()));
     let sink = changes.clone();
-    styled::set_radio_group_on_change(&mut document, group, move |_, value| {
-        sink.borrow_mut().push(value)
+    let group = with_reactive_scope(&mut document, || {
+        view! {
+            <radio_group labels={vec!["One".to_string(), "Two".to_string(), "Three".to_string()]} selected={None} on_change={Box::new(move |_document: &mut Document, value| {
+                sink.borrow_mut().push(value)
+            })} />
+        }
     });
+    let after = labelled_button(&mut document, "After");
+    let after_focus = focus_flag(&mut document, after);
     toolbar(&mut document, &[group, after]);
     let mut harness = Harness::new(document);
     harness.key(Key::Tab, Modifiers::NONE);

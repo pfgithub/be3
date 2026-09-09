@@ -9,9 +9,9 @@ use beui::styled::theme::{
 };
 use beui::styled::{
     self, AccordionBuilder, BodyBuilder, ButtonBuilder, ButtonVariant, CaptionBuilder, CardBuilder,
-    CheckboxBuilder, DisplayBuilder, HeadingBuilder, ParagraphBuilder, ProgressBuilder,
-    ScrollbarBuilder, ShortcutBuilder, SliderBuilder, SwitchBuilder, TitleBuilder,
-    ToggleButtonBuilder,
+    CheckboxBuilder, DisplayBuilder, HeadingBuilder, ListboxBuilder, ParagraphBuilder,
+    ProgressBuilder, RadioGroupBuilder, ScrollbarBuilder, ShortcutBuilder, SliderBuilder,
+    SwitchBuilder, TabsBuilder, TitleBuilder, ToggleButtonBuilder,
 };
 use beui::{unstyled, Color32, Context, Document, ItemSize, NodeId, Rect, TextAlign};
 
@@ -411,13 +411,16 @@ fn build_controls(document: &mut Document, scroll: NodeId, rows: &Rc<Rows>) -> N
     document.append_child(panels, choices_visibility, ItemSize::Intrinsic);
     document.append_child(panels, menus_visibility, ItemSize::Intrinsic);
 
-    let tabs = styled::tabs(document, &["List", "Load", "Name", "Choices", "Menus"], 0);
-    styled::set_tabs_on_change(document, tabs, move |document, selected| {
-        document.set_visible(list_visibility, selected == 0);
-        document.set_visible(load_visibility, selected == 1);
-        document.set_visible(name_visibility, selected == 2);
-        document.set_visible(choices_visibility, selected == 3);
-        document.set_visible(menus_visibility, selected == 4);
+    let tabs = with_reactive_scope(document, || {
+        view! {
+            <tabs labels={vec!["List".to_string(), "Load".to_string(), "Name".to_string(), "Choices".to_string(), "Menus".to_string()]} selected={0} on_change={Box::new(move |document: &mut Document, selected| {
+                document.set_visible(list_visibility, selected == 0);
+                document.set_visible(load_visibility, selected == 1);
+                document.set_visible(name_visibility, selected == 2);
+                document.set_visible(choices_visibility, selected == 3);
+                document.set_visible(menus_visibility, selected == 4);
+            })} />
+        }
     });
 
     let column = unstyled::column(document, 16.0);
@@ -524,36 +527,37 @@ fn percent_label(value: f32) -> String {
 
 fn build_choice_controls(document: &mut Document) -> NodeId {
     let modes = ["Automatic", "Manual", "Scheduled"];
-    let mode_label = with_reactive_scope(document, || {
-        view! { <caption content={"Update mode".to_string()} /> }
-    });
-    let mode = styled::radio_group(document, &modes, Some(0));
     let (mode_status_text, set_mode_status_text) = create_signal("Automatic updates".to_string());
-    let mode_status = with_reactive_scope(
-        document,
-        || view! { <caption content={mode_status_text} /> },
-    );
-    styled::set_radio_group_on_change(document, mode, move |document, selected| {
-        if let Some(index) = selected {
-            let text = format!("{} updates", modes[index]);
-            with_reactive_scope(document, || set_mode_status_text.set(text));
-        }
+    let (mode_label, mode, mode_status) = with_reactive_scope(document, || {
+        (
+            view! { <caption content={"Update mode".to_string()} /> },
+            view! {
+                <radio_group labels={vec!["Automatic".to_string(), "Manual".to_string(), "Scheduled".to_string()]} selected={Some(0)} on_change={Box::new(move |document: &mut Document, selected| {
+                    if let Some(index) = selected {
+                        let text = format!("{} updates", modes[index]);
+                        with_reactive_scope(document, || set_mode_status_text.set(text));
+                    }
+                })} />
+            },
+            view! { <caption content={mode_status_text} /> },
+        )
     });
+
     let colors = ["Amber", "Blue", "Green", "Purple"];
-    let color_label = with_reactive_scope(document, || {
-        view! { <caption content={"Highlight color (type to search)".to_string()} /> }
-    });
-    let color = styled::listbox(document, &colors, Some(1));
     let (color_status_text, set_color_status_text) = create_signal("Blue selected".to_string());
-    let color_status = with_reactive_scope(
-        document,
-        || view! { <caption content={color_status_text} /> },
-    );
-    styled::set_listbox_on_change(document, color, move |document, selected| {
-        if let Some(index) = selected {
-            let text = format!("{} selected", colors[index]);
-            with_reactive_scope(document, || set_color_status_text.set(text));
-        }
+    let (color_label, color, color_status) = with_reactive_scope(document, || {
+        (
+            view! { <caption content={"Highlight color (type to search)".to_string()} /> },
+            view! {
+                <listbox labels={vec!["Amber".to_string(), "Blue".to_string(), "Green".to_string(), "Purple".to_string()]} selected={Some(1)} on_change={Box::new(move |document: &mut Document, selected| {
+                    if let Some(index) = selected {
+                        let text = format!("{} selected", colors[index]);
+                        with_reactive_scope(document, || set_color_status_text.set(text));
+                    }
+                })} />
+            },
+            view! { <caption content={color_status_text} /> },
+        )
     });
     let (pin_status_text, set_pin_status_text) = create_signal("Selection is unpinned".to_string());
     let (pin, pin_status) = with_reactive_scope(document, || {

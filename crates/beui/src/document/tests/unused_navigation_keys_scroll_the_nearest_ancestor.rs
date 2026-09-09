@@ -1,12 +1,14 @@
 use super::*;
 use crate::reactive::{view, with_reactive_scope};
-use crate::styled::SliderBuilder;
+use crate::styled::{SliderBuilder, TabsBuilder};
 
 #[test]
 fn unused_navigation_keys_scroll_the_nearest_ancestor() {
     let mut document = Document::new();
     let scroll = document.create_scroll();
-    let tabs = styled::tabs(&mut document, &["One", "Two"], 0);
+    let tabs = with_reactive_scope(&mut document, || {
+        view! { <tabs labels={vec!["One".to_string(), "Two".to_string()]} selected={0} /> }
+    });
     document.append_scroll_item(scroll, tabs);
     let slider = with_reactive_scope(&mut document, || view! { <slider value={0.5} /> });
     document.append_scroll_item(scroll, slider);

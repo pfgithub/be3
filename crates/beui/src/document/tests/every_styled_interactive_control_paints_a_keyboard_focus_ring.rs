@@ -1,8 +1,8 @@
 use super::*;
 use crate::reactive::{view, with_document, with_reactive_scope};
 use crate::styled::{
-    AccordionBuilder, ButtonBuilder, CheckboxBuilder, ListRowBuilder, SliderBuilder, SwitchBuilder,
-    ToggleButtonBuilder,
+    AccordionBuilder, ButtonBuilder, CheckboxBuilder, ListRowBuilder, ListboxBuilder,
+    RadioGroupBuilder, SliderBuilder, SwitchBuilder, TabsBuilder, ToggleButtonBuilder,
 };
 
 #[test]
@@ -21,9 +21,21 @@ fn every_styled_interactive_control_paints_a_keyboard_focus_ring() {
         |doc| with_reactive_scope(doc, || view! { <switch on={false} /> }),
         |doc| with_reactive_scope(doc, || view! { <slider value={0.5} /> }),
         |doc| styled::text_input(doc, "Text"),
-        |doc| styled::tabs(doc, &["One", "Two"], 0),
-        |doc| styled::radio_group(doc, &["One", "Two"], Some(0)),
-        |doc| styled::listbox(doc, &["One", "Two"], Some(0)),
+        |doc| {
+            with_reactive_scope(doc, || {
+                view! { <tabs labels={vec!["One".to_string(), "Two".to_string()]} selected={0} /> }
+            })
+        },
+        |doc| {
+            with_reactive_scope(doc, || {
+                view! { <radio_group labels={vec!["One".to_string(), "Two".to_string()]} selected={Some(0)} /> }
+            })
+        },
+        |doc| {
+            with_reactive_scope(doc, || {
+                view! { <listbox labels={vec!["One".to_string(), "Two".to_string()]} selected={Some(0)} /> }
+            })
+        },
         |doc| {
             with_reactive_scope(doc, || {
                 view! { <toggle_button label={"Toggle".to_string()} pressed={false} /> }

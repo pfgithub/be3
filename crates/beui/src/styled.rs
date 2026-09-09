@@ -34,7 +34,7 @@ pub use select::{
 pub use shortcut::ShortcutBuilder;
 pub use slider::{slider_value, SliderBuilder};
 pub use switch::{switch_on, SwitchBuilder};
-pub use tabs::{focus_tabs, set_tabs_on_change, set_tabs_selected, tabs, tabs_selected};
+pub use tabs::{focus_tabs, tabs_selected, TabsBuilder};
 pub use text::{
     code, icon, icon_sized, BodyBuilder, CaptionBuilder, DisplayBuilder, HeadingBuilder,
     ParagraphBuilder, TitleBuilder,
@@ -48,11 +48,6 @@ mod choice;
 mod listbox;
 mod radio_group;
 mod toggle_button;
-pub use listbox::{
-    focus_listbox, listbox, listbox_selected, set_listbox_on_change, set_listbox_selected,
-};
-pub use radio_group::{
-    focus_radio_group, radio_group, radio_group_selected, set_radio_group_on_change,
-    set_radio_group_selected,
-};
+pub use listbox::{focus_listbox, listbox_selected, ListboxBuilder};
+pub use radio_group::{focus_radio_group, radio_group_selected, RadioGroupBuilder};
 pub use toggle_button::{focus_toggle_button, toggle_button_pressed, ToggleButtonBuilder};

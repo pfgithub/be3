@@ -1,13 +1,18 @@
 use super::*;
+use crate::reactive::{view, with_reactive_scope};
+use crate::styled::TabsBuilder;
 
 #[test]
 fn clicking_a_tab_selects_the_panel_it_names() {
     let mut document = Document::new();
-    let tabs = styled::tabs(&mut document, &["List", "Load"], 0);
     let reported = Rc::new(Cell::new(0));
     let sink = reported.clone();
-    styled::set_tabs_on_change(&mut document, tabs, move |_document, selected| {
-        sink.set(selected);
+    let tabs = with_reactive_scope(&mut document, || {
+        view! {
+            <tabs labels={vec!["List".to_string(), "Load".to_string()]} selected={0} on_change={Box::new(move |_document: &mut Document, selected| {
+                sink.set(selected);
+            })} />
+        }
     });
     toolbar(&mut document, &[tabs]);
     let mut harness = Harness::new(document);
@@ -15,7 +20,8 @@ fn clicking_a_tab_selects_the_panel_it_names() {
 
     assert_eq!(styled::tabs_selected(harness.document(), tabs), 0);
 
-    let root = harness.document().shadow_root(tabs);
+    let styled_choice = harness.document().shadow_root(tabs);
+    let root = harness.document().shadow_root(styled_choice);
     let row = harness.document().shadow_root(root);
     let second = harness.document().children(row)[1];
     harness.click(harness.center(second));

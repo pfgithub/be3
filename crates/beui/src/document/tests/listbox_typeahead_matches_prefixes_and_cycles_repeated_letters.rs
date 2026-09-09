@@ -1,13 +1,15 @@
 use super::*;
+use crate::reactive::{view, with_reactive_scope};
+use crate::styled::ListboxBuilder;
 
 #[test]
 fn listbox_typeahead_matches_prefixes_and_cycles_repeated_letters() {
     let mut document = Document::new();
-    let listbox = styled::listbox(
-        &mut document,
-        &["Apple", "Banana", "Blueberry", "Cherry"],
-        Some(0),
-    );
+    let listbox = with_reactive_scope(&mut document, || {
+        view! {
+            <listbox labels={vec!["Apple".to_string(), "Banana".to_string(), "Blueberry".to_string(), "Cherry".to_string()]} selected={Some(0)} />
+        }
+    });
     let after = labelled_button(&mut document, "After");
     let after_focus = focus_flag(&mut document, after);
     toolbar(&mut document, &[listbox, after]);
