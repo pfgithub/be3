@@ -3,29 +3,41 @@ use crate::color::Color32;
 use beui_macros::component;
 
 use crate::base::TextAlign;
-use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{current_component, set_component_detail, with_document, Prop, TextBuilder};
 use crate::styled::theme::{
     FONT_BODY, FONT_DISPLAY, FONT_HEADING, FONT_SMALL, FONT_TITLE, ICON_SIZE, TEXT, TEXT_MUTED,
 };
 
-pub fn code(document: &mut Document, content: impl Into<String>) -> NodeId {
-    let code = document.create_text(content, FONT_SMALL, TEXT);
-    document.set_text_monospace(code, true);
-    document.set_text_align(code, TextAlign::Start, TextAlign::Center);
-    code
+#[component]
+pub fn code(content: String) -> NodeId {
+    TextBuilder::default()
+        .string(content)
+        .font_size(FONT_SMALL)
+        .color(TEXT)
+        .align(TextAlign::Start)
+        .monospace(true)
+        .build()
 }
 
-pub fn icon(document: &mut Document, glyph: &str) -> NodeId {
-    icon_sized(document, glyph, ICON_SIZE, TEXT)
+#[component]
+pub fn icon(glyph: String) -> NodeId {
+    IconSizedBuilder::default()
+        .glyph(glyph)
+        .font_size(ICON_SIZE)
+        .color(TEXT)
+        .build()
 }
 
-pub fn icon_sized(document: &mut Document, glyph: &str, font_size: f32, color: Color32) -> NodeId {
-    let icon = document.create_text(glyph, font_size, color);
-    document.set_text_icon(icon, true);
-    document.set_text_align(icon, TextAlign::Center, TextAlign::Center);
-    icon
+#[component]
+pub fn icon_sized(glyph: String, font_size: f32, color: Color32) -> NodeId {
+    TextBuilder::default()
+        .string(glyph)
+        .font_size(font_size)
+        .color(color)
+        .align(TextAlign::Center)
+        .icon(true)
+        .build()
 }
 
 fn reactive_line(

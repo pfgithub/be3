@@ -9,13 +9,12 @@ use crate::node::NodeId;
 use crate::reactive::{
     create_signal, intrinsic, view, with_reactive_scope, ClickCatcherBuilder, WriteSignal,
 };
-use crate::styled;
 use crate::styled::theme::{
     ACCENT, BORDER_WIDTH, CHIP_RADIUS, ON_ACCENT, RADIUS, SCROLLBAR_WIDTH, SEPARATOR_HEIGHT,
     SURFACE, SURFACE_RAISED, TEXT, TEXT_MUTED,
 };
 use crate::styled::{
-    BorderedBuilder, CaptionBuilder, HeadingBuilder, ListRowBuilder, ScrollbarBuilder,
+    BorderedBuilder, CaptionBuilder, CodeBuilder, HeadingBuilder, ListRowBuilder, ScrollbarBuilder,
     SeparatorBuilder,
 };
 use crate::unstyled;
@@ -80,8 +79,18 @@ pub(crate) fn build(entries: &[Entry], summary: &Summary, state: &Rc<State>, off
     document.set_scroll_offset(scroll, offset);
     let body = body(&mut document, scroll);
 
-    let selection = styled::code(&mut document, summary.selection.clone());
-    let bounds = styled::code(&mut document, summary.bounds.clone());
+    let selection = with_reactive_scope(&mut document, || {
+        CodeBuilder::default()
+            .content(summary.selection.clone())
+            .build()
+    });
+    let selection = document.shadow_root(selection);
+    let bounds = with_reactive_scope(&mut document, || {
+        CodeBuilder::default()
+            .content(summary.bounds.clone())
+            .build()
+    });
+    let bounds = document.shadow_root(bounds);
     document.set_text_color(bounds, TEXT_MUTED);
     let footer = footer(&mut document, selection, bounds);
 
@@ -165,7 +174,10 @@ fn pick_toggle(
     state: &Rc<State>,
     picking: bool,
 ) -> (NodeId, NodeId, NodeId) {
-    let label = styled::code(document, "Pick");
+    let label = with_reactive_scope(document, || {
+        CodeBuilder::default().content("Pick".to_owned()).build()
+    });
+    let label = document.shadow_root(label);
     document.set_text_align(label, TextAlign::Center, TextAlign::Center);
     document.set_text_color(label, toggle_text(picking));
 
@@ -212,12 +224,23 @@ fn row(document: &mut Document, entry: &Entry, state: &Rc<State>) -> Row {
     let indent = unstyled::spacer(document);
     let marker = marker(document, entry, state);
 
-    let kind = styled::code(document, entry.kind);
+    let kind = with_reactive_scope(document, || {
+        CodeBuilder::default()
+            .content(entry.kind.to_owned())
+            .build()
+    });
+    let kind = document.shadow_root(kind);
 
-    let detail = styled::code(document, entry.detail.clone());
+    let detail = with_reactive_scope(document, || {
+        CodeBuilder::default().content(entry.detail.clone()).build()
+    });
+    let detail = document.shadow_root(detail);
     document.set_text_color(detail, TEXT_MUTED);
 
-    let size = styled::code(document, entry.size.clone());
+    let size = with_reactive_scope(document, || {
+        CodeBuilder::default().content(entry.size.clone()).build()
+    });
+    let size = document.shadow_root(size);
     document.set_text_color(size, TEXT_MUTED);
     document.set_text_align(size, TextAlign::End, TextAlign::Center);
 
@@ -260,7 +283,12 @@ fn row(document: &mut Document, entry: &Entry, state: &Rc<State>) -> Row {
 }
 
 fn marker(document: &mut Document, entry: &Entry, state: &Rc<State>) -> NodeId {
-    let glyph = styled::code(document, glyph(entry));
+    let glyph = with_reactive_scope(document, || {
+        CodeBuilder::default()
+            .content(glyph(entry).to_owned())
+            .build()
+    });
+    let glyph = document.shadow_root(glyph);
     document.set_text_color(glyph, TEXT_MUTED);
     document.set_text_align(glyph, TextAlign::Center, TextAlign::Center);
     if !entry.expandable {

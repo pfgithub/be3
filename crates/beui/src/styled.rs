@@ -33,8 +33,8 @@ pub use slider::{slider_value, SliderBuilder};
 pub use switch::{switch_on, SwitchBuilder};
 pub use tabs::{focus_tabs, tabs_selected, TabsBuilder};
 pub use text::{
-    code, icon, icon_sized, BodyBuilder, CaptionBuilder, DisplayBuilder, HeadingBuilder,
-    ParagraphBuilder, TitleBuilder,
+    BodyBuilder, CaptionBuilder, CodeBuilder, DisplayBuilder, HeadingBuilder, IconBuilder,
+    IconSizedBuilder, ParagraphBuilder, TitleBuilder,
 };
 pub use text_input::{focus_text_input, text_input_value, TextInputBuilder};
 

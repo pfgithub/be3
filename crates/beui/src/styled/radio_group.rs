@@ -4,6 +4,7 @@ use crate::document::Document;
 use crate::node::{Handler, NodeId};
 use crate::reactive::{with_document, Prop};
 use crate::styled::choice::{self, Kind};
+use crate::unstyled;
 
 #[component]
 pub fn radio_group(
@@ -13,30 +14,31 @@ pub fn radio_group(
 ) -> NodeId {
     let mut on_change = on_change;
     let label_refs: Vec<&str> = labels.iter().map(String::as_str).collect();
-    let control =
-        with_document(|document| choice::choice(document, &label_refs, None, Kind::Radio));
-
-    with_document(|document| {
-        choice::set_on_change(document, control, move |document, selected| {
-            if let Some(handler) = &mut on_change {
-                handler(document, selected);
-            }
-        });
+    let control = with_document(|document| {
+        choice::choice(
+            document,
+            &label_refs,
+            None,
+            Kind::Radio,
+            move |document, selected| {
+                if let Some(handler) = &mut on_change {
+                    handler(document, selected);
+                }
+            },
+        )
     });
 
     selected.apply(move |selected| {
-        with_document(|document| choice::set_selected(document, control, selected));
+        with_document(|document| unstyled::set_choice_selected(document, control, selected));
     });
 
     control
 }
 
 pub fn radio_group_selected(document: &Document, control: NodeId) -> Option<usize> {
-    let inner = document.shadow_root(control);
-    choice::selected_index(document, inner)
+    choice::selected_index(document, control)
 }
 
 pub fn focus_radio_group(document: &mut Document, control: NodeId) {
-    let inner = document.shadow_root(control);
-    choice::focus(document, inner);
+    choice::focus(document, control);
 }
