@@ -150,6 +150,29 @@ impl Document {
         })
     }
 
+    pub(crate) fn reserve_shadow(&mut self) -> NodeId {
+        self.arena.reserve()
+    }
+
+    pub(crate) fn finish_shadow(
+        &mut self,
+        shadow: NodeId,
+        name: &'static str,
+        shadow_root: NodeId,
+        slots: Vec<NodeId>,
+    ) {
+        self.arena.fill(
+            shadow,
+            ShadowNode {
+                name,
+                shadow_root,
+                slots,
+                state: None,
+                detail: None,
+            },
+        );
+    }
+
     pub fn set_slot_child(&mut self, slot: NodeId, child: NodeId) {
         if self.arena.get_as::<SlotNode>(slot).content != Some(child) {
             self.arena.get_mut_as::<SlotNode>(slot).content = Some(child);

@@ -9,7 +9,7 @@ use beui::styled::theme::{
 };
 use beui::styled::{
     self, BodyBuilder, ButtonBuilder, ButtonVariant, CaptionBuilder, CardBuilder, DisplayBuilder,
-    HeadingBuilder, ParagraphBuilder, TitleBuilder,
+    HeadingBuilder, ParagraphBuilder, ShortcutBuilder, TitleBuilder,
 };
 use beui::{unstyled, Color32, Context, Document, ItemSize, NodeId, Rect, TextAlign};
 
@@ -292,14 +292,21 @@ fn build_sidebar(document: &mut Document) -> NodeId {
 
     let line = styled::separator(document);
 
-    let tab = styled::shortcut(document, "Tab", "move focus to the next control");
-    let shift_tab = styled::shortcut(document, "Shift+Tab", "move focus back");
-    let enter = styled::shortcut(document, "Enter", "activate the focused control");
-    let arrows = styled::shortcut(document, "Arrows", "adjust sliders or move within choices");
-    let wheel = styled::shortcut(document, "Page Up/Down", "scroll the focused row list");
-    let typing = styled::shortcut(document, "Ctrl+Z", "undo an edit in a text field");
-    let inspect = styled::shortcut(document, "Ctrl+Shift+I", "open the inspector");
-    let pick = styled::shortcut(document, "Ctrl+Shift+C", "pick a node to inspect");
+    let (tab, shift_tab, enter, arrows, wheel, typing, inspect, pick) = with_reactive_scope(
+        document,
+        || {
+            (
+                view! { <shortcut keys={"Tab".to_string()} description={"move focus to the next control".to_string()} /> },
+                view! { <shortcut keys={"Shift+Tab".to_string()} description={"move focus back".to_string()} /> },
+                view! { <shortcut keys={"Enter".to_string()} description={"activate the focused control".to_string()} /> },
+                view! { <shortcut keys={"Arrows".to_string()} description={"adjust sliders or move within choices".to_string()} /> },
+                view! { <shortcut keys={"Page Up/Down".to_string()} description={"scroll the focused row list".to_string()} /> },
+                view! { <shortcut keys={"Ctrl+Z".to_string()} description={"undo an edit in a text field".to_string()} /> },
+                view! { <shortcut keys={"Ctrl+Shift+I".to_string()} description={"open the inspector".to_string()} /> },
+                view! { <shortcut keys={"Ctrl+Shift+C".to_string()} description={"pick a node to inspect".to_string()} /> },
+            )
+        },
+    );
 
     let keys = unstyled::column(document, 12.0);
     document.append_child(keys, tab, ItemSize::Intrinsic);

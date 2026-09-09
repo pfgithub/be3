@@ -17,6 +17,7 @@ pub use reactive::{
 
 thread_local! {
     static CURRENT_DOCUMENT: RefCell<Option<Document>> = const { RefCell::new(None) };
+    static CURRENT_COMPONENT: Cell<Option<NodeId>> = const { Cell::new(None) };
 }
 
 pub(crate) struct DocumentGuard<'a> {
@@ -76,8 +77,18 @@ pub fn bind(mut effect: impl FnMut(&mut Document) + 'static) {
 }
 
 pub fn component(name: &'static str, f: impl FnOnce() -> NodeId) -> NodeId {
+    let shadow = with_document(Document::reserve_shadow);
+    let previous = CURRENT_COMPONENT.with(|cell| cell.replace(Some(shadow)));
     let root = f();
-    with_document(|document| document.create_shadow(name, root, Vec::new()))
+    CURRENT_COMPONENT.with(|cell| cell.set(previous));
+    with_document(|document| document.finish_shadow(shadow, name, root, Vec::new()));
+    shadow
+}
+
+pub fn current_component() -> NodeId {
+    CURRENT_COMPONENT
+        .with(Cell::get)
+        .expect("current_component() called outside of a #[component] body")
 }
 
 pub enum Prop<T> {
@@ -110,6 +121,12 @@ pub trait IntoProp<T> {
 impl<T: 'static> IntoProp<T> for T {
     fn into_prop(self) -> Prop<T> {
         Prop::Static(self)
+    }
+}
+
+impl<T: 'static> IntoProp<T> for Prop<T> {
+    fn into_prop(self) -> Prop<T> {
+        self
     }
 }
 
