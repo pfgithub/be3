@@ -18,6 +18,7 @@ use crate::styled::{
     SeparatorBuilder,
 };
 use crate::unstyled;
+use crate::unstyled::PressableBuilder;
 
 use super::tree::Entry;
 use super::State;
@@ -218,7 +219,7 @@ fn pick_toggle(state: &Rc<State>, picking: bool) -> (NodeId, NodeId, NodeId) {
     });
 
     let bordered = view! { <bordered corner_radius={CHIP_RADIUS}>{fill}</bordered> };
-    let pressable = unstyled::PressableBuilder::default().build();
+    let pressable = PressableBuilder::default().build();
     unstyled::set_pressable_child(pressable, bordered);
 
     let picker = state.clone();
@@ -328,7 +329,7 @@ fn marker(entry: &Entry, state: &Rc<State>) -> NodeId {
         return glyph_node;
     }
 
-    let marker = unstyled::PressableBuilder::default().build();
+    let marker = PressableBuilder::default().build();
     unstyled::set_pressable_child(marker, glyph_node);
 
     let expansion = state.clone();
