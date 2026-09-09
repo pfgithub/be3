@@ -6,6 +6,7 @@ use std::rc::Rc;
 use reactive::create_effect;
 
 use crate::base::ItemSize;
+use crate::color::Color32;
 use crate::document::Document;
 use crate::node::{ClickHandler, NodeId};
 use crate::unstyled;
@@ -242,6 +243,37 @@ pub fn column(spacing: f32, children: Children) -> NodeId {
     let column = with_document(|document| unstyled::column(document, spacing));
     children.mount(column);
     column
+}
+
+#[component]
+pub fn centered_row(spacing: f32, children: Children) -> NodeId {
+    let row = with_document(|document| unstyled::centered_row(document, spacing));
+    children.mount(row);
+    row
+}
+
+#[component]
+pub fn padding(horizontal: f32, vertical: f32, children: Children) -> NodeId {
+    let child = children
+        .into_first()
+        .expect("padding requires a child, e.g. <padding>{content}</padding>");
+    with_document(|document| {
+        let padding = document.create_padding(horizontal, vertical);
+        document.set_padding_child(padding, child);
+        padding
+    })
+}
+
+#[component]
+pub fn fill(color: Color32, radius: u8, children: Children) -> NodeId {
+    let child = children
+        .into_first()
+        .expect("fill requires a child, e.g. <fill>{content}</fill>");
+    with_document(|document| {
+        let fill = document.create_fill(color, radius);
+        document.set_fill_child(fill, child);
+        fill
+    })
 }
 
 #[component]

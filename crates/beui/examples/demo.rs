@@ -2,7 +2,10 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 
-use beui::reactive::{create_memo, create_signal, view, with_reactive_scope, WriteSignal};
+use beui::reactive::{
+    create_memo, create_signal, view, with_document, with_reactive_scope, CenteredRowBuilder,
+    ColumnBuilder, FillBuilder, PaddingBuilder, RowBuilder, ShowBuilder, WriteSignal,
+};
 use beui::styled::theme::{
     ACCENT, ACCENT_SOFT, BACKGROUND, RADIUS, SCROLLBAR_WIDTH, SEPARATOR_HEIGHT, SURFACE,
     SURFACE_RAISED, TEXT_MUTED,
@@ -39,22 +42,23 @@ impl DemoApp {
     fn new() -> Self {
         let mut document = Document::new();
         let (count, set_count) = create_signal(0i64);
-        let value = with_reactive_scope(&mut document, || {
-            view! { <display content={create_memo(move || count.get().to_string())} /> }
+
+        let root = with_reactive_scope(&mut document, || {
+            let value =
+                view! { <display content={create_memo(move || count.get().to_string())} /> };
+            let header = build_header(set_count);
+            let body = build_body(value);
+            view! {
+                <fill color={BACKGROUND} radius={0}>
+                    <column spacing={0.0}>
+                        @fixed(HEADER_HEIGHT) {header}
+                        @fixed(SEPARATOR_HEIGHT) {with_document(styled::separator)}
+                        @percent(100.0) {body}
+                    </column>
+                </fill>
+            }
         });
-
-        let header = build_header(&mut document, set_count);
-        let body = build_body(&mut document, value);
-
-        let root_column = unstyled::column(&mut document, 0.0);
-        document.append_child(root_column, header, ItemSize::Fixed(HEADER_HEIGHT));
-        let header_line = styled::separator(&mut document);
-        document.append_child(root_column, header_line, ItemSize::Fixed(SEPARATOR_HEIGHT));
-        document.append_child(root_column, body, ItemSize::Percent(100.0));
-
-        let background = document.create_fill(BACKGROUND, 0);
-        document.set_fill_child(background, root_column);
-        document.set_root(background);
+        document.set_root(root);
 
         Self { document }
     }
@@ -222,297 +226,207 @@ fn install_rows(document: &mut Document, scroll: NodeId, rows: &Rc<Rows>, compac
     });
 }
 
-fn build_header(document: &mut Document, set_count: WriteSignal<i64>) -> NodeId {
-    let title = with_reactive_scope(
-        document,
-        || view! { <title content={"beui".to_string()} /> },
-    );
-    let subtitle = with_reactive_scope(document, || {
-        view! { <caption content={"retained mode ui".to_string()} /> }
-    });
-    let brand = unstyled::centered_row(document, 10.0);
-    document.append_child(brand, title, ItemSize::Intrinsic);
-    document.append_child(brand, subtitle, ItemSize::Intrinsic);
-
-    let reset = with_reactive_scope(document, || {
-        view! { <button label={"Reset".to_string()} variant={ButtonVariant::Secondary} /> }
-    });
-    let decrement = with_reactive_scope(document, || {
-        view! { <button label={"-".to_string()} variant={ButtonVariant::Primary} /> }
-    });
-    let increment = with_reactive_scope(document, || {
-        view! { <button label={"+".to_string()} variant={ButtonVariant::Primary} /> }
-    });
-
-    styled::set_button_on_click(document, reset, {
-        let set_count = set_count.clone();
-        move |_document| set_count.set(0)
-    });
-    styled::set_button_on_click(document, decrement, {
-        let set_count = set_count.clone();
-        move |_document| set_count.update(|value| *value = value.saturating_sub(1))
-    });
-    styled::set_button_on_click(document, increment, move |_document| {
-        set_count.update(|value| *value = value.saturating_add(1))
-    });
-
-    let gap = unstyled::spacer(document);
-    let bar = unstyled::centered_row(document, 10.0);
-    document.append_child(bar, brand, ItemSize::Intrinsic);
-    document.append_child(bar, gap, ItemSize::Percent(100.0));
-    document.append_child(bar, reset, ItemSize::Intrinsic);
-    document.append_child(bar, decrement, ItemSize::Fixed(ICON_BUTTON_WIDTH));
-    document.append_child(bar, increment, ItemSize::Fixed(ICON_BUTTON_WIDTH));
-
-    let padding = document.create_padding(HEADER_PADDING, 0.0);
-    document.set_padding_child(padding, bar);
-    let fill = document.create_fill(SURFACE, 0);
-    document.set_fill_child(fill, padding);
-    fill
+fn build_header(set_count: WriteSignal<i64>) -> NodeId {
+    let reset_count = set_count.clone();
+    let decrement_count = set_count.clone();
+    view! {
+        <fill color={SURFACE} radius={0}>
+            <padding horizontal={HEADER_PADDING} vertical={0.0}>
+                <centered_row spacing={10.0}>
+                    <centered_row spacing={10.0}>
+                        <title content={"beui".to_string()} />
+                        <caption content={"retained mode ui".to_string()} />
+                    </centered_row>
+                    @percent(100.0) {with_document(unstyled::spacer)}
+                    <button label={"Reset".to_string()} variant={ButtonVariant::Secondary} on_click={Box::new(move |_document| {
+                        reset_count.set(0);
+                    })} />
+                    @fixed(ICON_BUTTON_WIDTH) <button label={"-".to_string()} variant={ButtonVariant::Primary} on_click={Box::new(move |_document| {
+                        decrement_count.update(|value| *value = value.saturating_sub(1));
+                    })} />
+                    @fixed(ICON_BUTTON_WIDTH) <button label={"+".to_string()} variant={ButtonVariant::Primary} on_click={Box::new(move |_document| {
+                        set_count.update(|value| *value = value.saturating_add(1));
+                    })} />
+                </centered_row>
+            </padding>
+        </fill>
+    }
 }
 
-fn build_body(document: &mut Document, value: NodeId) -> NodeId {
-    let panes = unstyled::row(document, 20.0);
-    let sidebar = build_sidebar(document);
-    let main = build_main(document, value);
-    document.append_child(panes, sidebar, ItemSize::Percent(32.0));
-    document.append_child(panes, main, ItemSize::Percent(68.0));
-
-    let padding = document.create_padding(BODY_PADDING, BODY_PADDING);
-    document.set_padding_child(padding, panes);
-    padding
+fn build_body(value: NodeId) -> NodeId {
+    let sidebar = build_sidebar();
+    let main = build_main(value);
+    view! {
+        <padding horizontal={BODY_PADDING} vertical={BODY_PADDING}>
+            <row spacing={20.0}>
+                @percent(32.0) {sidebar}
+                @percent(68.0) {main}
+            </row>
+        </padding>
+    }
 }
 
-fn build_sidebar(document: &mut Document) -> NodeId {
-    let about = with_reactive_scope(document, || {
-        view! {
-            <paragraph content={"beui keeps a retained tree of nodes. Base nodes carry behaviour only, unstyled \
-                 components compose them, and the styled components paint them.".to_string()} />
-        }
-    });
-    let about_section = with_reactive_scope(document, || {
-        view! { <accordion title={"About".to_string()} open={true}>{about}</accordion> }
-    });
-
-    let line = styled::separator(document);
-
-    let (tab, shift_tab, enter, arrows, wheel, typing, inspect, pick) = with_reactive_scope(
-        document,
-        || {
-            (
-                view! { <shortcut keys={"Tab".to_string()} description={"move focus to the next control".to_string()} /> },
-                view! { <shortcut keys={"Shift+Tab".to_string()} description={"move focus back".to_string()} /> },
-                view! { <shortcut keys={"Enter".to_string()} description={"activate the focused control".to_string()} /> },
-                view! { <shortcut keys={"Arrows".to_string()} description={"adjust sliders or move within choices".to_string()} /> },
-                view! { <shortcut keys={"Page Up/Down".to_string()} description={"scroll the focused row list".to_string()} /> },
-                view! { <shortcut keys={"Ctrl+Z".to_string()} description={"undo an edit in a text field".to_string()} /> },
-                view! { <shortcut keys={"Ctrl+Shift+I".to_string()} description={"open the inspector".to_string()} /> },
-                view! { <shortcut keys={"Ctrl+Shift+C".to_string()} description={"pick a node to inspect".to_string()} /> },
-            )
-        },
-    );
-
-    let keys = unstyled::column(document, 12.0);
-    document.append_child(keys, tab, ItemSize::Intrinsic);
-    document.append_child(keys, shift_tab, ItemSize::Intrinsic);
-    document.append_child(keys, enter, ItemSize::Intrinsic);
-    document.append_child(keys, arrows, ItemSize::Intrinsic);
-    document.append_child(keys, wheel, ItemSize::Intrinsic);
-    document.append_child(keys, typing, ItemSize::Intrinsic);
-    document.append_child(keys, inspect, ItemSize::Intrinsic);
-    document.append_child(keys, pick, ItemSize::Intrinsic);
-    let keyboard_section = with_reactive_scope(document, || {
-        view! { <accordion title={"Keyboard".to_string()} open={true}>{keys}</accordion> }
-    });
-
-    let content = unstyled::column(document, 12.0);
-    document.append_child(content, about_section, ItemSize::Intrinsic);
-    document.append_child(content, line, ItemSize::Fixed(SEPARATOR_HEIGHT));
-    document.append_child(content, keyboard_section, ItemSize::Intrinsic);
-
-    with_reactive_scope(document, || view! { <card>{content}</card> })
+fn build_sidebar() -> NodeId {
+    view! {
+        <card>
+            <column spacing={12.0}>
+                <accordion title={"About".to_string()} open={true}>
+                    <paragraph content={"beui keeps a retained tree of nodes. Base nodes carry behaviour only, unstyled \
+                         components compose them, and the styled components paint them.".to_string()} />
+                </accordion>
+                @fixed(SEPARATOR_HEIGHT) {with_document(styled::separator)}
+                <accordion title={"Keyboard".to_string()} open={true}>
+                    <column spacing={12.0}>
+                        <shortcut keys={"Tab".to_string()} description={"move focus to the next control".to_string()} />
+                        <shortcut keys={"Shift+Tab".to_string()} description={"move focus back".to_string()} />
+                        <shortcut keys={"Enter".to_string()} description={"activate the focused control".to_string()} />
+                        <shortcut keys={"Arrows".to_string()} description={"adjust sliders or move within choices".to_string()} />
+                        <shortcut keys={"Page Up/Down".to_string()} description={"scroll the focused row list".to_string()} />
+                        <shortcut keys={"Ctrl+Z".to_string()} description={"undo an edit in a text field".to_string()} />
+                        <shortcut keys={"Ctrl+Shift+I".to_string()} description={"open the inspector".to_string()} />
+                        <shortcut keys={"Ctrl+Shift+C".to_string()} description={"pick a node to inspect".to_string()} />
+                    </column>
+                </accordion>
+            </column>
+        </card>
+    }
 }
 
-fn build_main(document: &mut Document, value: NodeId) -> NodeId {
-    let counter_label = with_reactive_scope(document, || {
-        view! { <caption content={"Counter".to_string()} /> }
-    });
-    let counter_hint = with_reactive_scope(document, || {
-        view! { <paragraph content={"Click the header buttons, or focus one with Tab and press Enter.".to_string()} /> }
-    });
-    let counter_column = unstyled::column(document, 4.0);
-    document.append_child(counter_column, counter_label, ItemSize::Intrinsic);
-    document.append_child(counter_column, value, ItemSize::Intrinsic);
-    document.append_child(counter_column, counter_hint, ItemSize::Intrinsic);
-    let counter_card = with_reactive_scope(document, || view! { <card>{counter_column}</card> });
-
-    let list_title = with_reactive_scope(document, || {
-        view! { <heading content={format!("Rows ({ROW_COUNT})")} /> }
-    });
+fn build_main(value: NodeId) -> NodeId {
     let (status_text, set_status_text) = create_signal("Nothing selected".to_string());
-    let status = with_reactive_scope(document, || view! { <caption content={status_text} /> });
-    let status_text_node = document.shadow_root(status);
-    document.set_text_align(status_text_node, TextAlign::End, TextAlign::Center);
-    let list_header = unstyled::centered_row(document, 12.0);
-    document.append_child(list_header, list_title, ItemSize::Intrinsic);
-    document.append_child(list_header, status, ItemSize::Percent(100.0));
-
-    let list_line = styled::separator(document);
-
-    let scroll = document.create_scroll();
     let rows = Rc::new(Rows::new(set_status_text));
-    install_rows(document, scroll, &rows, false);
-    let bar = with_reactive_scope(document, || view! { <scrollbar scroll={scroll} /> });
+    let scroll = with_document(Document::create_scroll);
+    with_document(|document| install_rows(document, scroll, &rows, false));
 
-    let area = unstyled::row(document, 10.0);
-    document.append_child(area, scroll, ItemSize::Percent(100.0));
-    document.append_child(area, bar, ItemSize::Fixed(SCROLLBAR_WIDTH));
-
-    let list_column = unstyled::column(document, 12.0);
-    document.append_child(list_column, list_header, ItemSize::Intrinsic);
-    document.append_child(list_column, list_line, ItemSize::Fixed(SEPARATOR_HEIGHT));
-    document.append_child(list_column, area, ItemSize::Percent(100.0));
-    let list_card = with_reactive_scope(document, || view! { <card>{list_column}</card> });
-
-    let controls_card = build_controls(document, scroll, &rows);
-
-    let main = unstyled::column(document, 20.0);
-    document.append_child(main, counter_card, ItemSize::Intrinsic);
-    document.append_child(main, controls_card, ItemSize::Intrinsic);
-    document.append_child(main, list_card, ItemSize::Percent(100.0));
-    main
-}
-
-fn build_controls(document: &mut Document, scroll: NodeId, rows: &Rc<Rows>) -> NodeId {
-    let list_panel = build_list_controls(document, scroll, rows);
-    let list_visibility = document.create_visibility(true);
-    document.set_visibility_child(list_visibility, list_panel);
-
-    let load_panel = build_load_controls(document);
-    let load_visibility = document.create_visibility(false);
-    document.set_visibility_child(load_visibility, load_panel);
-
-    let name_panel = build_name_controls(document);
-    let name_visibility = document.create_visibility(false);
-    document.set_visibility_child(name_visibility, name_panel);
-
-    let choices_panel = build_choice_controls(document);
-    let choices_visibility = document.create_visibility(false);
-    document.set_visibility_child(choices_visibility, choices_panel);
-
-    let menus_panel = build_menu_controls(document);
-    let menus_visibility = document.create_visibility(false);
-    document.set_visibility_child(menus_visibility, menus_panel);
-
-    let panels = unstyled::column(document, 0.0);
-    document.append_child(panels, list_visibility, ItemSize::Intrinsic);
-    document.append_child(panels, load_visibility, ItemSize::Intrinsic);
-    document.append_child(panels, name_visibility, ItemSize::Intrinsic);
-    document.append_child(panels, choices_visibility, ItemSize::Intrinsic);
-    document.append_child(panels, menus_visibility, ItemSize::Intrinsic);
-
-    let tabs = with_reactive_scope(document, || {
-        view! {
-            <tabs labels={vec!["List".to_string(), "Load".to_string(), "Name".to_string(), "Choices".to_string(), "Menus".to_string()]} selected={0} on_change={Box::new(move |document: &mut Document, selected| {
-                document.set_visible(list_visibility, selected == 0);
-                document.set_visible(load_visibility, selected == 1);
-                document.set_visible(name_visibility, selected == 2);
-                document.set_visible(choices_visibility, selected == 3);
-                document.set_visible(menus_visibility, selected == 4);
-            })} />
-        }
+    let status = view! { <caption content={status_text} /> };
+    with_document(|document| {
+        let status_text_node = document.shadow_root(status);
+        document.set_text_align(status_text_node, TextAlign::End, TextAlign::Center);
     });
 
-    let column = unstyled::column(document, 16.0);
-    document.append_child(column, tabs, ItemSize::Intrinsic);
-    document.append_child(column, panels, ItemSize::Intrinsic);
-    with_reactive_scope(document, || view! { <card>{column}</card> })
+    let controls_card = build_controls(scroll, &rows);
+
+    view! {
+        <column spacing={20.0}>
+            <card>
+                <column spacing={4.0}>
+                    <caption content={"Counter".to_string()} />
+                    {value}
+                    <paragraph content={"Click the header buttons, or focus one with Tab and press Enter.".to_string()} />
+                </column>
+            </card>
+            {controls_card}
+            @percent(100.0) <card>
+                <column spacing={12.0}>
+                    <centered_row spacing={12.0}>
+                        <heading content={format!("Rows ({ROW_COUNT})")} />
+                        @percent(100.0) {status}
+                    </centered_row>
+                    @fixed(SEPARATOR_HEIGHT) {with_document(styled::separator)}
+                    @percent(100.0) <row spacing={10.0}>
+                        @percent(100.0) {scroll}
+                        @fixed(SCROLLBAR_WIDTH) <scrollbar scroll={scroll} />
+                    </row>
+                </column>
+            </card>
+        </column>
+    }
 }
 
-fn build_list_controls(document: &mut Document, scroll: NodeId, rows: &Rc<Rows>) -> NodeId {
+fn build_controls(scroll: NodeId, rows: &Rc<Rows>) -> NodeId {
+    let (selected_tab, set_selected_tab) = create_signal(0usize);
+
+    let list_rows = rows.clone();
+    let list_tab = selected_tab.clone();
+    let load_tab = selected_tab.clone();
+    let name_tab = selected_tab.clone();
+    let choices_tab = selected_tab.clone();
+    let list_condition = create_memo(move || list_tab.get() == 0);
+    let load_condition = create_memo(move || load_tab.get() == 1);
+    let name_condition = create_memo(move || name_tab.get() == 2);
+    let choices_condition = create_memo(move || choices_tab.get() == 3);
+    let menus_condition = create_memo(move || selected_tab.get() == 4);
+
+    view! {
+        <card>
+            <column spacing={16.0}>
+                <tabs labels={vec!["List".to_string(), "Load".to_string(), "Name".to_string(), "Choices".to_string(), "Menus".to_string()]} selected={0} on_change={Box::new(move |_document: &mut Document, selected| {
+                    set_selected_tab.set(selected);
+                })} />
+                <column spacing={0.0}>
+                    <show condition={list_condition} then={Box::new(move || build_list_controls(scroll, &list_rows))} />
+                    <show condition={load_condition} then={Box::new(build_load_controls)} />
+                    <show condition={name_condition} then={Box::new(build_name_controls)} />
+                    <show condition={choices_condition} then={Box::new(build_choice_controls)} />
+                    <show condition={menus_condition} then={Box::new(build_menu_controls)} />
+                </column>
+            </column>
+        </card>
+    }
+}
+
+fn build_list_controls(scroll: NodeId, rows: &Rc<Rows>) -> NodeId {
     let timing_rows = rows.clone();
-    let timings = with_reactive_scope(document, || {
-        view! {
+    let compact_rows = rows.clone();
+    view! {
+        <column spacing={12.0}>
             <checkbox label={"Show timings".to_string()} checked={true} on_change={Box::new(move |document: &mut Document, checked| {
                 timing_rows.show_timings(document, checked);
             })} />
-        }
-    });
-
-    let compact_rows = rows.clone();
-    let (compact, compact_label) = with_reactive_scope(document, || {
-        (
-            view! { <switch on={false} on_change={Box::new(move |document: &mut Document, on| {
-                install_rows(document, scroll, &compact_rows, on);
-            })} /> },
-            view! { <body content={"Compact rows".to_string()} /> },
-        )
-    });
-    let compact_line = unstyled::centered_row(document, 12.0);
-    document.append_child(compact_line, compact, ItemSize::Intrinsic);
-    document.append_child(compact_line, compact_label, ItemSize::Percent(100.0));
-
-    let column = unstyled::column(document, 12.0);
-    document.append_child(column, timings, ItemSize::Intrinsic);
-    document.append_child(column, compact_line, ItemSize::Intrinsic);
-    column
+            <centered_row spacing={12.0}>
+                <switch on={false} on_change={Box::new(move |document: &mut Document, on| {
+                    install_rows(document, scroll, &compact_rows, on);
+                })} />
+                @percent(100.0) <body content={"Compact rows".to_string()} />
+            </centered_row>
+        </column>
+    }
 }
 
-fn build_load_controls(document: &mut Document) -> NodeId {
+fn build_load_controls() -> NodeId {
     let (progress_value, set_progress_value) = create_signal(0.4f32);
-    let (label, readout, bar, slider) = with_reactive_scope(document, || {
-        let readout_value = progress_value.clone();
-        (
-            view! { <caption content={"Simulated load".to_string()} /> },
-            view! { <caption content={create_memo(move || percent_label(readout_value.get()))} /> },
-            view! { <progress value={progress_value} /> },
-            view! { <slider value={0.4} on_change={Box::new(move |_document: &mut Document, value| {
-                set_progress_value.set(value);
-            })} /> },
-        )
+    let readout_value = progress_value.clone();
+    let readout =
+        view! { <caption content={create_memo(move || percent_label(readout_value.get()))} /> };
+    with_document(|document| {
+        let readout_text_node = document.shadow_root(readout);
+        document.set_text_align(readout_text_node, TextAlign::End, TextAlign::Center);
     });
-    let readout_text_node = document.shadow_root(readout);
-    document.set_text_align(readout_text_node, TextAlign::End, TextAlign::Center);
-    let header = unstyled::centered_row(document, 12.0);
-    document.append_child(header, label, ItemSize::Intrinsic);
-    document.append_child(header, readout, ItemSize::Percent(100.0));
 
-    let column = unstyled::column(document, 12.0);
-    document.append_child(column, header, ItemSize::Intrinsic);
-    document.append_child(column, slider, ItemSize::Intrinsic);
-    document.append_child(column, bar, ItemSize::Intrinsic);
-    column
+    view! {
+        <column spacing={12.0}>
+            <centered_row spacing={12.0}>
+                <caption content={"Simulated load".to_string()} />
+                @percent(100.0) {readout}
+            </centered_row>
+            <slider value={0.4} on_change={Box::new(move |_document: &mut Document, value| {
+                set_progress_value.set(value);
+            })} />
+            <progress value={progress_value} />
+        </column>
+    }
 }
 
-fn build_name_controls(document: &mut Document) -> NodeId {
-    let label = with_reactive_scope(document, || {
-        view! { <caption content={"Display name".to_string()} /> }
-    });
+fn build_name_controls() -> NodeId {
     let (greeting_text, set_greeting_text) = create_signal(greeting_label(""));
-    let greeting = with_reactive_scope(document, || view! { <caption content={greeting_text} /> });
-    let greeting_text_node = document.shadow_root(greeting);
-    document.set_text_align(greeting_text_node, TextAlign::End, TextAlign::Center);
-    let header = unstyled::centered_row(document, 12.0);
-    document.append_child(header, label, ItemSize::Intrinsic);
-    document.append_child(header, greeting, ItemSize::Percent(100.0));
+    let greeting = view! { <caption content={greeting_text} /> };
+    with_document(|document| {
+        let greeting_text_node = document.shadow_root(greeting);
+        document.set_text_align(greeting_text_node, TextAlign::End, TextAlign::Center);
+    });
 
-    let input = with_reactive_scope(document, || {
-        view! {
+    view! {
+        <column spacing={12.0}>
+            <centered_row spacing={12.0}>
+                <caption content={"Display name".to_string()} />
+                @percent(100.0) {greeting}
+            </centered_row>
             <text_input value={String::new()} placeholder={"Type a name".to_string()} on_change={Box::new(move |_document: &mut Document, value| {
                 set_greeting_text.set(greeting_label(&value));
             })} />
-        }
-    });
-
-    let hint = with_reactive_scope(document, || {
-        view! { <paragraph content={"Click to place the caret, drag to select, and Ctrl+Z to undo.".to_string()} /> }
-    });
-
-    let column = unstyled::column(document, 12.0);
-    document.append_child(column, header, ItemSize::Intrinsic);
-    document.append_child(column, input, ItemSize::Intrinsic);
-    document.append_child(column, hint, ItemSize::Intrinsic);
-    column
+            <paragraph content={"Click to place the caret, drag to select, and Ctrl+Z to undo.".to_string()} />
+        </column>
+    }
 }
 
 fn greeting_label(name: &str) -> String {
@@ -527,44 +441,24 @@ fn percent_label(value: f32) -> String {
     format!("{}%", (value * 100.0).round())
 }
 
-fn build_choice_controls(document: &mut Document) -> NodeId {
+fn build_choice_controls() -> NodeId {
     let modes = ["Automatic", "Manual", "Scheduled"];
     let (mode_status_text, set_mode_status_text) = create_signal("Automatic updates".to_string());
-    let (mode_label, mode, mode_status) = with_reactive_scope(document, || {
-        (
-            view! { <caption content={"Update mode".to_string()} /> },
-            view! {
+    let colors = ["Amber", "Blue", "Green", "Purple"];
+    let (color_status_text, set_color_status_text) = create_signal("Blue selected".to_string());
+    let (pin_status_text, set_pin_status_text) = create_signal("Selection is unpinned".to_string());
+
+    view! {
+        <row spacing={20.0}>
+            @percent(50.0) <column spacing={8.0}>
+                <caption content={"Update mode".to_string()} />
                 <radio_group labels={vec!["Automatic".to_string(), "Manual".to_string(), "Scheduled".to_string()]} selected={Some(0)} on_change={Box::new(move |_document: &mut Document, selected| {
                     if let Some(index) = selected {
                         let text = format!("{} updates", modes[index]);
                         set_mode_status_text.set(text);
                     }
                 })} />
-            },
-            view! { <caption content={mode_status_text} /> },
-        )
-    });
-
-    let colors = ["Amber", "Blue", "Green", "Purple"];
-    let (color_status_text, set_color_status_text) = create_signal("Blue selected".to_string());
-    let (color_label, color, color_status) = with_reactive_scope(document, || {
-        (
-            view! { <caption content={"Highlight color (type to search)".to_string()} /> },
-            view! {
-                <listbox labels={vec!["Amber".to_string(), "Blue".to_string(), "Green".to_string(), "Purple".to_string()]} selected={Some(1)} on_change={Box::new(move |_document: &mut Document, selected| {
-                    if let Some(index) = selected {
-                        let text = format!("{} selected", colors[index]);
-                        set_color_status_text.set(text);
-                    }
-                })} />
-            },
-            view! { <caption content={color_status_text} /> },
-        )
-    });
-    let (pin_status_text, set_pin_status_text) = create_signal("Selection is unpinned".to_string());
-    let (pin, pin_status) = with_reactive_scope(document, || {
-        (
-            view! {
+                <caption content={mode_status_text} />
                 <toggle_button label={"Pin selection".to_string()} pressed={false} on_change={Box::new(move |_document: &mut Document, pressed| {
                     let text = if pressed {
                         "Selection is pinned"
@@ -574,69 +468,40 @@ fn build_choice_controls(document: &mut Document) -> NodeId {
                     .to_string();
                     set_pin_status_text.set(text);
                 })} />
-            },
-            view! { <caption content={pin_status_text} /> },
-        )
-    });
-    let left = unstyled::column(document, 8.0);
-    for child in [mode_label, mode, mode_status, pin, pin_status] {
-        document.append_child(left, child, ItemSize::Intrinsic);
+                <caption content={pin_status_text} />
+            </column>
+            @percent(50.0) <column spacing={8.0}>
+                <caption content={"Highlight color (type to search)".to_string()} />
+                <listbox labels={vec!["Amber".to_string(), "Blue".to_string(), "Green".to_string(), "Purple".to_string()]} selected={Some(1)} on_change={Box::new(move |_document: &mut Document, selected| {
+                    if let Some(index) = selected {
+                        let text = format!("{} selected", colors[index]);
+                        set_color_status_text.set(text);
+                    }
+                })} />
+                <caption content={color_status_text} />
+            </column>
+        </row>
     }
-    let right = unstyled::column(document, 8.0);
-    for child in [color_label, color, color_status] {
-        document.append_child(right, child, ItemSize::Intrinsic);
-    }
-    let row = unstyled::row(document, 20.0);
-    document.append_child(row, left, ItemSize::Percent(50.0));
-    document.append_child(row, right, ItemSize::Percent(50.0));
-    row
 }
 
-fn build_menu_controls(document: &mut Document) -> NodeId {
+fn build_menu_controls() -> NodeId {
     let fruits: Vec<String> = ["Apple", "Banana", "Cherry", "Date", "Grape", "Mango"]
         .iter()
         .map(|label| (*label).to_owned())
         .collect();
-    let (fruit_status_text, set_fruit_status_text) = create_signal("Apple selected".to_string());
     let fruit_names = fruits.clone();
-    let (fruit_label, fruit, fruit_status) = with_reactive_scope(document, || {
-        (
-            view! { <caption content={"Favorite fruit (type to search)".to_string()} /> },
-            view! {
-                <select options={fruits} selected={Some(0)} on_change={Box::new(move |_document: &mut Document, selected| {
-                    let text = selected
-                        .and_then(|index| fruit_names.get(index))
-                        .map_or_else(
-                            || "Nothing selected".to_owned(),
-                            |label| format!("{label} selected"),
-                        );
-                    set_fruit_status_text.set(text);
-                })} />
-            },
-            view! { <caption content={fruit_status_text} /> },
-        )
-    });
-    let left = unstyled::column(document, 8.0);
-    document.append_child(left, fruit_label, ItemSize::Intrinsic);
-    document.append_child(left, fruit, ItemSize::Intrinsic);
-    document.append_child(left, fruit_status, ItemSize::Intrinsic);
-
-    let region_label = with_reactive_scope(document, || {
-        view! { <caption content={"Right-click the card below".to_string()} /> }
-    });
-    let region_hint = with_reactive_scope(document, || {
-        view! { <paragraph content={"The Share item opens a submenu on hover or Right Arrow; Left Arrow closes it.".to_string()} /> }
-    });
-    let region_column = unstyled::column(document, 4.0);
-    document.append_child(region_column, region_label, ItemSize::Intrinsic);
-    document.append_child(region_column, region_hint, ItemSize::Intrinsic);
-    let region_card = with_reactive_scope(document, || view! { <card>{region_column}</card> });
-
+    let (fruit_status_text, set_fruit_status_text) = create_signal("Apple selected".to_string());
     let (menu_status_text, set_menu_status_text) = create_signal("Nothing chosen yet".to_string());
-    let menu_status = with_reactive_scope(
-        document,
-        || view! { <caption content={menu_status_text} /> },
-    );
+
+    let region_card = view! {
+        <card>
+            <column spacing={4.0}>
+                <caption content={"Right-click the card below".to_string()} />
+                <paragraph content={"The Share item opens a submenu on hover or Right Arrow; Left Arrow closes it.".to_string()} />
+            </column>
+        </card>
+    };
+
     let items = vec![
         unstyled::MenuItem::new("Copy"),
         unstyled::MenuItem::new("Paste"),
@@ -648,26 +513,35 @@ fn build_menu_controls(document: &mut Document) -> NodeId {
             ],
         ),
     ];
-    let context_menu = with_reactive_scope(document, || {
-        view! {
-            <context_menu region={region_card} items={items} on_select={Box::new(move |_document: &mut Document, path: Vec<usize>| {
-                let label = match path.as_slice() {
-                    [0] => "Copy".to_owned(),
-                    [1] => "Paste".to_owned(),
-                    [2, 0] => "Share > Email".to_owned(),
-                    [2, 1] => "Share > Link".to_owned(),
-                    other => format!("{other:?}"),
-                };
-                set_menu_status_text.set(format!("Chose: {label}"));
-            })} />
-        }
-    });
-    let right = unstyled::column(document, 8.0);
-    document.append_child(right, context_menu, ItemSize::Intrinsic);
-    document.append_child(right, menu_status, ItemSize::Intrinsic);
 
-    let row = unstyled::row(document, 20.0);
-    document.append_child(row, left, ItemSize::Percent(50.0));
-    document.append_child(row, right, ItemSize::Percent(50.0));
-    row
+    view! {
+        <row spacing={20.0}>
+            @percent(50.0) <column spacing={8.0}>
+                <caption content={"Favorite fruit (type to search)".to_string()} />
+                <select options={fruits} selected={Some(0)} on_change={Box::new(move |_document: &mut Document, selected| {
+                    let text = selected
+                        .and_then(|index| fruit_names.get(index))
+                        .map_or_else(
+                            || "Nothing selected".to_owned(),
+                            |label| format!("{label} selected"),
+                        );
+                    set_fruit_status_text.set(text);
+                })} />
+                <caption content={fruit_status_text} />
+            </column>
+            @percent(50.0) <column spacing={8.0}>
+                <context_menu region={region_card} items={items} on_select={Box::new(move |_document: &mut Document, path: Vec<usize>| {
+                    let label = match path.as_slice() {
+                        [0] => "Copy".to_owned(),
+                        [1] => "Paste".to_owned(),
+                        [2, 0] => "Share > Email".to_owned(),
+                        [2, 1] => "Share > Link".to_owned(),
+                        other => format!("{other:?}"),
+                    };
+                    set_menu_status_text.set(format!("Chose: {label}"));
+                })} />
+                <caption content={menu_status_text} />
+            </column>
+        </row>
+    }
 }

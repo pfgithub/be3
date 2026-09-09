@@ -1,11 +1,12 @@
 use std::rc::Rc;
 
 use block_editor_plugin::beui::reactive::{
-    create_memo, create_signal, view, with_reactive_scope, WriteSignal,
+    create_memo, create_signal, view, with_reactive_scope, CenteredRowBuilder, ColumnBuilder,
+    FillBuilder, PaddingBuilder, WriteSignal,
 };
 use block_editor_plugin::beui::styled::theme::BACKGROUND;
-use block_editor_plugin::beui::styled::{self, ButtonBuilder, ButtonVariant, DisplayBuilder};
-use block_editor_plugin::beui::{unstyled, Color32, Context, Document, ItemSize, Rect};
+use block_editor_plugin::beui::styled::{ButtonBuilder, ButtonVariant, DisplayBuilder};
+use block_editor_plugin::beui::{Color32, Context, Document, Rect};
 
 const PADDING: f32 = 20.0;
 const BUTTON_WIDTH: f32 = 44.0;
@@ -27,62 +28,59 @@ impl CounterUi {
         let mut document = Document::new();
         let (count, set_count) = create_signal(counter.value());
 
-        let (value, reset, decrement, increment) = with_reactive_scope(&mut document, || {
+        let (value, reset, decrement, increment, root) = with_reactive_scope(&mut document, || {
+            let reset_counter = counter.clone();
+            let reset_set_count = set_count.clone();
+            let decrement_counter = counter.clone();
+            let decrement_set_count = set_count.clone();
+            let increment_counter = counter.clone();
+            let increment_set_count = set_count.clone();
+
             let value = view! {
                 <display content={create_memo(move || count.get().to_string())} />
             };
             let reset = view! {
-                <button label={"Reset".to_string()} variant={ButtonVariant::Secondary} />
+                <button label={"Reset".to_string()} variant={ButtonVariant::Secondary} on_click={Box::new(move |_document| {
+                    reset_counter.reset();
+                    reset_set_count.set(reset_counter.value());
+                })} />
             };
             let decrement = view! {
-                <button label={"-".to_string()} variant={ButtonVariant::Primary} />
+                <button label={"-".to_string()} variant={ButtonVariant::Primary} on_click={Box::new(move |_document| {
+                    decrement_counter.decrement();
+                    decrement_set_count.set(decrement_counter.value());
+                })} />
             };
             let increment = view! {
-                <button label={"+".to_string()} variant={ButtonVariant::Primary} />
+                <button label={"+".to_string()} variant={ButtonVariant::Primary} on_click={Box::new(move |_document| {
+                    increment_counter.increment();
+                    increment_set_count.set(increment_counter.value());
+                })} />
             };
-            (value, reset, decrement, increment)
+
+            let root = view! {
+                <fill color={BACKGROUND} radius={0}>
+                    <padding horizontal={PADDING} vertical={PADDING}>
+                        <column spacing={16.0}>
+                            {value}
+                            <centered_row spacing={10.0}>
+                                @fixed(BUTTON_WIDTH) {decrement}
+                                @fixed(BUTTON_WIDTH) {increment}
+                                {reset}
+                            </centered_row>
+                        </column>
+                    </padding>
+                </fill>
+            };
+
+            (value, reset, decrement, increment, root)
         });
 
         document.set_test_id(document.shadow_root(value), "counter.value");
         document.set_test_id(reset, "counter.reset");
         document.set_test_id(decrement, "counter.decrement");
         document.set_test_id(increment, "counter.increment");
-
-        let reset_counter = counter.clone();
-        let reset_set_count = set_count.clone();
-        styled::set_button_on_click(&mut document, reset, move |_document| {
-            reset_counter.reset();
-            reset_set_count.set(reset_counter.value());
-        });
-
-        let decrement_counter = counter.clone();
-        let decrement_set_count = set_count.clone();
-        styled::set_button_on_click(&mut document, decrement, move |_document| {
-            decrement_counter.decrement();
-            decrement_set_count.set(decrement_counter.value());
-        });
-
-        let increment_counter = counter.clone();
-        let increment_set_count = set_count.clone();
-        styled::set_button_on_click(&mut document, increment, move |_document| {
-            increment_counter.increment();
-            increment_set_count.set(increment_counter.value());
-        });
-
-        let buttons_row = unstyled::centered_row(&mut document, 10.0);
-        document.append_child(buttons_row, decrement, ItemSize::Fixed(BUTTON_WIDTH));
-        document.append_child(buttons_row, increment, ItemSize::Fixed(BUTTON_WIDTH));
-        document.append_child(buttons_row, reset, ItemSize::Intrinsic);
-
-        let column = unstyled::column(&mut document, 16.0);
-        document.append_child(column, value, ItemSize::Intrinsic);
-        document.append_child(column, buttons_row, ItemSize::Intrinsic);
-
-        let padding = document.create_padding(PADDING, PADDING);
-        document.set_padding_child(padding, column);
-        let background = document.create_fill(BACKGROUND, 0);
-        document.set_fill_child(background, padding);
-        document.set_root(background);
+        document.set_root(root);
 
         Self {
             document,
