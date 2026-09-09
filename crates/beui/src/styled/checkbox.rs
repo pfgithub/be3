@@ -33,44 +33,35 @@ pub fn checkbox(
 
     let toggle = unstyled::ToggleBuilder::default().checked(false).build();
 
-    let mark = FillBuilder::default()
-        .color(ON_ACCENT)
-        .radius(MARK_RADIUS)
-        .children([])
-        .build();
-    let mark_size = view! { <sized width={MARK_SIZE} height={MARK_SIZE}>{mark}</sized> };
-    let mark_visibility = view! { <visibility visible={false}>{mark_size}</visibility> };
-    let center = view! {
-        <centered_row spacing={0.0}>
-            @percent(100.0) {with_document(unstyled::spacer)}
-            {mark_visibility}
-            @percent(100.0) {with_document(unstyled::spacer)}
-        </centered_row>
+    let mark_visibility = view! {
+        <visibility visible={false}>
+            <sized width={MARK_SIZE} height={MARK_SIZE}>
+                <fill color={ON_ACCENT} radius={MARK_RADIUS}></fill>
+            </sized>
+        </visibility>
     };
 
-    let fill = view! { <fill color={box_fill(false, false)} radius={CHIP_RADIUS}>{center}</fill> };
+    let fill = view! {
+        <fill color={box_fill(false, false)} radius={CHIP_RADIUS}>
+            <centered_row spacing={0.0}>
+                @percent(100.0) {with_document(unstyled::spacer)}
+                {mark_visibility}
+                @percent(100.0) {with_document(unstyled::spacer)}
+            </centered_row>
+        </fill>
+    };
     let border = view! {
         <outline color={BORDER} width={BORDER_WIDTH} radius={CHIP_RADIUS} offset={0.0} visible={true}>
             {fill}
         </outline>
     };
-    let boxed = view! { <sized width={BOX_SIZE} height={BOX_SIZE}>{border}</sized> };
 
-    let label_node = TextBuilder::default()
-        .string(label)
-        .font_size(FONT_BODY)
-        .color(TEXT)
-        .align(TextAlign::Start)
-        .build();
-    let line = view! {
-        <centered_row spacing={SPACING}>
-            {boxed}
-            @percent(100.0) {label_node}
-        </centered_row>
-    };
     let ring = view! {
         <outline color={ACCENT} width={FOCUS_RING_WIDTH} radius={RADIUS} offset={FOCUS_RING_OFFSET}>
-            {line}
+            <centered_row spacing={SPACING}>
+                <sized width={BOX_SIZE} height={BOX_SIZE}>{border}</sized>
+                @percent(100.0) <text string={label} font_size={FONT_BODY} color={TEXT} align={TextAlign::Start} />
+            </centered_row>
         </outline>
     };
     with_document(|document| unstyled::set_toggle_child(document, toggle, ring));

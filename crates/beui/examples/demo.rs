@@ -1,7 +1,7 @@
 use beui::reactive::{
-    create_effect, create_memo, create_signal, intrinsic, view, with_document, with_reactive_scope,
-    CenteredRowBuilder, ColumnBuilder, FillBuilder, OutlineBuilder, PaddingBuilder, ReadSignal,
-    RowBuilder, ShowBuilder, VisibilityBuilder, WriteSignal,
+    bind, create_memo, create_signal, view, with_document, with_reactive_scope, CenteredRowBuilder,
+    ColumnBuilder, FillBuilder, OutlineBuilder, PaddingBuilder, ReadSignal, RowBuilder,
+    ShowBuilder, VisibilityBuilder, WriteSignal,
 };
 use beui::styled::theme::{
     ACCENT, ACCENT_SOFT, BACKGROUND, RADIUS, SCROLLBAR_WIDTH, SEPARATOR_HEIGHT, SURFACE,
@@ -118,58 +118,44 @@ fn scroll_row(index: usize, rows: Rows, compact: bool) -> NodeId {
         view! { <caption content={format!("{} ms", 7 + index * 3 % 91)} align={TextAlign::End} /> };
     let value_text = with_document(|document| document.shadow_root(value));
     let value_selected = is_selected.clone();
-    create_effect(move || {
+    bind(move |document| {
         let color = if value_selected.get() {
             ACCENT
         } else {
             TEXT_MUTED
         };
-        with_document(|document| document.set_text_color(value_text, color));
+        document.set_text_color(value_text, color);
     });
-
-    let timing = view! { <visibility visible={rows.timings.clone()}>{value}</visibility> };
 
     let vertical = if compact {
         COMPACT_ROW_PADDING_VERTICAL
     } else {
         ROW_PADDING_VERTICAL
     };
-    let line = view! {
-        <centered_row spacing={12.0}>
-            @percent(100.0) {label}
-            {timing}
-        </centered_row>
+    let fill = view! {
+        <fill color={Color32::TRANSPARENT} radius={RADIUS}>
+            <padding horizontal={ROW_PADDING_HORIZONTAL} vertical={vertical}>
+                <centered_row spacing={12.0}>
+                    @percent(100.0) {label}
+                    <visibility visible={rows.timings.clone()}>{value}</visibility>
+                </centered_row>
+            </padding>
+        </fill>
     };
-    let padding = view! {
-        <padding horizontal={ROW_PADDING_HORIZONTAL} vertical={vertical}>
-            {line}
-        </padding>
-    };
-
-    let fill = FillBuilder::default()
-        .color(Color32::TRANSPARENT)
-        .radius(RADIUS)
-        .children([intrinsic(padding)])
-        .build();
-    create_effect(move || {
+    bind(move |document| {
         let color = match (is_selected.get(), hovered.get()) {
             (true, _) => ACCENT_SOFT,
             (false, true) => SURFACE_RAISED,
             (false, false) => Color32::TRANSPARENT,
         };
-        with_document(|document| document.set_fill_color(fill, color));
+        document.set_fill_color(fill, color);
     });
 
-    let ring = OutlineBuilder::default()
-        .color(ACCENT)
-        .width(2.0)
-        .radius(RADIUS)
-        .offset(0.0)
-        .children([intrinsic(fill)])
-        .build();
-    create_effect(move || {
-        let visible = focused.get();
-        with_document(|document| document.set_outline_visible(ring, visible));
+    let ring = view! {
+        <outline color={ACCENT} width={2.0} radius={RADIUS} offset={0.0}>{fill}</outline>
+    };
+    bind(move |document| {
+        document.set_outline_visible(ring, focused.get());
     });
 
     unstyled::set_button_child(button, ring);
@@ -188,11 +174,7 @@ fn install_rows(document: &mut Document, scroll: NodeId, rows: &Rows, compact: b
     document.set_scroll_virtual_items(scroll, ROW_COUNT, height, move |document, index| {
         let rows = rows.clone();
         with_reactive_scope(document, move || {
-            ScrollRowBuilder::default()
-                .index(index)
-                .rows(rows)
-                .compact(compact)
-                .build()
+            view! { <scroll_row index={index} rows={rows} compact={compact} /> }
         })
     });
 }

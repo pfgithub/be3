@@ -18,9 +18,5 @@ pub fn bordered(corner_radius: u8, children: Children) -> NodeId {
 
 #[component]
 pub fn separator() -> NodeId {
-    FillBuilder::default()
-        .color(BORDER)
-        .radius(0)
-        .children([])
-        .build()
+    view! { <fill color={BORDER} radius={0}></fill> }
 }

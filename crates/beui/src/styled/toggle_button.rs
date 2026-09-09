@@ -21,12 +21,12 @@ pub fn toggle_button(
     let mut on_change = on_change;
 
     let toggle = unstyled::ToggleBuilder::default().checked(false).build();
-    let text = TextBuilder::default()
-        .font_size(FONT_BODY)
-        .color(TEXT)
-        .build();
-    let padding = view! { <padding horizontal={14.0} vertical={8.0}>{text}</padding> };
-    let fill = view! { <fill color={SURFACE} radius={RADIUS}>{padding}</fill> };
+    let text = view! { <text font_size={FONT_BODY} color={TEXT} /> };
+    let fill = view! {
+        <fill color={SURFACE} radius={RADIUS}>
+            <padding horizontal={14.0} vertical={8.0}>{text}</padding>
+        </fill>
+    };
     let border = view! {
         <outline color={BORDER} width={1.0} radius={RADIUS} offset={0.0} visible={true}>
             {fill}

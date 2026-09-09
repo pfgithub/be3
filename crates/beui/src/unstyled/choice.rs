@@ -5,7 +5,7 @@ use crate::color::Color32;
 use crate::document::Document;
 use crate::input::{Key, KeyPress};
 use crate::node::{Handler, NodeId};
-use crate::reactive::{create_effect, with_document, ReadSignal};
+use crate::reactive::{bind, ReadSignal};
 use crate::unstyled;
 
 const FONT_SIZE: f32 = 14.0;
@@ -83,14 +83,12 @@ pub fn choice(
             .push(Option_ { button, label });
     }
     if kind == ChoiceKind::Listbox {
-        create_effect(move || {
+        bind(move |document| {
             let any_focused = focused_signals.iter().any(ReadSignal::get);
             if !any_focused {
-                with_document(|document| {
-                    let state = document.component_state_mut::<State>(choice);
-                    state.search.clear();
-                    state.typed_at = None;
-                });
+                let state = document.component_state_mut::<State>(choice);
+                state.search.clear();
+                state.typed_at = None;
             }
         });
     }

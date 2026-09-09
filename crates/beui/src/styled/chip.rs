@@ -16,11 +16,8 @@ const PADDING_VERTICAL: f32 = 3.0;
 pub fn chip(label: Prop<String>) -> NodeId {
     let shadow = current_component();
 
-    let label_node = TextBuilder::default()
-        .font_size(FONT_SMALL)
-        .color(TEXT)
-        .align(TextAlign::Center)
-        .build();
+    let label_node =
+        view! { <text font_size={FONT_SMALL} color={TEXT} align={TextAlign::Center} /> };
 
     let frame = view! {
         <bordered corner_radius={CHIP_RADIUS}>

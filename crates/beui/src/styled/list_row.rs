@@ -3,9 +3,7 @@ use beui_macros::{component, view};
 use crate::color::Color32;
 
 use crate::node::{ClickHandler, NodeId};
-use crate::reactive::{
-    create_effect, with_document, Children, FillBuilder, OutlineBuilder, PaddingBuilder,
-};
+use crate::reactive::{bind, with_document, Children, FillBuilder, OutlineBuilder, PaddingBuilder};
 use crate::styled::theme::{ACCENT, BORDER, RADIUS, SURFACE_RAISED};
 use crate::unstyled;
 
@@ -23,10 +21,11 @@ pub fn list_row(children: Children, on_click: Option<ClickHandler>) -> NodeId {
     let active = with_document(|document| unstyled::button_active(document, row));
     let focused = with_document(|document| unstyled::button_focused(document, row));
 
-    let padding = view! {
-        <padding horizontal={PADDING_HORIZONTAL} vertical={PADDING_VERTICAL}>{child}</padding>
+    let fill = view! {
+        <fill color={Color32::TRANSPARENT} radius={RADIUS}>
+            <padding horizontal={PADDING_HORIZONTAL} vertical={PADDING_VERTICAL}>{child}</padding>
+        </fill>
     };
-    let fill = view! { <fill color={Color32::TRANSPARENT} radius={RADIUS}>{padding}</fill> };
     let ring = view! {
         <outline color={ACCENT} width={2.0} radius={RADIUS} offset={0.0} visible={focused}>
             {fill}
@@ -34,9 +33,8 @@ pub fn list_row(children: Children, on_click: Option<ClickHandler>) -> NodeId {
     };
     unstyled::set_button_child(row, ring);
 
-    create_effect(move || {
-        let color = background(hovered.get(), active.get());
-        with_document(|document| document.set_fill_color(fill, color));
+    bind(move |document| {
+        document.set_fill_color(fill, background(hovered.get(), active.get()));
     });
 
     if let Some(on_click) = on_click {

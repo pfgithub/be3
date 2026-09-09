@@ -6,9 +6,7 @@ use crate::input::CursorIcon;
 use crate::base::{ItemSize, TextAlign};
 use crate::document::Document;
 use crate::node::NodeId;
-use crate::reactive::{
-    create_signal, intrinsic, view, with_reactive_scope, ClickCatcherBuilder, WriteSignal,
-};
+use crate::reactive::{create_signal, view, with_reactive_scope, ClickCatcherBuilder, WriteSignal};
 use crate::styled::theme::{
     ACCENT, BORDER_WIDTH, CHIP_RADIUS, ON_ACCENT, RADIUS, SCROLLBAR_WIDTH, SEPARATOR_HEIGHT,
     SURFACE, SURFACE_RAISED, TEXT, TEXT_MUTED,
@@ -79,17 +77,15 @@ pub(crate) fn build(entries: &[Entry], summary: &Summary, state: &Rc<State>, off
     document.set_scroll_offset(scroll, offset);
     let body = body(&mut document, scroll);
 
-    let selection = with_reactive_scope(&mut document, || {
-        CodeBuilder::default()
-            .content(summary.selection.clone())
-            .build()
-    });
+    let selection = with_reactive_scope(
+        &mut document,
+        || view! { <code content={summary.selection.clone()} /> },
+    );
     let selection = document.shadow_root(selection);
-    let bounds = with_reactive_scope(&mut document, || {
-        CodeBuilder::default()
-            .content(summary.bounds.clone())
-            .build()
-    });
+    let bounds = with_reactive_scope(
+        &mut document,
+        || view! { <code content={summary.bounds.clone()} /> },
+    );
     let bounds = document.shadow_root(bounds);
     document.set_text_color(bounds, TEXT_MUTED);
     let footer = footer(&mut document, selection, bounds);
@@ -174,9 +170,7 @@ fn pick_toggle(
     state: &Rc<State>,
     picking: bool,
 ) -> (NodeId, NodeId, NodeId) {
-    let label = with_reactive_scope(document, || {
-        CodeBuilder::default().content("Pick".to_owned()).build()
-    });
+    let label = with_reactive_scope(document, || view! { <code content={"Pick".to_owned()} /> });
     let label = document.shadow_root(label);
     document.set_text_align(label, TextAlign::Center, TextAlign::Center);
     document.set_text_color(label, toggle_text(picking));
@@ -224,22 +218,20 @@ fn row(document: &mut Document, entry: &Entry, state: &Rc<State>) -> Row {
     let indent = unstyled::spacer(document);
     let marker = marker(document, entry, state);
 
-    let kind = with_reactive_scope(document, || {
-        CodeBuilder::default()
-            .content(entry.kind.to_owned())
-            .build()
-    });
+    let kind = with_reactive_scope(
+        document,
+        || view! { <code content={entry.kind.to_owned()} /> },
+    );
     let kind = document.shadow_root(kind);
 
-    let detail = with_reactive_scope(document, || {
-        CodeBuilder::default().content(entry.detail.clone()).build()
-    });
+    let detail = with_reactive_scope(
+        document,
+        || view! { <code content={entry.detail.clone()} /> },
+    );
     let detail = document.shadow_root(detail);
     document.set_text_color(detail, TEXT_MUTED);
 
-    let size = with_reactive_scope(document, || {
-        CodeBuilder::default().content(entry.size.clone()).build()
-    });
+    let size = with_reactive_scope(document, || view! { <code content={entry.size.clone()} /> });
     let size = document.shadow_root(size);
     document.set_text_color(size, TEXT_MUTED);
     document.set_text_align(size, TextAlign::End, TextAlign::Center);
@@ -260,16 +252,19 @@ fn row(document: &mut Document, entry: &Entry, state: &Rc<State>) -> Row {
     let hover = state.clone();
     let selection = state.clone();
     let row = with_reactive_scope(document, || {
-        ClickCatcherBuilder::default()
-            .cursor(CursorIcon::PointingHand)
-            .on_click(Box::new(move |_document: &mut Document| {
-                selection.select(node)
-            }))
-            .on_hover_change(Box::new(move |_document: &mut Document, hovered: bool| {
-                hover.hover(node, hovered);
-            }))
-            .children([intrinsic(outline)])
-            .build()
+        view! {
+            <click_catcher
+                cursor={CursorIcon::PointingHand}
+                on_click={Box::new(move |_document: &mut Document| {
+                    selection.select(node)
+                })}
+                on_hover_change={Box::new(move |_document: &mut Document, hovered: bool| {
+                    hover.hover(node, hovered);
+                })}
+            >
+                {outline}
+            </click_catcher>
+        }
     });
 
     Row {
@@ -283,11 +278,10 @@ fn row(document: &mut Document, entry: &Entry, state: &Rc<State>) -> Row {
 }
 
 fn marker(document: &mut Document, entry: &Entry, state: &Rc<State>) -> NodeId {
-    let glyph = with_reactive_scope(document, || {
-        CodeBuilder::default()
-            .content(glyph(entry).to_owned())
-            .build()
-    });
+    let glyph = with_reactive_scope(
+        document,
+        || view! { <code content={glyph(entry).to_owned()} /> },
+    );
     let glyph = document.shadow_root(glyph);
     document.set_text_color(glyph, TEXT_MUTED);
     document.set_text_align(glyph, TextAlign::Center, TextAlign::Center);

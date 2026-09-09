@@ -38,19 +38,15 @@ pub fn text_input(
         unstyled::set_text_input_caret_color(document, input, ACCENT);
         unstyled::set_text_input_padding(document, input, PADDING_HORIZONTAL, 0.0);
 
-        let fill = view! { <fill color={SURFACE_RAISED} radius={RADIUS}>{field}</fill> };
-
         let border = view! {
             <outline color={BORDER} width={BORDER_WIDTH} radius={RADIUS} offset={0.0} visible={true}>
-                {fill}
+                <fill color={SURFACE_RAISED} radius={RADIUS}>{field}</fill>
             </outline>
         };
 
-        let sized = view! { <sized height={HEIGHT}>{border}</sized> };
-
         let ring = view! {
             <outline color={ACCENT} width={FOCUS_RING_WIDTH} radius={RADIUS} offset={FOCUS_RING_OFFSET}>
-                {sized}
+                <sized height={HEIGHT}>{border}</sized>
             </outline>
         };
         unstyled::set_text_input_child(document, input, ring);

@@ -5,7 +5,7 @@ use crate::color::Color32;
 use crate::document::Document;
 use crate::node::{Handler, NodeId};
 use crate::reactive::{
-    create_effect, with_document, FillBuilder, OutlineBuilder, PaddingBuilder, Prop, SizedBuilder,
+    bind, with_document, FillBuilder, OutlineBuilder, PaddingBuilder, Prop, SizedBuilder,
     TextBuilder,
 };
 use crate::styled::theme::{
@@ -35,28 +35,26 @@ pub fn select(
         let inner = unstyled::select(document, &options, None);
         let trigger = unstyled::select_trigger(document, inner);
 
-        let label = TextBuilder::default()
-            .string(trigger_label(&options, None))
-            .font_size(FONT_BODY)
-            .color(TEXT)
-            .align(TextAlign::Start)
-            .clip(true)
-            .build();
-
-        let fill = view! {
-            <fill color={SURFACE_RAISED} radius={RADIUS}>
-                <padding horizontal={PADDING_HORIZONTAL} vertical={0.0}>{label}</padding>
-            </fill>
+        let label = view! {
+            <text
+                string={trigger_label(&options, None)}
+                font_size={FONT_BODY}
+                color={TEXT}
+                align={TextAlign::Start}
+                clip={true}
+            />
         };
+
         let border = view! {
             <outline color={BORDER} width={BORDER_WIDTH} radius={RADIUS} offset={0.0} visible={true}>
-                {fill}
+                <fill color={SURFACE_RAISED} radius={RADIUS}>
+                    <padding horizontal={PADDING_HORIZONTAL} vertical={0.0}>{label}</padding>
+                </fill>
             </outline>
         };
-        let sized = view! { <sized width={TRIGGER_WIDTH} height={HEIGHT}>{border}</sized> };
         let ring = view! {
             <outline color={ACCENT} width={FOCUS_RING_WIDTH} radius={RADIUS} offset={FOCUS_RING_OFFSET}>
-                {sized}
+                <sized width={TRIGGER_WIDTH} height={HEIGHT}>{border}</sized>
             </outline>
         };
         unstyled::set_button_child(trigger, ring);
@@ -64,14 +62,13 @@ pub fn select(
         let trigger_hovered = unstyled::button_hovered(document, trigger);
         let trigger_focused = unstyled::button_focused(document, trigger);
         let border_focused = trigger_focused.clone();
-        create_effect(move || {
-            let color = border_color(border_focused.get(), trigger_hovered.get());
-            with_document(|document| document.set_outline_color(border, color));
+        bind(move |document| {
+            document.set_outline_color(
+                border,
+                border_color(border_focused.get(), trigger_hovered.get()),
+            );
         });
-        create_effect(move || {
-            let visible = trigger_focused.get();
-            with_document(|document| document.set_outline_visible(ring, visible));
-        });
+        bind(move |document| document.set_outline_visible(ring, trigger_focused.get()));
 
         let search = unstyled::select_search(document, inner);
         let field = unstyled::text_input_field(document, search);
@@ -84,14 +81,16 @@ pub fn select(
         unstyled::set_text_input_padding(document, search, PADDING_HORIZONTAL, 0.0);
         unstyled::set_text_input_placeholder(document, search, "Search");
 
-        let search_fill = view! { <fill color={SURFACE} radius={RADIUS}>{field}</fill> };
         let search_border = view! {
             <outline color={BORDER} width={BORDER_WIDTH} radius={RADIUS} offset={0.0} visible={true}>
-                {search_fill}
+                <fill color={SURFACE} radius={RADIUS}>{field}</fill>
             </outline>
         };
-        let search_sized = view! { <sized height={HEIGHT}>{search_border}</sized> };
-        unstyled::set_text_input_child(document, search, search_sized);
+        unstyled::set_text_input_child(
+            document,
+            search,
+            view! { <sized height={HEIGHT}>{search_border}</sized> },
+        );
 
         unstyled::set_text_input_on_hover_change(document, search, move |document, hovered| {
             let focused = unstyled::text_input_focused(document, search);
@@ -109,51 +108,46 @@ pub fn select(
             document.set_text_color(label_node, TEXT);
             document.set_text_align(label_node, TextAlign::Start, TextAlign::Center);
 
-            let row_padding = view! {
-                <padding horizontal={PADDING_HORIZONTAL} vertical={OPTION_PADDING_VERTICAL}>
-                    {label_node}
-                </padding>
+            let row_fill = view! {
+                <fill color={Color32::TRANSPARENT} radius={RADIUS}>
+                    <padding horizontal={PADDING_HORIZONTAL} vertical={OPTION_PADDING_VERTICAL}>
+                        {label_node}
+                    </padding>
+                </fill>
             };
-            let row_fill =
-                view! { <fill color={Color32::TRANSPARENT} radius={RADIUS}>{row_padding}</fill> };
             unstyled::set_button_child(button, row_fill);
 
             let hovered = unstyled::button_hovered(document, button);
             let highlight_hovered = hovered.clone();
-            create_effect(move || {
+            bind(move |document| {
                 if highlight_hovered.get() {
-                    with_document(|document| {
-                        unstyled::set_select_highlighted(document, inner, Some(index));
-                    });
+                    unstyled::set_select_highlighted(document, inner, Some(index));
                 }
             });
 
             let highlighted = unstyled::select_highlighted_signal(document, inner);
-            create_effect(move || {
+            bind(move |document| {
                 let is_highlighted = highlighted.get() == Some(index);
                 let is_hovered = hovered.get();
-                with_document(|document| {
-                    document
-                        .set_fill_color(row_fill, option_background(is_highlighted, is_hovered));
-                });
+                document.set_fill_color(row_fill, option_background(is_highlighted, is_hovered));
             });
         }
 
         let popup = document
             .overlay_content(unstyled::select_overlay(document, inner))
             .expect("select popup always has content");
-        let popup_fill = view! {
-            <fill color={SURFACE_RAISED} radius={RADIUS}>
-                <padding horizontal={POPUP_PADDING} vertical={POPUP_PADDING}>{popup}</padding>
-            </fill>
-        };
-        let popup_border = view! {
-            <outline color={BORDER} width={BORDER_WIDTH} radius={RADIUS} offset={0.0} visible={true}>
-                {popup_fill}
-            </outline>
-        };
-        let popup_sized = view! { <sized width={POPUP_WIDTH}>{popup_border}</sized> };
-        document.set_overlay_content(unstyled::select_overlay(document, inner), popup_sized);
+        document.set_overlay_content(
+            unstyled::select_overlay(document, inner),
+            view! {
+                <sized width={POPUP_WIDTH}>
+                    <outline color={BORDER} width={BORDER_WIDTH} radius={RADIUS} offset={0.0} visible={true}>
+                        <fill color={SURFACE_RAISED} radius={RADIUS}>
+                            <padding horizontal={POPUP_PADDING} vertical={POPUP_PADDING}>{popup}</padding>
+                        </fill>
+                    </outline>
+                </sized>
+            },
+        );
 
         unstyled::set_select_on_change(document, inner, move |document, selected| {
             document.set_text(label, trigger_label(&options, selected));

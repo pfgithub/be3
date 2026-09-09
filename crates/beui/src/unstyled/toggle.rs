@@ -1,11 +1,11 @@
-use beui_macros::component;
+use beui_macros::{component, view};
 
 use crate::input::CursorIcon;
 
 use crate::document::Document;
 use crate::node::{Handler, NodeId};
 use crate::reactive::{
-    self, current_component, intrinsic, set_component_state, with_document, ClickCatcherBuilder,
+    self, current_component, set_component_state, with_document, ClickCatcherBuilder,
     FocusableBuilder,
 };
 
@@ -25,43 +25,48 @@ struct State {
 #[component]
 pub fn toggle(checked: bool) -> NodeId {
     let toggle = current_component();
-    with_document(|document| {
-        let click_catcher = ClickCatcherBuilder::default()
-            .cursor(CursorIcon::PointingHand)
-            .on_click(Box::new(move |document: &mut Document| {
+
+    let click_catcher = view! {
+        <click_catcher
+            cursor={CursorIcon::PointingHand}
+            on_click={Box::new(move |document: &mut Document| {
                 let checked = toggle_checked(document, toggle);
                 set_toggle_checked(document, toggle, !checked);
-            }))
-            .on_hover_change(Box::new(move |document: &mut Document, hovered: bool| {
+            })}
+            on_hover_change={Box::new(move |document: &mut Document, hovered: bool| {
                 document.component_state_mut::<State>(toggle).hovered = hovered;
                 document.call_component_handler(toggle, hovered, |state: &mut State| {
                     &mut state.on_hover_change
                 });
-            }))
-            .on_active_change(Box::new(move |document: &mut Document, active: bool| {
+            })}
+            on_active_change={Box::new(move |document: &mut Document, active: bool| {
                 document.component_state_mut::<State>(toggle).active = active;
                 document.call_component_handler(toggle, active, |state: &mut State| {
                     &mut state.on_active_change
                 });
-            }))
-            .children([])
-            .build();
-        let focusable = FocusableBuilder::default()
-            .on_focus_change(Box::new(move |document: &mut Document, focused: bool| {
+            })}
+        ></click_catcher>
+    };
+    let focusable = view! {
+        <focusable
+            on_focus_change={Box::new(move |document: &mut Document, focused: bool| {
                 document.component_state_mut::<State>(toggle).focused = focused;
                 document.call_component_handler(toggle, focused, |state: &mut State| {
                     &mut state.on_focus_change
                 });
-            }))
-            .on_activate_change(Box::new(move |document: &mut Document, pressed: bool| {
+            })}
+            on_activate_change={Box::new(move |document: &mut Document, pressed: bool| {
                 document.set_click_catcher_key_active(click_catcher, pressed);
-            }))
-            .on_activate(Box::new(move |document: &mut Document| {
+            })}
+            on_activate={Box::new(move |document: &mut Document| {
                 document.click_click_catcher(click_catcher);
-            }))
-            .children([intrinsic(click_catcher)])
-            .build();
+            })}
+        >
+            {click_catcher}
+        </focusable>
+    };
 
+    with_document(|document| {
         reactive::set_component_detail(document, toggle, detail(checked));
         set_component_state(
             document,
@@ -79,9 +84,9 @@ pub fn toggle(checked: bool) -> NodeId {
                 on_focus_change: None,
             },
         );
+    });
 
-        focusable
-    })
+    focusable
 }
 
 pub fn set_toggle_child(document: &mut Document, toggle: NodeId, child: NodeId) {

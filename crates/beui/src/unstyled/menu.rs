@@ -6,7 +6,9 @@ use crate::base::ItemSize;
 use crate::document::Document;
 use crate::input::{Key, KeyPress};
 use crate::node::{Handler, NodeId};
-use crate::reactive::{create_effect, with_document, with_reactive_scope, FocusableBuilder};
+use beui_macros::view;
+
+use crate::reactive::{bind, with_reactive_scope, FocusableBuilder};
 use crate::unstyled;
 
 #[derive(Clone)]
@@ -60,14 +62,15 @@ fn build_menu_list(
     let menu_cell: Rc<Cell<Option<NodeId>>> = Rc::new(Cell::new(None));
     let key_cell = menu_cell.clone();
     let root = with_reactive_scope(document, || {
-        FocusableBuilder::default()
-            .tab_stop(true)
-            .on_key(Box::new(move |document: &mut Document, press: KeyPress| {
-                let menu = key_cell.get().expect("menu not yet initialized");
-                root_key(document, menu, press)
-            }))
-            .children([])
-            .build()
+        view! {
+            <focusable
+                tab_stop={true}
+                on_key={Box::new(move |document: &mut Document, press: KeyPress| {
+                    let menu = key_cell.get().expect("menu not yet initialized");
+                    root_key(document, menu, press)
+                })}
+            ></focusable>
+        }
     });
     let wrapper = unstyled::column(document, 0.0);
     document.append_child(wrapper, root, ItemSize::Intrinsic);
@@ -123,9 +126,9 @@ fn build_menu_list(
             }
         });
         let hovered = unstyled::button_hovered(document, button);
-        create_effect(move || {
+        bind(move |document| {
             if hovered.get() {
-                with_document(|document| hover_menu_list_row(document, menu, index));
+                hover_menu_list_row(document, menu, index);
             }
         });
         unstyled::set_button_on_key(button, move |document, press| {

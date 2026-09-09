@@ -15,19 +15,14 @@ const RADIUS: u8 = 3;
 pub fn progress(value: Prop<f32>) -> NodeId {
     let shadow = current_component();
 
-    let filled = FillBuilder::default()
-        .color(ACCENT)
-        .radius(RADIUS)
-        .children([])
-        .build();
+    let filled = view! { <fill color={ACCENT} radius={RADIUS}></fill> };
     let rest = with_document(unstyled::spacer);
-    let line = RowBuilder::default()
-        .spacing(0.0)
-        .children([
-            (filled, ItemSize::Percent(0.0)),
-            (rest, ItemSize::Percent(100.0)),
-        ])
-        .build();
+    let line = view! {
+        <row spacing={0.0}>
+            @percent(0.0) {filled}
+            @percent(100.0) {rest}
+        </row>
+    };
     let sized = view! {
         <sized height={HEIGHT}>
             <fill color={TRACK} radius={RADIUS}>{line}</fill>

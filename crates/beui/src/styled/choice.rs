@@ -5,8 +5,8 @@ use crate::node::NodeId;
 use beui_macros::view;
 
 use crate::reactive::{
-    create_effect, intrinsic, with_document, CenteredRowBuilder, FillBuilder, OutlineBuilder,
-    PaddingBuilder, SizedBuilder, VisibilityBuilder,
+    bind, CenteredRowBuilder, FillBuilder, OutlineBuilder, PaddingBuilder, SizedBuilder,
+    VisibilityBuilder,
 };
 use crate::styled::theme::{
     ACCENT, ACCENT_SOFT, BORDER, FONT_BODY, RADIUS, SURFACE_RAISED, TEXT, TEXT_MUTED,
@@ -41,14 +41,11 @@ pub(super) fn choice(
 
         let mut mark = None;
         let content = if kind == Kind::Radio {
-            let dot = FillBuilder::default()
-                .color(ACCENT)
-                .radius(9)
-                .children([])
-                .build();
             let visibility = view! {
                 <visibility visible={active}>
-                    <sized width={8.0} height={8.0}>{dot}</sized>
+                    <sized width={8.0} height={8.0}>
+                        <fill color={ACCENT} radius={9}></fill>
+                    </sized>
                 </visibility>
             };
             mark = Some(visibility);
@@ -71,12 +68,11 @@ pub(super) fn choice(
         } else {
             label
         };
-        let padding = view! { <padding horizontal={14.0} vertical={6.0}>{content}</padding> };
-        let fill = FillBuilder::default()
-            .color(background(active, false))
-            .radius(RADIUS)
-            .children([intrinsic(padding)])
-            .build();
+        let fill = view! {
+            <fill color={background(active, false)} radius={RADIUS}>
+                <padding horizontal={14.0} vertical={6.0}>{content}</padding>
+            </fill>
+        };
         let ring = view! {
             <outline color={ACCENT} width={2.0} radius={RADIUS} offset={1.0}>
                 {fill}
@@ -85,18 +81,13 @@ pub(super) fn choice(
         unstyled::set_button_child(button, ring);
 
         let hovered = unstyled::button_hovered(document, button);
-        create_effect(move || {
+        bind(move |document| {
             let is_hovered = hovered.get();
-            with_document(|document| {
-                let active = unstyled::choice_selected(document, inner) == Some(index);
-                document.set_fill_color(fill, background(active, is_hovered));
-            });
+            let active = unstyled::choice_selected(document, inner) == Some(index);
+            document.set_fill_color(fill, background(active, is_hovered));
         });
         let focused = unstyled::button_focused(document, button);
-        create_effect(move || {
-            let visible = focused.get();
-            with_document(|document| document.set_outline_visible(ring, visible));
-        });
+        bind(move |document| document.set_outline_visible(ring, focused.get()));
 
         fills.push(fill);
         label_nodes.push(label);

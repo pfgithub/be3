@@ -14,7 +14,9 @@ use crate::input::{CursorIcon, Key, KeyPress, PointerPress};
 use crate::base::TextAlign;
 use crate::document::Document;
 use crate::node::{Handler, NodeId};
-use crate::reactive::{intrinsic, with_reactive_scope, ClickCatcherBuilder, FocusableBuilder};
+use beui_macros::view;
+
+use crate::reactive::{with_reactive_scope, ClickCatcherBuilder, FocusableBuilder};
 
 const FONT_SIZE: f32 = 14.0;
 const WORD_CLICKS: u32 = 2;
@@ -53,75 +55,76 @@ pub fn text_input(document: &mut Document, value: impl Into<String>) -> NodeId {
     let press_cell = input_cell.clone();
     let drag_cell = input_cell.clone();
     let hover_cell = input_cell.clone();
-    let click_catcher = with_reactive_scope(document, || {
-        ClickCatcherBuilder::default()
-            .cursor(CursorIcon::Text)
-            .on_press(Box::new(
-                move |document: &mut Document, press: PointerPress| {
-                    let input = press_cell.get().expect("text_input not yet initialized");
-                    point(document, input, press);
-                },
-            ))
-            .on_drag(Box::new(
-                move |document: &mut Document, press: PointerPress| {
-                    let input = drag_cell.get().expect("text_input not yet initialized");
-                    extend(document, input, press);
-                },
-            ))
-            .on_hover_change(Box::new(move |document: &mut Document, hovered: bool| {
-                let input = hover_cell.get().expect("text_input not yet initialized");
-                document.component_state_mut::<State>(input).hovered = hovered;
-                document.call_component_handler(input, hovered, |state: &mut State| {
-                    &mut state.on_hover_change
-                });
-            }))
-            .children([intrinsic(slot)])
-            .build()
-    });
     let focus_cell = input_cell.clone();
     let text_cell = input_cell.clone();
     let key_cell = input_cell.clone();
     let focusable = with_reactive_scope(document, || {
-        FocusableBuilder::default()
-            .on_focus_change(Box::new(move |document: &mut Document, focused: bool| {
-                let input = focus_cell.get().expect("text_input not yet initialized");
-                let state = document.component_state_mut::<State>(input);
-                state.focused = focused;
-                if !focused {
-                    state.dragging = false;
-                    state.core.external_edit();
-                }
-                show(document, input);
-                document.call_component_handler(input, focused, |state: &mut State| {
-                    &mut state.on_focus_change
-                });
-            }))
-            .on_text(Box::new(move |document: &mut Document, typed: String| {
-                let input = text_cell.get().expect("text_input not yet initialized");
-                insert(document, input, &typed);
-            }))
-            .on_key(Box::new(move |document: &mut Document, press: KeyPress| {
-                let input = key_cell.get().expect("text_input not yet initialized");
-                let overridden = document
-                    .component_state_mut::<State>(input)
-                    .on_key_override
-                    .take();
-                if let Some(mut handler) = overridden {
-                    let handled = handler(document, press);
-                    if document.contains(input) {
-                        let state = document.component_state_mut::<State>(input);
-                        if state.on_key_override.is_none() {
-                            state.on_key_override = Some(handler);
+        view! {
+            <focusable
+                on_focus_change={Box::new(move |document: &mut Document, focused: bool| {
+                    let input = focus_cell.get().expect("text_input not yet initialized");
+                    let state = document.component_state_mut::<State>(input);
+                    state.focused = focused;
+                    if !focused {
+                        state.dragging = false;
+                        state.core.external_edit();
+                    }
+                    show(document, input);
+                    document.call_component_handler(input, focused, |state: &mut State| {
+                        &mut state.on_focus_change
+                    });
+                })}
+                on_text={Box::new(move |document: &mut Document, typed: String| {
+                    let input = text_cell.get().expect("text_input not yet initialized");
+                    insert(document, input, &typed);
+                })}
+                on_key={Box::new(move |document: &mut Document, press: KeyPress| {
+                    let input = key_cell.get().expect("text_input not yet initialized");
+                    let overridden = document
+                        .component_state_mut::<State>(input)
+                        .on_key_override
+                        .take();
+                    if let Some(mut handler) = overridden {
+                        let handled = handler(document, press);
+                        if document.contains(input) {
+                            let state = document.component_state_mut::<State>(input);
+                            if state.on_key_override.is_none() {
+                                state.on_key_override = Some(handler);
+                            }
+                        }
+                        if handled {
+                            return true;
                         }
                     }
-                    if handled {
-                        return true;
-                    }
-                }
-                key(document, input, press)
-            }))
-            .children([intrinsic(click_catcher)])
-            .build()
+                    key(document, input, press)
+                })}
+            >
+                <click_catcher
+                    cursor={CursorIcon::Text}
+                    on_press={Box::new(
+                        move |document: &mut Document, press: PointerPress| {
+                            let input = press_cell.get().expect("text_input not yet initialized");
+                            point(document, input, press);
+                        },
+                    )}
+                    on_drag={Box::new(
+                        move |document: &mut Document, press: PointerPress| {
+                            let input = drag_cell.get().expect("text_input not yet initialized");
+                            extend(document, input, press);
+                        },
+                    )}
+                    on_hover_change={Box::new(move |document: &mut Document, hovered: bool| {
+                        let input = hover_cell.get().expect("text_input not yet initialized");
+                        document.component_state_mut::<State>(input).hovered = hovered;
+                        document.call_component_handler(input, hovered, |state: &mut State| {
+                            &mut state.on_hover_change
+                        });
+                    })}
+                >
+                    {slot}
+                </click_catcher>
+            </focusable>
+        }
     });
 
     let input = document.create_shadow("text-input", focusable, vec![slot]);

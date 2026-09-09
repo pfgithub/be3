@@ -1,12 +1,11 @@
-use beui_macros::component;
+use beui_macros::{component, view};
 
 use crate::input::CursorIcon;
 
 use crate::document::Document;
 use crate::node::{ClickHandler, Handler, NodeId};
 use crate::reactive::{
-    current_component, intrinsic, set_component_state, with_document, ClickCatcherBuilder,
-    FocusableBuilder,
+    current_component, set_component_state, with_document, ClickCatcherBuilder, FocusableBuilder,
 };
 
 struct State {
@@ -23,42 +22,47 @@ struct State {
 #[component]
 pub fn pressable() -> NodeId {
     let pressable = current_component();
-    with_document(|document| {
-        let click_catcher = ClickCatcherBuilder::default()
-            .cursor(CursorIcon::PointingHand)
-            .on_click(Box::new(move |document: &mut Document| {
+
+    let click_catcher = view! {
+        <click_catcher
+            cursor={CursorIcon::PointingHand}
+            on_click={Box::new(move |document: &mut Document| {
                 document.call_component_click::<State>(pressable, |state| &mut state.on_click);
-            }))
-            .on_hover_change(Box::new(move |document: &mut Document, hovered: bool| {
+            })}
+            on_hover_change={Box::new(move |document: &mut Document, hovered: bool| {
                 document.component_state_mut::<State>(pressable).hovered = hovered;
                 document.call_component_handler(pressable, hovered, |state: &mut State| {
                     &mut state.on_hover_change
                 });
-            }))
-            .on_active_change(Box::new(move |document: &mut Document, active: bool| {
+            })}
+            on_active_change={Box::new(move |document: &mut Document, active: bool| {
                 document.component_state_mut::<State>(pressable).active = active;
                 document.call_component_handler(pressable, active, |state: &mut State| {
                     &mut state.on_active_change
                 });
-            }))
-            .children([])
-            .build();
-        let focusable = FocusableBuilder::default()
-            .on_focus_change(Box::new(move |document: &mut Document, focused: bool| {
+            })}
+        ></click_catcher>
+    };
+    let focusable = view! {
+        <focusable
+            on_focus_change={Box::new(move |document: &mut Document, focused: bool| {
                 document.component_state_mut::<State>(pressable).focused = focused;
                 document.call_component_handler(pressable, focused, |state: &mut State| {
                     &mut state.on_focus_change
                 });
-            }))
-            .on_activate_change(Box::new(move |document: &mut Document, pressed: bool| {
+            })}
+            on_activate_change={Box::new(move |document: &mut Document, pressed: bool| {
                 document.set_click_catcher_key_active(click_catcher, pressed);
-            }))
-            .on_activate(Box::new(move |document: &mut Document| {
+            })}
+            on_activate={Box::new(move |document: &mut Document| {
                 document.click_click_catcher(click_catcher);
-            }))
-            .children([intrinsic(click_catcher)])
-            .build();
+            })}
+        >
+            {click_catcher}
+        </focusable>
+    };
 
+    with_document(|document| {
         set_component_state(
             document,
             pressable,
@@ -73,9 +77,9 @@ pub fn pressable() -> NodeId {
                 on_active_change: None,
             },
         );
+    });
 
-        focusable
-    })
+    focusable
 }
 
 pub fn set_pressable_child(document: &mut Document, pressable: NodeId, child: NodeId) {

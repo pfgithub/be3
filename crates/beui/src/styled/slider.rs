@@ -27,40 +27,29 @@ pub fn slider(value: Prop<f32>, on_change: Option<Handler<f32>>) -> NodeId {
 
     let slider = with_document(|document| unstyled::slider(document, 0.0));
 
-    let filled_fill = FillBuilder::default()
-        .color(ACCENT)
-        .radius(TRACK_RADIUS)
-        .children([])
-        .build();
-    let filled = view! { <sized height={TRACK_HEIGHT}>{filled_fill}</sized> };
-
-    let rest_fill = FillBuilder::default()
-        .color(TRACK)
-        .radius(TRACK_RADIUS)
-        .children([])
-        .build();
-    let rest = view! { <sized height={TRACK_HEIGHT}>{rest_fill}</sized> };
-
-    let knob_fill = FillBuilder::default()
-        .color(KNOB)
-        .radius(KNOB_RADIUS)
-        .children([])
-        .build();
-    let knob = view! { <sized width={KNOB_SIZE} height={KNOB_SIZE}>{knob_fill}</sized> };
+    let filled = view! {
+        <sized height={TRACK_HEIGHT}><fill color={ACCENT} radius={TRACK_RADIUS}></fill></sized>
+    };
+    let rest = view! {
+        <sized height={TRACK_HEIGHT}><fill color={TRACK} radius={TRACK_RADIUS}></fill></sized>
+    };
+    let knob_fill = view! { <fill color={KNOB} radius={KNOB_RADIUS}></fill> };
 
     let line = CenteredRowBuilder::default()
         .spacing(0.0)
         .children([
             (filled, filled_size(0.0)),
-            (knob, ItemSize::Intrinsic),
+            (
+                view! { <sized width={KNOB_SIZE} height={KNOB_SIZE}>{knob_fill}</sized> },
+                ItemSize::Intrinsic,
+            ),
             (rest, rest_size(0.0)),
         ])
         .build();
 
-    let sized = view! { <sized height={HEIGHT}>{line}</sized> };
     let ring = view! {
         <outline color={ACCENT} width={FOCUS_RING_WIDTH} radius={RADIUS} offset={FOCUS_RING_OFFSET}>
-            {sized}
+            <sized height={HEIGHT}>{line}</sized>
         </outline>
     };
     with_document(|document| unstyled::set_slider_child(document, slider, ring));

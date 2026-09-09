@@ -6,7 +6,7 @@ use crate::base::TextAlign;
 use crate::document::Document;
 use crate::node::{ClickHandler, NodeId};
 use crate::reactive::{
-    create_effect, with_document, FillBuilder, OutlineBuilder, PaddingBuilder, Prop, TextBuilder,
+    bind, with_document, FillBuilder, OutlineBuilder, PaddingBuilder, Prop, TextBuilder,
 };
 use crate::styled::theme::{
     ACCENT, ACCENT_ACTIVE, ACCENT_HOVER, BORDER, BORDER_WIDTH, FONT_BODY, ON_ACCENT, RADIUS,
@@ -57,31 +57,31 @@ pub fn button(
     let active = with_document(|document| unstyled::button_active(document, button));
     let focused = with_document(|document| unstyled::button_focused(document, button));
 
-    let label_node = TextBuilder::default()
-        .string(label)
-        .font_size(FONT_BODY)
-        .color(variant.label())
-        .align(TextAlign::Center)
-        .build();
-
-    let padding = view! {
-        <padding horizontal={PADDING_HORIZONTAL} vertical={PADDING_VERTICAL}>
-            {label_node}
-        </padding>
+    let fill = view! {
+        <fill color={variant.fill(false, false)} radius={RADIUS}>
+            <padding horizontal={PADDING_HORIZONTAL} vertical={PADDING_VERTICAL}>
+                {TextBuilder::default()
+                    .string(label)
+                    .font_size(FONT_BODY)
+                    .color(variant.label())
+                    .align(TextAlign::Center)
+                    .build()}
+            </padding>
+        </fill>
     };
-    let fill = view! { <fill color={variant.fill(false, false)} radius={RADIUS}>{padding}</fill> };
-    let ring = view! {
-        <outline color={ACCENT} width={FOCUS_RING_WIDTH} radius={RADIUS + 4} offset={FOCUS_RING_OFFSET} visible={focused}>
-            <outline color={BORDER} width={BORDER_WIDTH} radius={RADIUS} offset={0.0} visible={variant == ButtonVariant::Secondary}>
-                {fill}
+    unstyled::set_button_child(
+        button,
+        view! {
+            <outline color={ACCENT} width={FOCUS_RING_WIDTH} radius={RADIUS + 4} offset={FOCUS_RING_OFFSET} visible={focused}>
+                <outline color={BORDER} width={BORDER_WIDTH} radius={RADIUS} offset={0.0} visible={variant == ButtonVariant::Secondary}>
+                    {fill}
+                </outline>
             </outline>
-        </outline>
-    };
-    unstyled::set_button_child(button, ring);
+        },
+    );
 
-    create_effect(move || {
-        let color = variant.fill(hovered.get(), active.get());
-        with_document(|document| document.set_fill_color(fill, color));
+    bind(move |document| {
+        document.set_fill_color(fill, variant.fill(hovered.get(), active.get()));
     });
 
     if let Some(on_click) = on_click {

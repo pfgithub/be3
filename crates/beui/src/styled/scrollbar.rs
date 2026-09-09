@@ -16,21 +16,16 @@ pub fn scrollbar(scroll: NodeId) -> NodeId {
     with_document(|document| document.set_scroll_focus_color(scroll, ACCENT));
 
     let before = with_document(unstyled::spacer);
-    let thumb = FillBuilder::default()
-        .color(Color32::TRANSPARENT)
-        .radius(RADIUS)
-        .children([])
-        .build();
+    let thumb = view! { <fill color={Color32::TRANSPARENT} radius={RADIUS}></fill> };
     let after = with_document(unstyled::spacer);
 
-    let track = ColumnBuilder::default()
-        .spacing(0.0)
-        .children([
-            (before, ItemSize::Percent(0.0)),
-            (thumb, ItemSize::Percent(100.0)),
-            (after, ItemSize::Percent(0.0)),
-        ])
-        .build();
+    let track = view! {
+        <column spacing={0.0}>
+            @percent(0.0) {before}
+            @percent(100.0) {thumb}
+            @percent(0.0) {after}
+        </column>
+    };
     let background = view! { <fill color={SURFACE_RAISED} radius={RADIUS}>{track}</fill> };
 
     with_document(|document| {
@@ -57,7 +52,7 @@ pub fn scrollbar(scroll: NodeId) -> NodeId {
             };
             document.set_fill_color(thumb, color);
         });
+    });
 
-        background
-    })
+    background
 }

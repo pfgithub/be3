@@ -28,31 +28,32 @@ pub fn switch(on: Prop<bool>, on_change: Option<Handler<bool>>) -> NodeId {
 
     let toggle = unstyled::ToggleBuilder::default().checked(false).build();
 
-    let knob = FillBuilder::default()
-        .color(KNOB)
-        .radius(KNOB_RADIUS)
-        .children([])
-        .build();
-    let knob = view! { <sized width={KNOB_SIZE} height={KNOB_SIZE}>{knob}</sized> };
-
     let before = with_document(unstyled::spacer);
     let after = with_document(unstyled::spacer);
     let line = CenteredRowBuilder::default()
         .spacing(0.0)
         .children([
             (before, before_size(false)),
-            (knob, ItemSize::Intrinsic),
+            (
+                view! {
+                    <sized width={KNOB_SIZE} height={KNOB_SIZE}>
+                        <fill color={KNOB} radius={KNOB_RADIUS}></fill>
+                    </sized>
+                },
+                ItemSize::Intrinsic,
+            ),
             (after, after_size(false)),
         ])
         .build();
 
-    let padding = view! { <padding horizontal={PADDING} vertical={PADDING}>{line}</padding> };
-    let track =
-        view! { <fill color={track_fill(false, false)} radius={TRACK_RADIUS}>{padding}</fill> };
-    let sized = view! { <sized width={WIDTH} height={HEIGHT}>{track}</sized> };
+    let track = view! {
+        <fill color={track_fill(false, false)} radius={TRACK_RADIUS}>
+            <padding horizontal={PADDING} vertical={PADDING}>{line}</padding>
+        </fill>
+    };
     let ring = view! {
         <outline color={ACCENT} width={FOCUS_RING_WIDTH} radius={RADIUS} offset={FOCUS_RING_OFFSET}>
-            {sized}
+            <sized width={WIDTH} height={HEIGHT}>{track}</sized>
         </outline>
     };
     with_document(|document| unstyled::set_toggle_child(document, toggle, ring));
