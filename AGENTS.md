@@ -12,6 +12,7 @@ Do not:
 - When making changes to serialization formats or network requests, do not consider backwards compatibility with existing clients or data. The project is still early, and it is fine to ask the user to delete all their data. The crash handler in block-app will offer this automatically.
 - Do not use unicode symbols for icons, either use an icon library or no icon at all.
 - Do not edit README.md. If it is out of date, you may say so in your handoff message.
+- Don't use worktrees. If using subagents, run them sequentially rather than in parallel.
 
 Verification:
 - `./scripts/verify`: Always run this one before committing. Run using a 10 minute timeout in the tool call arguments so it doesn't convert itself to a background task.
