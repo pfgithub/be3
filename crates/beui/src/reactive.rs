@@ -203,7 +203,7 @@ impl<T: Clone + PartialEq + 'static> IntoProp<T> for Memo<T> {
     }
 }
 
-#[component]
+#[component(base)]
 pub fn text(string: Prop<String>) -> NodeId {
     let node =
         with_document(|document| document.create_text(String::new(), 14.0, crate::Color32::WHITE));
@@ -245,28 +245,28 @@ impl<I: IntoIterator<Item = (NodeId, ItemSize)>> From<I> for Children {
     }
 }
 
-#[component]
+#[component(base)]
 pub fn row(spacing: f32, children: Children) -> NodeId {
     let row = with_document(|document| unstyled::row(document, spacing));
     children.mount(row);
     row
 }
 
-#[component]
+#[component(base)]
 pub fn column(spacing: f32, children: Children) -> NodeId {
     let column = with_document(|document| unstyled::column(document, spacing));
     children.mount(column);
     column
 }
 
-#[component]
+#[component(base)]
 pub fn centered_row(spacing: f32, children: Children) -> NodeId {
     let row = with_document(|document| unstyled::centered_row(document, spacing));
     children.mount(row);
     row
 }
 
-#[component]
+#[component(base)]
 pub fn padding(horizontal: f32, vertical: f32, children: Children) -> NodeId {
     let child = children
         .into_first()
@@ -278,7 +278,7 @@ pub fn padding(horizontal: f32, vertical: f32, children: Children) -> NodeId {
     })
 }
 
-#[component]
+#[component(base)]
 pub fn fill(color: Color32, radius: u8, children: Children) -> NodeId {
     let child = children
         .into_first()
@@ -290,7 +290,7 @@ pub fn fill(color: Color32, radius: u8, children: Children) -> NodeId {
     })
 }
 
-#[component]
+#[component(base)]
 pub fn outline(
     color: Color32,
     width: f32,
@@ -313,7 +313,7 @@ pub fn outline(
     outline
 }
 
-#[component]
+#[component(base)]
 pub fn sized(width: Option<f32>, height: Option<f32>, children: Children) -> NodeId {
     let child = children
         .into_first()
@@ -325,7 +325,7 @@ pub fn sized(width: Option<f32>, height: Option<f32>, children: Children) -> Nod
     })
 }
 
-#[component]
+#[component(base)]
 pub fn visibility(visible: Prop<bool>, children: Children) -> NodeId {
     let child = children
         .into_first()

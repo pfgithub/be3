@@ -19,8 +19,5 @@ fn a_component_function_appears_in_the_inspector_tree_without_hiding_its_childre
 
     harness.toggle_inspector();
 
-    assert_eq!(
-        harness.tree(),
-        ["column", "  column", "    widget", "      row"]
-    );
+    assert_eq!(harness.tree(), ["column", "  widget", "    row"]);
 }

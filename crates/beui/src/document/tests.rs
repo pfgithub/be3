@@ -297,7 +297,7 @@ pub(crate) fn virtual_list(built: &Rc<RefCell<Vec<usize>>>) -> (Document, NodeId
 }
 
 pub(crate) fn text_of(document: &Document, id: NodeId) -> &str {
-    document.text(document.shadow_root(id))
+    document.text(id)
 }
 
 pub(crate) fn toolbar(document: &mut Document, buttons: &[NodeId]) -> NodeId {

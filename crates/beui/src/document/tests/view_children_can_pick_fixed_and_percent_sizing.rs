@@ -15,7 +15,7 @@ fn view_children_can_pick_fixed_and_percent_sizing() {
                 @percent(100.0) <column spacing={0.0}></column>
             </row>
         };
-        let children = with_document(|document| document.children(document.shadow_root(tree)));
+        let children = with_document(|document| document.children(tree));
         sink_left.set(Some(children[0]));
         sink_right.set(Some(children[1]));
         tree

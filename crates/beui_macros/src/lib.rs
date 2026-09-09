@@ -16,6 +16,26 @@ struct Prop {
     is_children: bool,
 }
 
+struct ComponentAttr {
+    base: bool,
+}
+
+impl Parse for ComponentAttr {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        if input.is_empty() {
+            return Ok(ComponentAttr { base: false });
+        }
+        let ident: Ident = input.parse()?;
+        if ident != "base" {
+            return Err(syn::Error::new(
+                ident.span(),
+                "expected `base`, e.g. `#[component(base)]`",
+            ));
+        }
+        Ok(ComponentAttr { base: true })
+    }
+}
+
 fn pascal_case(name: &str) -> String {
     name.split('_')
         .map(|part| {
@@ -56,7 +76,8 @@ fn is_named_type(ty: &Type, name: &str) -> bool {
 }
 
 #[proc_macro_attribute]
-pub fn component(_attr: TokenStream, item: TokenStream) -> TokenStream {
+pub fn component(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let ComponentAttr { base } = parse_macro_input!(attr as ComponentAttr);
     let ItemFn {
         attrs,
         vis,
@@ -157,7 +178,11 @@ pub fn component(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
     let generics = &sig.generics;
     let where_clause = &sig.generics.where_clause;
-    let finish = quote! { ::beui::reactive::component(#name, move || #block) };
+    let finish = if base {
+        quote! { (move || #block)() }
+    } else {
+        quote! { ::beui::reactive::component(#name, move || #block) }
+    };
 
     let prop_idents: Vec<_> = props.iter().map(|prop| prop.ident.clone()).collect();
 
