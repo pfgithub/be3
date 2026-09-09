@@ -1,5 +1,5 @@
 use super::*;
-use crate::reactive::{build, column, row, view, with_document};
+use crate::reactive::{build, view, with_document, ColumnBuilder, RowBuilder};
 
 #[test]
 fn view_children_can_pick_fixed_and_percent_sizing() {

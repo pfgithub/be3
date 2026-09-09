@@ -1,5 +1,7 @@
 use super::*;
-use crate::reactive::{build, button, column, create_memo, create_signal, intrinsic, row, text};
+use crate::reactive::{
+    build, create_memo, create_signal, view, ButtonBuilder, ColumnBuilder, RowBuilder, TextBuilder,
+};
 
 #[test]
 fn a_reactive_tree_can_nest_builder_calls_without_threading_the_document() {
@@ -10,26 +12,26 @@ fn a_reactive_tree_can_nest_builder_calls_without_threading_the_document() {
 
     let document = build(move || {
         let (count, set_count) = create_signal(0i64);
-        let value_node = text()
-            .string(create_memo(move || count.get().to_string()))
-            .build();
-        let increment_node = button()
-            .children([intrinsic(text().string("+".to_string()).build())])
-            .on_click(Box::new(move |_document| {
+        let value_node = view! {
+            <text string={create_memo(move || count.get().to_string())} />
+        };
+        let increment_node = view! {
+            <button on_click={Box::new(move |_document| {
                 set_count.update(|count| *count += 1)
-            }))
-            .build();
+            })}>
+                <text string={"+".to_string()} />
+            </button>
+        };
         sink_value.set(Some(value_node));
         sink_increment.set(Some(increment_node));
-        column()
-            .spacing(8.0)
-            .children([intrinsic(
-                row()
-                    .spacing(8.0)
-                    .children([intrinsic(increment_node), intrinsic(value_node)])
-                    .build(),
-            )])
-            .build()
+        view! {
+            <column spacing={8.0}>
+                <row spacing={8.0}>
+                    {increment_node}
+                    {value_node}
+                </row>
+            </column>
+        }
     });
 
     let value = value.get().expect("text node was created");

@@ -1,5 +1,7 @@
 use super::*;
-use crate::reactive::{build, button, column, create_signal, intrinsic, show, text};
+use crate::reactive::{
+    build, create_signal, view, ButtonBuilder, ColumnBuilder, ShowBuilder, TextBuilder,
+};
 
 #[test]
 fn show_lazily_builds_and_toggles_its_child_when_the_condition_changes() {
@@ -13,27 +15,29 @@ fn show_lazily_builds_and_toggles_its_child_when_the_condition_changes() {
     let document = build(move || {
         let (visible, set_visible) = create_signal(false);
 
-        let toggle = button()
-            .children([intrinsic(text().string("toggle".to_string()).build())])
-            .on_click(Box::new(move |_document| {
+        let toggle = view! {
+            <button on_click={Box::new(move |_document| {
                 set_visible.update(|visible| *visible = !*visible)
-            }))
-            .build();
+            })}>
+                <text string={"toggle".to_string()} />
+            </button>
+        };
         sink_toggle.set(Some(toggle));
 
-        let panel = show()
-            .condition(visible)
-            .then(Box::new(move || {
+        let panel = view! {
+            <show condition={visible} then={Box::new(move || {
                 sink.set(sink.get() + 1);
-                text().string("panel".to_string()).build()
-            }))
-            .build();
+                view! { <text string={"panel".to_string()} /> }
+            })} />
+        };
         sink_panel.set(Some(panel));
 
-        column()
-            .spacing(0.0)
-            .children([intrinsic(toggle), intrinsic(panel)])
-            .build()
+        view! {
+            <column spacing={0.0}>
+                {toggle}
+                {panel}
+            </column>
+        }
     });
 
     let toggle = toggle_id.get().expect("toggle button was created");

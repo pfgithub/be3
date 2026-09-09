@@ -1,6 +1,6 @@
 use beui::reactive::{
-    build, button, column, component, create_memo, create_signal, for_each, intrinsic, row, show,
-    text, view,
+    build, component, create_memo, create_signal, intrinsic, view, ButtonBuilder, ColumnBuilder,
+    ForEachBuilder, RowBuilder, ShowBuilder, TextBuilder,
 };
 use beui::{App, ClickHandler, Color32, Context, Document, NodeId, Rect};
 
@@ -83,7 +83,7 @@ fn app() -> NodeId {
                 spacing={4.0}
                 items={history}
                 key={Box::new(|(id, _)| *id)}
-                view={Box::new(|(_, value)| intrinsic(history_entry().value(*value).build()))}
+                view={Box::new(|(_, value)| intrinsic(view! { <history_entry value={*value} /> }))}
             />
         </column>
     }
@@ -96,7 +96,7 @@ struct CounterApp {
 impl CounterApp {
     fn new() -> Self {
         Self {
-            document: build(|| app().build()),
+            document: build(|| view! { <app /> }),
         }
     }
 }

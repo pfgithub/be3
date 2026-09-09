@@ -1,18 +1,19 @@
 use super::*;
-use crate::reactive::{build, column, component, intrinsic, row};
+use crate::reactive::{build, component, view, ColumnBuilder, RowBuilder};
 
 #[component]
 fn widget() -> NodeId {
-    row().spacing(0.0).children([]).build()
+    view! { <row spacing={0.0}></row> }
 }
 
 #[test]
 fn a_component_function_appears_in_the_inspector_tree_without_hiding_its_children() {
     let document = build(|| {
-        column()
-            .spacing(0.0)
-            .children([intrinsic(widget().build())])
-            .build()
+        view! {
+            <column spacing={0.0}>
+                <widget />
+            </column>
+        }
     });
     let mut harness = Harness::new(document);
 

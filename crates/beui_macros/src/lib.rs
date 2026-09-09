@@ -64,7 +64,6 @@ pub fn component(_attr: TokenStream, item: TokenStream) -> TokenStream {
         block,
     } = parse_macro_input!(item as ItemFn);
     let name = sig.ident.to_string();
-    let fn_ident = sig.ident.clone();
     let builder_ident = format_ident!("{}Builder", pascal_case(&name));
     let output = sig.output.clone();
 
@@ -183,10 +182,6 @@ pub fn component(_attr: TokenStream, item: TokenStream) -> TokenStream {
                 #(#field_lets)*
                 #finish
             }
-        }
-
-        #vis fn #fn_ident #generics () -> #builder_ident #generics #where_clause {
-            #builder_ident::default()
         }
     }
     .into()
@@ -328,7 +323,11 @@ impl Parse for ViewNode {
 }
 
 fn expand_view_node(node: &ViewNode) -> proc_macro2::TokenStream {
-    let tag = &node.tag;
+    let builder_ident = format_ident!(
+        "{}Builder",
+        pascal_case(&node.tag.to_string()),
+        span = node.tag.span()
+    );
     let setters = node.props.iter().map(|prop| {
         let key = &prop.key;
         let value = &prop.value;
@@ -336,7 +335,7 @@ fn expand_view_node(node: &ViewNode) -> proc_macro2::TokenStream {
     });
 
     match &node.children {
-        None => quote! { #tag() #(#setters)* .build() },
+        None => quote! { #builder_ident::default() #(#setters)* .build() },
         Some(children) => {
             let items = children.iter().map(|child| {
                 let node = match &child.kind {
@@ -356,7 +355,7 @@ fn expand_view_node(node: &ViewNode) -> proc_macro2::TokenStream {
                 }
             });
             quote! {
-                #tag() #(#setters)* .children([#(#items),*]) .build()
+                #builder_ident::default() #(#setters)* .children([#(#items),*]) .build()
             }
         }
     }

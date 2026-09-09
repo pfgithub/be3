@@ -1,5 +1,5 @@
 use super::*;
-use crate::reactive::{build, button, column, create_signal, intrinsic, text};
+use crate::reactive::{build, create_signal, view, ButtonBuilder, ColumnBuilder, TextBuilder};
 
 #[test]
 fn a_disabled_button_prop_tracks_a_signal_and_blocks_clicks_while_true() {
@@ -13,25 +13,28 @@ fn a_disabled_button_prop_tracks_a_signal_and_blocks_clicks_while_true() {
     let document = build(move || {
         let (disabled, set_disabled) = create_signal(true);
 
-        let toggle = button()
-            .children([intrinsic(text().string("toggle".to_string()).build())])
-            .on_click(Box::new(move |_document| {
+        let toggle = view! {
+            <button on_click={Box::new(move |_document| {
                 set_disabled.update(|disabled| *disabled = !*disabled)
-            }))
-            .build();
+            })}>
+                <text string={"toggle".to_string()} />
+            </button>
+        };
         sink_toggle.set(Some(toggle));
 
-        let go = button()
-            .children([intrinsic(text().string("go".to_string()).build())])
-            .disabled(disabled)
-            .on_click(Box::new(move |_document| sink.set(sink.get() + 1)))
-            .build();
+        let go = view! {
+            <button disabled={disabled} on_click={Box::new(move |_document| sink.set(sink.get() + 1))}>
+                <text string={"go".to_string()} />
+            </button>
+        };
         sink_go.set(Some(go));
 
-        column()
-            .spacing(0.0)
-            .children([intrinsic(toggle), intrinsic(go)])
-            .build()
+        view! {
+            <column spacing={0.0}>
+                {toggle}
+                {go}
+            </column>
+        }
     });
 
     let toggle = toggle_id.get().expect("toggle button was created");

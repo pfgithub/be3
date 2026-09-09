@@ -1,5 +1,8 @@
 use super::*;
-use crate::reactive::{build, button, column, create_signal, for_each, intrinsic, text};
+use crate::reactive::{
+    build, create_signal, intrinsic, view, ButtonBuilder, ColumnBuilder, ForEachBuilder,
+    TextBuilder,
+};
 
 #[test]
 fn for_each_reuses_nodes_for_keys_that_persist_across_an_update() {
@@ -11,26 +14,31 @@ fn for_each_reuses_nodes_for_keys_that_persist_across_an_update() {
     let document = build(move || {
         let (items, set_items) = create_signal(vec![1i64, 2, 3]);
 
-        let list = for_each()
-            .spacing(0.0)
-            .items(items)
-            .key(Box::new(|value| *value))
-            .view(Box::new(|value| {
-                intrinsic(text().string(value.to_string()).build())
-            }))
-            .build();
+        let list = view! {
+            <for_each
+                spacing={0.0}
+                items={items}
+                key={Box::new(|value| *value)}
+                view={Box::new(|value| {
+                    intrinsic(view! { <text string={value.to_string()} /> })
+                })}
+            />
+        };
         sink_list.set(Some(list));
 
-        let shuffle = button()
-            .children([intrinsic(text().string("shuffle".to_string()).build())])
-            .on_click(Box::new(move |_document| set_items.set(vec![3, 2, 4])))
-            .build();
+        let shuffle = view! {
+            <button on_click={Box::new(move |_document| set_items.set(vec![3, 2, 4]))}>
+                <text string={"shuffle".to_string()} />
+            </button>
+        };
         sink_shuffle.set(Some(shuffle));
 
-        column()
-            .spacing(0.0)
-            .children([intrinsic(shuffle), intrinsic(list)])
-            .build()
+        view! {
+            <column spacing={0.0}>
+                {shuffle}
+                {list}
+            </column>
+        }
     });
 
     let list = list_id.get().expect("the list container was created");
