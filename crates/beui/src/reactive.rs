@@ -7,7 +7,8 @@ use std::rc::Rc;
 use crate::base::ItemSize;
 use crate::color::Color32;
 use crate::document::Document;
-use crate::node::{ClickHandler, NodeId};
+use crate::input::{CursorIcon, PointerPress};
+use crate::node::{ClickHandler, Handler, NodeId};
 use crate::unstyled;
 
 pub use beui_macros::{component, view};
@@ -311,6 +312,44 @@ pub fn outline(
         with_document(|document| document.set_outline_visible(outline, visible))
     });
     outline
+}
+
+#[component(base)]
+pub fn click_catcher(
+    cursor: CursorIcon,
+    on_click: Option<ClickHandler>,
+    on_hover_change: Option<Handler<bool>>,
+    on_active_change: Option<Handler<bool>>,
+    on_press: Option<Handler<PointerPress>>,
+    on_secondary_press: Option<Handler<PointerPress>>,
+    on_drag: Option<Handler<PointerPress>>,
+    children: Children,
+) -> NodeId {
+    with_document(|document| {
+        let click_catcher = document.create_click_catcher(cursor);
+        if let Some(child) = children.into_first() {
+            document.set_click_catcher_child(click_catcher, child);
+        }
+        if let Some(on_click) = on_click {
+            document.set_click_catcher_on_click(click_catcher, on_click);
+        }
+        if let Some(on_hover_change) = on_hover_change {
+            document.set_click_catcher_on_hover_change(click_catcher, on_hover_change);
+        }
+        if let Some(on_active_change) = on_active_change {
+            document.set_click_catcher_on_active_change(click_catcher, on_active_change);
+        }
+        if let Some(on_press) = on_press {
+            document.set_click_catcher_on_press(click_catcher, on_press);
+        }
+        if let Some(on_secondary_press) = on_secondary_press {
+            document.set_click_catcher_on_secondary_press(click_catcher, on_secondary_press);
+        }
+        if let Some(on_drag) = on_drag {
+            document.set_click_catcher_on_drag(click_catcher, on_drag);
+        }
+        click_catcher
+    })
 }
 
 #[component(base)]
