@@ -24,7 +24,7 @@ pub use card::CardBuilder;
 pub use checkbox::{checkbox_checked, CheckboxBuilder};
 pub use chip::ChipBuilder;
 pub use context_menu::{context_menu, set_context_menu_items, set_context_menu_on_select};
-pub use list_row::{list_row, set_list_row_on_click};
+pub use list_row::ListRowBuilder;
 pub use progress::ProgressBuilder;
 pub use scrollbar::scrollbar;
 pub use select::{

@@ -12,7 +12,7 @@ use crate::styled::theme::{
     ACCENT, BORDER_WIDTH, CHIP_RADIUS, ON_ACCENT, RADIUS, SCROLLBAR_WIDTH, SEPARATOR_HEIGHT,
     SURFACE, SURFACE_RAISED, TEXT, TEXT_MUTED,
 };
-use crate::styled::{CaptionBuilder, HeadingBuilder};
+use crate::styled::{CaptionBuilder, HeadingBuilder, ListRowBuilder};
 use crate::unstyled;
 
 use super::tree::Entry;
@@ -221,7 +221,7 @@ fn row(document: &mut Document, entry: &Entry, state: &Rc<State>) -> Row {
     document.append_child(line, detail, ItemSize::Percent(100.0));
     document.append_child(line, size, ItemSize::Intrinsic);
 
-    let list_row = styled::list_row(document, line);
+    let list_row = with_reactive_scope(document, || view! { <list_row>{line}</list_row> });
     let outline = document.create_outline(ACCENT, BORDER_WIDTH, RADIUS, 0.0);
     document.set_outline_visible(outline, entry.selected);
     document.set_outline_child(outline, list_row);

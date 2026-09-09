@@ -1,13 +1,16 @@
 use super::*;
+use crate::reactive::{view, with_document, with_reactive_scope};
+use crate::styled::ListRowBuilder;
 
 #[test]
 fn list_rows_and_pressables_activate_from_the_keyboard() {
     let mut document = Document::new();
-    let text = document.create_text("Row", 14.0, Color32::WHITE);
-    let row = styled::list_row(&mut document, text);
     let count = Rc::new(Cell::new(0));
     let sink = count.clone();
-    styled::set_list_row_on_click(&mut document, row, move |_| sink.set(sink.get() + 1));
+    let row = with_reactive_scope(&mut document, || {
+        let text = with_document(|document| document.create_text("Row", 14.0, Color32::WHITE));
+        view! { <list_row on_click={Box::new(move |_document: &mut Document| sink.set(sink.get() + 1))}>{text}</list_row> }
+    });
     let pressable = unstyled::pressable(&mut document);
     let text = document.create_text("Press", 14.0, Color32::WHITE);
     unstyled::set_pressable_child(&mut document, pressable, text);
