@@ -39,9 +39,9 @@ pub fn choice(
 ) -> NodeId {
     let selected = selected.filter(|index| *index < labels.len());
     let line = if kind == ChoiceKind::Tabs {
-        unstyled::row(document, 6.0)
+        unstyled::row(6.0)
     } else {
-        unstyled::column(document, 6.0)
+        unstyled::column(6.0)
     };
     let choice = document.create_shadow(kind_name(kind), line, Vec::new());
     document.set_component_detail(choice, selected.map_or("", |index| labels[index]));

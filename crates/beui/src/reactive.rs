@@ -248,21 +248,21 @@ pub use crate::base::visibility::VisibilityBuilder;
 
 #[component(base)]
 pub fn row(spacing: f32, children: Children) -> NodeId {
-    let row = with_document(|document| unstyled::row(document, spacing));
+    let row = unstyled::row(spacing);
     children.mount(row);
     row
 }
 
 #[component(base)]
 pub fn column(spacing: f32, children: Children) -> NodeId {
-    let column = with_document(|document| unstyled::column(document, spacing));
+    let column = unstyled::column(spacing);
     children.mount(column);
     column
 }
 
 #[component(base)]
 pub fn centered_row(spacing: f32, children: Children) -> NodeId {
-    let row = with_document(|document| unstyled::centered_row(document, spacing));
+    let row = unstyled::centered_row(spacing);
     children.mount(row);
     row
 }
@@ -303,7 +303,7 @@ where
 {
     let key = key.expect("for_each requires a `key` callback");
     let view = view.expect("for_each requires a `view` callback");
-    let parent = with_document(|document| unstyled::column(document, spacing));
+    let parent = unstyled::column(spacing);
     let existing: Rc<RefCell<HashMap<K, (NodeId, ItemSize)>>> =
         Rc::new(RefCell::new(HashMap::new()));
     items.apply(move |items| {

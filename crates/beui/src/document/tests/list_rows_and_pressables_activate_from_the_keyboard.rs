@@ -11,13 +11,14 @@ fn list_rows_and_pressables_activate_from_the_keyboard() {
         let text = with_document(|document| document.create_text("Row", 14.0, Color32::WHITE));
         view! { <list_row on_click={Box::new(move |_document: &mut Document| sink.set(sink.get() + 1))}>{text}</list_row> }
     });
-    let pressable = with_reactive_scope(&mut document, || {
-        unstyled::PressableBuilder::default().build()
-    });
-    let text = document.create_text("Press", 14.0, Color32::WHITE);
-    unstyled::set_pressable_child(&mut document, pressable, text);
     let sink = count.clone();
-    unstyled::set_pressable_on_click(&mut document, pressable, move |_| sink.set(sink.get() + 1));
+    let pressable = with_reactive_scope(&mut document, || {
+        let pressable = unstyled::PressableBuilder::default().build();
+        let text = with_document(|document| document.create_text("Press", 14.0, Color32::WHITE));
+        unstyled::set_pressable_child(pressable, text);
+        unstyled::set_pressable_on_click(pressable, move |_| sink.set(sink.get() + 1));
+        pressable
+    });
     toolbar(&mut document, &[row, pressable]);
     let mut harness = Harness::new(document);
     harness.key(Key::Tab, Modifiers::NONE);

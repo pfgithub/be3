@@ -1,6 +1,4 @@
-use std::cell::Cell;
 use std::ops::Range;
-use std::rc::Rc;
 use std::sync::Arc;
 
 use text_editor_core::{
@@ -14,9 +12,12 @@ use crate::input::{CursorIcon, Key, KeyPress, PointerPress};
 use crate::base::TextAlign;
 use crate::document::Document;
 use crate::node::{Handler, NodeId};
-use beui_macros::view;
+use beui_macros::{component, view};
 
-use crate::reactive::{with_reactive_scope, ClickCatcherBuilder, FocusableBuilder};
+use crate::reactive::{
+    self, create_signal, current_component, set_component_state, with_document,
+    ClickCatcherBuilder, FocusableBuilder, ReadSignal, WriteSignal,
+};
 
 const FONT_SIZE: f32 = 14.0;
 const WORD_CLICKS: u32 = 2;
@@ -26,13 +27,16 @@ const ALL_CLICKS: u32 = 4;
 type KeyOverrideHandler = Box<dyn FnMut(&mut Document, KeyPress) -> bool>;
 
 struct State {
+    click_catcher: NodeId,
     focusable: NodeId,
     field: NodeId,
     text: NodeId,
     core: Core,
     dragging: bool,
-    hovered: bool,
-    focused: bool,
+    hovered_read: ReadSignal<bool>,
+    hovered_write: WriteSignal<bool>,
+    focused_read: ReadSignal<bool>,
+    focused_write: WriteSignal<bool>,
     on_change: Option<Handler<String>>,
     on_submit: Option<Handler<String>>,
     on_hover_change: Option<Handler<bool>>,
@@ -40,119 +44,116 @@ struct State {
     on_key_override: Option<KeyOverrideHandler>,
 }
 
-pub fn text_input(document: &mut Document, value: impl Into<String>) -> NodeId {
-    let value = value.into();
-    let text = document.create_text(value.clone(), FONT_SIZE, Color32::WHITE);
-    document.set_text_align(text, TextAlign::Start, TextAlign::Center);
-    document.set_text_clip(text, true);
+#[component]
+pub fn text_input(value: String) -> NodeId {
+    let input = current_component();
+    let (hovered_read, hovered_write) = create_signal(false);
+    let (focused_read, focused_write) = create_signal(false);
 
-    let field = document.create_padding(0.0, 0.0);
-    document.set_padding_child(field, text);
-    let slot = document.create_slot("field");
-    document.set_slot_child(slot, field);
-
-    let input_cell: Rc<Cell<Option<NodeId>>> = Rc::new(Cell::new(None));
-    let press_cell = input_cell.clone();
-    let drag_cell = input_cell.clone();
-    let hover_cell = input_cell.clone();
-    let focus_cell = input_cell.clone();
-    let text_cell = input_cell.clone();
-    let key_cell = input_cell.clone();
-    let focusable = with_reactive_scope(document, || {
-        view! {
-            <focusable
-                on_focus_change={Box::new(move |document: &mut Document, focused: bool| {
-                    let input = focus_cell.get().expect("text_input not yet initialized");
-                    let state = document.component_state_mut::<State>(input);
-                    state.focused = focused;
-                    if !focused {
-                        state.dragging = false;
-                        state.core.external_edit();
-                    }
-                    show(document, input);
-                    document.call_component_handler(input, focused, |state: &mut State| {
-                        &mut state.on_focus_change
-                    });
-                })}
-                on_text={Box::new(move |document: &mut Document, typed: String| {
-                    let input = text_cell.get().expect("text_input not yet initialized");
-                    insert(document, input, &typed);
-                })}
-                on_key={Box::new(move |document: &mut Document, press: KeyPress| {
-                    let input = key_cell.get().expect("text_input not yet initialized");
-                    let overridden = document
-                        .component_state_mut::<State>(input)
-                        .on_key_override
-                        .take();
-                    if let Some(mut handler) = overridden {
-                        let handled = handler(document, press);
-                        if document.contains(input) {
-                            let state = document.component_state_mut::<State>(input);
-                            if state.on_key_override.is_none() {
-                                state.on_key_override = Some(handler);
-                            }
-                        }
-                        if handled {
-                            return true;
-                        }
-                    }
-                    key(document, input, press)
-                })}
-            >
-                <click_catcher
-                    cursor={CursorIcon::Text}
-                    on_press={Box::new(
-                        move |document: &mut Document, press: PointerPress| {
-                            let input = press_cell.get().expect("text_input not yet initialized");
-                            point(document, input, press);
-                        },
-                    )}
-                    on_drag={Box::new(
-                        move |document: &mut Document, press: PointerPress| {
-                            let input = drag_cell.get().expect("text_input not yet initialized");
-                            extend(document, input, press);
-                        },
-                    )}
-                    on_hover_change={Box::new(move |document: &mut Document, hovered: bool| {
-                        let input = hover_cell.get().expect("text_input not yet initialized");
-                        document.component_state_mut::<State>(input).hovered = hovered;
-                        document.call_component_handler(input, hovered, |state: &mut State| {
-                            &mut state.on_hover_change
-                        });
-                    })}
-                >
-                    {slot}
-                </click_catcher>
-            </focusable>
-        }
+    let text = with_document(|document| {
+        let text = document.create_text(value.clone(), FONT_SIZE, Color32::WHITE);
+        document.set_text_align(text, TextAlign::Start, TextAlign::Center);
+        document.set_text_clip(text, true);
+        text
+    });
+    let field = with_document(|document| {
+        let field = document.create_padding(0.0, 0.0);
+        document.set_padding_child(field, text);
+        field
     });
 
-    let input = document.create_shadow("text-input", focusable, vec![slot]);
-    input_cell.set(Some(input));
-    document.set_component_detail(input, detail(&value));
-    document.set_component_state(
-        input,
-        State {
-            focusable,
-            field,
-            text,
-            core: core(&value),
-            dragging: false,
-            hovered: false,
-            focused: false,
-            on_change: None,
-            on_submit: None,
-            on_hover_change: None,
-            on_focus_change: None,
-            on_key_override: None,
-        },
-    );
+    let click_catcher = view! {
+        <click_catcher
+            cursor={CursorIcon::Text}
+            on_press={Box::new(move |document: &mut Document, press: PointerPress| {
+                point(document, input, press);
+            })}
+            on_drag={Box::new(move |document: &mut Document, press: PointerPress| {
+                extend(document, input, press);
+            })}
+            on_hover_change={Box::new(move |document: &mut Document, hovered: bool| {
+                document.component_state::<State>(input).hovered_write.set(hovered);
+                document.call_component_handler(input, hovered, |state: &mut State| {
+                    &mut state.on_hover_change
+                });
+            })}
+        >
+            {field}
+        </click_catcher>
+    };
+    let focusable = view! {
+        <focusable
+            on_focus_change={Box::new(move |document: &mut Document, focused: bool| {
+                document.component_state::<State>(input).focused_write.set(focused);
+                if !focused {
+                    document.component_state_mut::<State>(input).dragging = false;
+                    document.component_state_mut::<State>(input).core.external_edit();
+                }
+                show(document, input);
+                document.call_component_handler(input, focused, |state: &mut State| {
+                    &mut state.on_focus_change
+                });
+            })}
+            on_text={Box::new(move |document: &mut Document, typed: String| {
+                insert(document, input, &typed);
+            })}
+            on_key={Box::new(move |document: &mut Document, press: KeyPress| {
+                let overridden = document
+                    .component_state_mut::<State>(input)
+                    .on_key_override
+                    .take();
+                if let Some(mut handler) = overridden {
+                    let handled = handler(document, press);
+                    if document.contains(input) {
+                        let state = document.component_state_mut::<State>(input);
+                        if state.on_key_override.is_none() {
+                            state.on_key_override = Some(handler);
+                        }
+                    }
+                    if handled {
+                        return true;
+                    }
+                }
+                key(document, input, press)
+            })}
+        >
+            {click_catcher}
+        </focusable>
+    };
 
-    input
+    with_document(|document| {
+        reactive::set_component_detail(document, input, detail(&value));
+        set_component_state(
+            document,
+            input,
+            State {
+                click_catcher,
+                focusable,
+                field,
+                text,
+                core: core(&value),
+                dragging: false,
+                hovered_read,
+                hovered_write,
+                focused_read,
+                focused_write,
+                on_change: None,
+                on_submit: None,
+                on_hover_change: None,
+                on_focus_change: None,
+                on_key_override: None,
+            },
+        );
+    });
+
+    focusable
 }
 
-pub fn set_text_input_child(document: &mut Document, input: NodeId, child: NodeId) {
-    document.set_shadow_child(input, child);
+pub fn set_text_input_child(input: NodeId, child: NodeId) {
+    with_document(|document| {
+        let click_catcher = document.component_state::<State>(input).click_catcher;
+        document.set_click_catcher_child(click_catcher, child);
+    });
 }
 
 pub fn text_input_field(document: &Document, input: NodeId) -> NodeId {
@@ -167,12 +168,18 @@ pub fn text_input_value(document: &Document, input: NodeId) -> String {
     content(&document.component_state::<State>(input).core)
 }
 
-pub fn text_input_hovered(document: &Document, input: NodeId) -> bool {
-    document.component_state::<State>(input).hovered
+pub fn text_input_hovered(document: &Document, input: NodeId) -> ReadSignal<bool> {
+    document
+        .component_state::<State>(input)
+        .hovered_read
+        .clone()
 }
 
-pub fn text_input_focused(document: &Document, input: NodeId) -> bool {
-    document.component_state::<State>(input).focused
+pub fn text_input_focused(document: &Document, input: NodeId) -> ReadSignal<bool> {
+    document
+        .component_state::<State>(input)
+        .focused_read
+        .clone()
 }
 
 pub fn set_text_input_value(document: &mut Document, input: NodeId, value: impl Into<String>) {
@@ -184,83 +191,91 @@ pub fn set_text_input_value(document: &mut Document, input: NodeId, value: impl 
     );
 }
 
-pub fn set_text_input_placeholder(
-    document: &mut Document,
-    input: NodeId,
-    placeholder: impl Into<String>,
-) {
-    let text = text_input_text(document, input);
-    document.set_text_placeholder(text, placeholder);
+pub fn set_text_input_placeholder(input: NodeId, placeholder: impl Into<String>) {
+    with_document(|document| {
+        let text = text_input_text(document, input);
+        document.set_text_placeholder(text, placeholder);
+    });
 }
 
-pub fn set_text_input_placeholder_color(document: &mut Document, input: NodeId, color: Color32) {
-    let text = text_input_text(document, input);
-    document.set_text_placeholder_color(text, color);
+pub fn set_text_input_placeholder_color(input: NodeId, color: Color32) {
+    with_document(|document| {
+        let text = text_input_text(document, input);
+        document.set_text_placeholder_color(text, color);
+    });
 }
 
-pub fn set_text_input_selection_color(document: &mut Document, input: NodeId, color: Color32) {
-    let text = text_input_text(document, input);
-    document.set_text_selection_color(text, color);
+pub fn set_text_input_selection_color(input: NodeId, color: Color32) {
+    with_document(|document| {
+        let text = text_input_text(document, input);
+        document.set_text_selection_color(text, color);
+    });
 }
 
-pub fn set_text_input_caret_color(document: &mut Document, input: NodeId, color: Color32) {
-    let text = text_input_text(document, input);
-    document.set_text_caret_color(text, color);
+pub fn set_text_input_caret_color(input: NodeId, color: Color32) {
+    with_document(|document| {
+        let text = text_input_text(document, input);
+        document.set_text_caret_color(text, color);
+    });
 }
 
-pub fn set_text_input_padding(
-    document: &mut Document,
-    input: NodeId,
-    horizontal: f32,
-    vertical: f32,
-) {
-    let field = text_input_field(document, input);
-    document.set_padding(field, horizontal, vertical);
+pub fn set_text_input_padding(input: NodeId, horizontal: f32, vertical: f32) {
+    with_document(|document| {
+        let field = text_input_field(document, input);
+        document.set_padding(field, horizontal, vertical);
+    });
 }
 
 pub fn set_text_input_on_change(
-    document: &mut Document,
     input: NodeId,
     handler: impl FnMut(&mut Document, String) + 'static,
 ) {
-    document.component_state_mut::<State>(input).on_change = Some(Box::new(handler));
+    with_document(|document| {
+        document.component_state_mut::<State>(input).on_change = Some(Box::new(handler));
+    });
 }
 
 pub fn set_text_input_on_submit(
-    document: &mut Document,
     input: NodeId,
     handler: impl FnMut(&mut Document, String) + 'static,
 ) {
-    document.component_state_mut::<State>(input).on_submit = Some(Box::new(handler));
+    with_document(|document| {
+        document.component_state_mut::<State>(input).on_submit = Some(Box::new(handler));
+    });
 }
 
 pub fn set_text_input_on_hover_change(
-    document: &mut Document,
     input: NodeId,
     handler: impl FnMut(&mut Document, bool) + 'static,
 ) {
-    document.component_state_mut::<State>(input).on_hover_change = Some(Box::new(handler));
+    with_document(|document| {
+        document.component_state_mut::<State>(input).on_hover_change = Some(Box::new(handler));
+    });
 }
 
 pub fn set_text_input_on_focus_change(
-    document: &mut Document,
     input: NodeId,
     handler: impl FnMut(&mut Document, bool) + 'static,
 ) {
-    document.component_state_mut::<State>(input).on_focus_change = Some(Box::new(handler));
+    with_document(|document| {
+        document.component_state_mut::<State>(input).on_focus_change = Some(Box::new(handler));
+    });
 }
 
 pub fn set_text_input_on_key_override(
-    document: &mut Document,
     input: NodeId,
     handler: impl FnMut(&mut Document, KeyPress) -> bool + 'static,
 ) {
-    document.component_state_mut::<State>(input).on_key_override = Some(Box::new(handler));
+    with_document(|document| {
+        document.component_state_mut::<State>(input).on_key_override = Some(Box::new(handler));
+    });
 }
 
-pub fn focus_text_input(document: &mut Document, input: NodeId) {
-    let focusable = document.component_state::<State>(input).focusable;
-    document.focus_focusable(focusable);
+pub fn focus_text_input(input: NodeId) {
+    with_document(|document| {
+        let focusable = document.component_state::<State>(input).focusable;
+        document.focus_focusable(focusable);
+    });
 }
 
 fn core(value: &str) -> Core {
@@ -309,7 +324,7 @@ fn show(document: &mut Document, input: NodeId) {
     let state = document.component_state::<State>(input);
     let text = state.text;
     let value = content(&state.core);
-    let caret = state.focused.then(|| caret(&state.core));
+    let caret = state.focused_read.get().then(|| caret(&state.core));
     let selection = selection(&state.core);
     document.set_text_caret(text, caret);
     document.set_text_selection(text, selection);

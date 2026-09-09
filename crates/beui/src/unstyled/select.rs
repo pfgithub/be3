@@ -34,16 +34,18 @@ pub fn select(document: &mut Document, options: &[String], selected: Option<usiz
     let selected = selected.filter(|index| *index < options.len());
     let trigger = unstyled::ButtonBuilder::default().build();
 
-    let search = unstyled::text_input(document, "");
+    let search = unstyled::TextInputBuilder::default()
+        .value(String::new())
+        .build();
     let list = document.create_scroll();
-    let popup = unstyled::column(document, 6.0);
+    let popup = unstyled::column(6.0);
     document.append_child(popup, search, ItemSize::Intrinsic);
     document.append_child(popup, list, ItemSize::Fixed(OPTIONS_MAX_HEIGHT));
 
     let overlay = document.create_overlay(OverlayAnchor::Node(trigger), Placement::BelowStart);
     document.set_overlay_content(overlay, popup);
 
-    let root = unstyled::column(document, 0.0);
+    let root = unstyled::column(0.0);
     document.append_child(root, trigger, ItemSize::Intrinsic);
     document.append_child(root, overlay, ItemSize::Intrinsic);
 
@@ -78,16 +80,16 @@ pub fn select(document: &mut Document, options: &[String], selected: Option<usiz
     document.set_overlay_on_dismiss(overlay, move |_document| {
         unstyled::focus_button(trigger);
     });
-    unstyled::set_text_input_on_change(document, search, move |document, text| {
+    unstyled::set_text_input_on_change(search, move |document, text| {
         filter(document, select, &text);
     });
-    unstyled::set_text_input_on_submit(document, search, move |document, _text| {
+    unstyled::set_text_input_on_submit(search, move |document, _text| {
         let highlighted = document.component_state::<State>(select).highlighted;
         if let Some(index) = highlighted {
             confirm(document, select, index);
         }
     });
-    unstyled::set_text_input_on_key_override(document, search, move |document, press| {
+    unstyled::set_text_input_on_key_override(search, move |document, press| {
         navigate(document, select, press)
     });
 
@@ -266,7 +268,7 @@ fn open(document: &mut Document, select: NodeId) {
     filter(document, select, "");
     set_highlighted(document, select, selected);
     reveal_highlighted(document, select);
-    unstyled::focus_text_input(document, search);
+    unstyled::focus_text_input(search);
 }
 
 fn confirm(document: &mut Document, select: NodeId, index: usize) {

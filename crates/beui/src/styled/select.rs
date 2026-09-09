@@ -71,11 +71,11 @@ pub fn select(
         let search_text = unstyled::text_input_text(document, search);
         document.set_text_font_size(search_text, FONT_BODY);
         document.set_text_color(search_text, TEXT);
-        unstyled::set_text_input_placeholder_color(document, search, TEXT_MUTED);
-        unstyled::set_text_input_selection_color(document, search, ACCENT_SOFT);
-        unstyled::set_text_input_caret_color(document, search, ACCENT);
-        unstyled::set_text_input_padding(document, search, PADDING_HORIZONTAL, 0.0);
-        unstyled::set_text_input_placeholder(document, search, "Search");
+        unstyled::set_text_input_placeholder_color(search, TEXT_MUTED);
+        unstyled::set_text_input_selection_color(search, ACCENT_SOFT);
+        unstyled::set_text_input_caret_color(search, ACCENT);
+        unstyled::set_text_input_padding(search, PADDING_HORIZONTAL, 0.0);
+        unstyled::set_text_input_placeholder(search, "Search");
 
         let search_border = view! {
             <outline color={BORDER} width={BORDER_WIDTH} radius={RADIUS} offset={0.0} visible={true}>
@@ -83,17 +83,16 @@ pub fn select(
             </outline>
         };
         unstyled::set_text_input_child(
-            document,
             search,
             view! { <sized height={HEIGHT}>{search_border}</sized> },
         );
 
-        unstyled::set_text_input_on_hover_change(document, search, move |document, hovered| {
-            let focused = unstyled::text_input_focused(document, search);
+        unstyled::set_text_input_on_hover_change(search, move |document, hovered| {
+            let focused = unstyled::text_input_focused(document, search).get();
             document.set_outline_color(search_border, border_color(focused, hovered));
         });
-        unstyled::set_text_input_on_focus_change(document, search, move |document, focused| {
-            let hovered = unstyled::text_input_hovered(document, search);
+        unstyled::set_text_input_on_focus_change(search, move |document, focused| {
+            let hovered = unstyled::text_input_hovered(document, search).get();
             document.set_outline_color(search_border, border_color(focused, hovered));
         });
 

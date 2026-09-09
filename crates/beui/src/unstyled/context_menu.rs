@@ -24,7 +24,7 @@ pub fn context_menu(document: &mut Document, region: NodeId, items: Vec<MenuItem
     let content = menu::menu_list(document, &items);
     document.set_overlay_content(overlay, content);
 
-    let root = unstyled::column(document, 0.0);
+    let root = unstyled::column(0.0);
     document.append_child(root, region, ItemSize::Intrinsic);
     document.append_child(root, overlay, ItemSize::Intrinsic);
 

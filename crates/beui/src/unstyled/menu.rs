@@ -58,7 +58,7 @@ fn build_menu_list(
     items: &[MenuItem],
     parent: Option<(NodeId, NodeId)>,
 ) -> NodeId {
-    let column = unstyled::column(document, 2.0);
+    let column = unstyled::column(2.0);
     let menu_cell: Rc<Cell<Option<NodeId>>> = Rc::new(Cell::new(None));
     let key_cell = menu_cell.clone();
     let root = with_reactive_scope(document, || {
@@ -72,7 +72,7 @@ fn build_menu_list(
             ></focusable>
         }
     });
-    let wrapper = unstyled::column(document, 0.0);
+    let wrapper = unstyled::column(0.0);
     document.append_child(wrapper, root, ItemSize::Intrinsic);
     document.append_child(wrapper, column, ItemSize::Intrinsic);
     let menu = document.create_shadow("menu", wrapper, Vec::new());

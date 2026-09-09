@@ -25,7 +25,7 @@ pub fn slider(value: Prop<f32>, on_change: Option<Handler<f32>>) -> NodeId {
     let shadow = current_component();
     let mut on_change = on_change;
 
-    let slider = with_document(|document| unstyled::slider(document, 0.0));
+    let slider = unstyled::SliderBuilder::default().value(0.0).build();
 
     let filled = view! {
         <sized height={TRACK_HEIGHT}><fill color={ACCENT} radius={TRACK_RADIUS}></fill></sized>
@@ -52,26 +52,24 @@ pub fn slider(value: Prop<f32>, on_change: Option<Handler<f32>>) -> NodeId {
             <sized height={HEIGHT}>{line}</sized>
         </outline>
     };
-    with_document(|document| unstyled::set_slider_child(document, slider, ring));
+    unstyled::set_slider_child(slider, ring);
 
-    with_document(|document| {
-        unstyled::set_slider_on_change(document, slider, move |document, value| {
-            document.set_child_size(line, filled, filled_size(value));
-            document.set_child_size(line, rest, rest_size(value));
-            set_component_detail(document, shadow, detail(value));
-            if let Some(handler) = &mut on_change {
-                handler(document, value);
-            }
-        });
-        unstyled::set_slider_on_drag_change(document, slider, move |document, dragging| {
-            document.set_fill_color(knob_fill, knob_fill_color(dragging));
-        });
-        unstyled::set_slider_on_focus_change(document, slider, move |document, focused| {
-            document.set_outline_visible(ring, focused);
-        });
-
-        set_component_detail(document, shadow, detail(0.0));
+    unstyled::set_slider_on_change(slider, move |document, value| {
+        document.set_child_size(line, filled, filled_size(value));
+        document.set_child_size(line, rest, rest_size(value));
+        set_component_detail(document, shadow, detail(value));
+        if let Some(handler) = &mut on_change {
+            handler(document, value);
+        }
     });
+    unstyled::set_slider_on_drag_change(slider, move |document, dragging| {
+        document.set_fill_color(knob_fill, knob_fill_color(dragging));
+    });
+    unstyled::set_slider_on_focus_change(slider, move |document, focused| {
+        document.set_outline_visible(ring, focused);
+    });
+
+    with_document(|document| set_component_detail(document, shadow, detail(0.0)));
 
     value.apply(move |value| {
         with_document(|document| unstyled::set_slider_value(document, slider, value));
@@ -81,7 +79,7 @@ pub fn slider(value: Prop<f32>, on_change: Option<Handler<f32>>) -> NodeId {
 }
 
 pub fn slider_value(document: &Document, slider: NodeId) -> f32 {
-    unstyled::slider_value(document, document.shadow_root(slider))
+    unstyled::slider_value(document, document.shadow_root(slider)).get()
 }
 
 fn detail(value: f32) -> String {

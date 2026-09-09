@@ -23,7 +23,7 @@ fn opening_a_select_focuses_its_search_box_and_highlights_the_selected_option() 
 
     assert!(styled::select_open(harness.document(), select));
     let search = unstyled::select_search(harness.document(), inner);
-    assert!(unstyled::text_input_focused(harness.document(), search));
+    assert!(unstyled::text_input_focused(harness.document(), search).get());
     assert_eq!(
         unstyled::select_highlighted(harness.document(), inner),
         Some(1)
