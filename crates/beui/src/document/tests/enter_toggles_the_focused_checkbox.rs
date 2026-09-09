@@ -1,9 +1,13 @@
 use super::*;
+use crate::reactive::{view, with_reactive_scope};
+use crate::styled::CheckboxBuilder;
 
 #[test]
 fn enter_toggles_the_focused_checkbox() {
     let mut document = Document::new();
-    let checkbox = styled::checkbox(&mut document, "Show timings", false);
+    let checkbox = with_reactive_scope(&mut document, || {
+        view! { <checkbox label={"Show timings".to_string()} checked={false} /> }
+    });
     toolbar(&mut document, &[checkbox]);
     let mut harness = Harness::new(document);
 

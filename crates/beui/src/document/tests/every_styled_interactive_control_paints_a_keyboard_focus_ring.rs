@@ -1,6 +1,6 @@
 use super::*;
 use crate::reactive::{view, with_reactive_scope};
-use crate::styled::{ButtonBuilder, SwitchBuilder};
+use crate::styled::{ButtonBuilder, CheckboxBuilder, SwitchBuilder};
 
 #[test]
 fn every_styled_interactive_control_paints_a_keyboard_focus_ring() {
@@ -10,7 +10,11 @@ fn every_styled_interactive_control_paints_a_keyboard_focus_ring() {
                 view! { <button label={"Button".to_string()} variant={styled::ButtonVariant::Primary} /> }
             })
         },
-        |doc| styled::checkbox(doc, "Check", false),
+        |doc| {
+            with_reactive_scope(doc, || {
+                view! { <checkbox label={"Check".to_string()} checked={false} /> }
+            })
+        },
         |doc| with_reactive_scope(doc, || view! { <switch on={false} /> }),
         |doc| styled::slider(doc, 0.5),
         |doc| styled::text_input(doc, "Text"),

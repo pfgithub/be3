@@ -1,12 +1,16 @@
 use super::*;
 use crate::reactive::{view, with_reactive_scope};
-use crate::styled::SwitchBuilder;
+use crate::styled::{CheckboxBuilder, SwitchBuilder};
 
 #[test]
 fn space_toggles_checkboxes_switches_and_toggle_buttons() {
     let mut document = Document::new();
-    let checkbox = styled::checkbox(&mut document, "Check", false);
-    let switch = with_reactive_scope(&mut document, || view! { <switch on={false} /> });
+    let (checkbox, switch) = with_reactive_scope(&mut document, || {
+        (
+            view! { <checkbox label={"Check".to_string()} checked={false} /> },
+            view! { <switch on={false} /> },
+        )
+    });
     let toggle = styled::toggle_button(&mut document, "Bold", false);
     toolbar(&mut document, &[checkbox, switch, toggle]);
     let mut harness = Harness::new(document);

@@ -21,7 +21,7 @@ pub use accordion::{accordion, accordion_open, set_accordion_on_toggle, set_acco
 pub use border::{bordered, separator};
 pub use button::{focus_button, set_button_on_click, ButtonBuilder, ButtonVariant};
 pub use card::CardBuilder;
-pub use checkbox::{checkbox, checkbox_checked, set_checkbox_checked, set_checkbox_on_change};
+pub use checkbox::{checkbox_checked, CheckboxBuilder};
 pub use chip::ChipBuilder;
 pub use context_menu::{context_menu, set_context_menu_items, set_context_menu_on_select};
 pub use list_row::{list_row, set_list_row_on_click};

@@ -8,9 +8,9 @@ use beui::styled::theme::{
     SURFACE_RAISED, TEXT_MUTED,
 };
 use beui::styled::{
-    self, BodyBuilder, ButtonBuilder, ButtonVariant, CaptionBuilder, CardBuilder, DisplayBuilder,
-    HeadingBuilder, ParagraphBuilder, ProgressBuilder, ShortcutBuilder, SwitchBuilder,
-    TitleBuilder,
+    self, BodyBuilder, ButtonBuilder, ButtonVariant, CaptionBuilder, CardBuilder, CheckboxBuilder,
+    DisplayBuilder, HeadingBuilder, ParagraphBuilder, ProgressBuilder, ShortcutBuilder,
+    SwitchBuilder, TitleBuilder,
 };
 use beui::{unstyled, Color32, Context, Document, ItemSize, NodeId, Rect, TextAlign};
 
@@ -422,10 +422,13 @@ fn build_controls(document: &mut Document, scroll: NodeId, rows: &Rc<Rows>) -> N
 }
 
 fn build_list_controls(document: &mut Document, scroll: NodeId, rows: &Rc<Rows>) -> NodeId {
-    let timings = styled::checkbox(document, "Show timings", true);
     let timing_rows = rows.clone();
-    styled::set_checkbox_on_change(document, timings, move |document, checked| {
-        timing_rows.show_timings(document, checked);
+    let timings = with_reactive_scope(document, || {
+        view! {
+            <checkbox label={"Show timings".to_string()} checked={true} on_change={Box::new(move |document: &mut Document, checked| {
+                timing_rows.show_timings(document, checked);
+            })} />
+        }
     });
 
     let compact_rows = rows.clone();
