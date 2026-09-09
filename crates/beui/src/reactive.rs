@@ -3,17 +3,16 @@ use std::collections::HashMap;
 use std::hash::Hash;
 use std::rc::Rc;
 
-use reactive::create_effect;
-
 use crate::base::ItemSize;
 use crate::color::Color32;
 use crate::document::Document;
-use crate::node::{ClickHandler, Handler, NodeId};
+use crate::node::{ClickHandler, NodeId};
 use crate::unstyled;
 
 pub use beui_macros::{component, view};
 pub use reactive::{
-    batch, create_memo, create_signal, on_cleanup, untrack, Memo, ReadSignal, Scope, WriteSignal,
+    batch, create_effect, create_memo, create_signal, on_cleanup, untrack, Effect, Memo,
+    ReadSignal, Scope, WriteSignal,
 };
 
 thread_local! {
@@ -289,6 +288,20 @@ pub fn outline(color: Color32, width: f32, radius: u8, offset: f32, children: Ch
 }
 
 #[component]
+pub fn visibility(visible: Prop<bool>, children: Children) -> NodeId {
+    let child = children
+        .into_first()
+        .expect("visibility requires a child, e.g. <visibility>{content}</visibility>");
+    let node = with_document(|document| {
+        let node = document.create_visibility(false);
+        document.set_visibility_child(node, child);
+        node
+    });
+    visible.apply(move |value| with_document(|document| document.set_visible(node, value)));
+    node
+}
+
+#[component]
 pub fn show(condition: Prop<bool>, then: Option<Box<dyn FnOnce() -> NodeId>>) -> NodeId {
     let mut then = then;
     let visibility = with_document(|document| document.create_visibility(false));
@@ -348,32 +361,14 @@ where
 }
 
 #[component]
-pub fn button(
-    children: Children,
-    disabled: Prop<bool>,
-    on_click: Option<ClickHandler>,
-    on_hover_change: Option<Handler<bool>>,
-    on_focus_change: Option<Handler<bool>>,
-) -> NodeId {
-    let button = with_document(unstyled::button);
+pub fn button(children: Children, disabled: Prop<bool>, on_click: Option<ClickHandler>) -> NodeId {
+    let button = unstyled::button();
     if let Some(child) = children.into_first() {
-        with_document(|document| unstyled::set_button_child(document, button, child));
+        unstyled::set_button_child(button, child);
     }
     if let Some(on_click) = on_click {
-        with_document(|document| unstyled::set_button_on_click(document, button, on_click));
+        unstyled::set_button_on_click(button, on_click);
     }
-    if let Some(on_hover_change) = on_hover_change {
-        with_document(|document| {
-            unstyled::set_button_on_hover_change(document, button, on_hover_change)
-        });
-    }
-    if let Some(on_focus_change) = on_focus_change {
-        with_document(|document| {
-            unstyled::set_button_on_focus_change(document, button, on_focus_change)
-        });
-    }
-    disabled.apply(move |disabled| {
-        with_document(|document| unstyled::set_button_disabled(document, button, disabled))
-    });
+    disabled.apply(move |disabled| unstyled::set_button_disabled(button, disabled));
     button
 }

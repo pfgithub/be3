@@ -10,7 +10,7 @@ fn tabs_have_one_tab_stop_and_wrap_with_arrow_keys() {
         view! { <tabs labels={vec!["One".to_string(), "Two".to_string(), "Three".to_string()]} selected={1} /> }
     });
     let after = labelled_button(&mut document, "After");
-    let after_focus = focus_flag(&mut document, after);
+    let after_focus = unstyled::button_focused(&document, after);
     toolbar(&mut document, &[before, tabs, after]);
     let mut harness = Harness::new(document);
     harness.key(Key::Tab, Modifiers::NONE);

@@ -15,7 +15,7 @@ fn radio_groups_select_with_space_and_arrows_without_leaving_the_group() {
         }
     });
     let after = labelled_button(&mut document, "After");
-    let after_focus = focus_flag(&mut document, after);
+    let after_focus = unstyled::button_focused(&document, after);
     toolbar(&mut document, &[group, after]);
     let mut harness = Harness::new(document);
     harness.key(Key::Tab, Modifiers::NONE);

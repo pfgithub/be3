@@ -3,6 +3,7 @@ use crate::base::TextAlign;
 use crate::color::Color32;
 use crate::document::Document;
 use crate::node::{Handler, NodeId};
+use crate::reactive::{create_effect, with_document};
 use crate::styled::theme::{
     ACCENT, ACCENT_SOFT, BORDER, FONT_BODY, RADIUS, SURFACE_RAISED, TEXT, TEXT_MUTED,
 };
@@ -27,7 +28,6 @@ pub(super) fn choice(
     let mut fills = Vec::new();
     let mut label_nodes = Vec::new();
     let mut marks: Vec<Option<NodeId>> = Vec::new();
-    let mut rings = Vec::new();
 
     for index in 0..unstyled::choice_option_count(document, inner) {
         let button = unstyled::choice_option_button(document, inner, index);
@@ -72,22 +72,26 @@ pub(super) fn choice(
         document.set_fill_child(fill, padding);
         let ring = document.create_outline(ACCENT, 2.0, RADIUS, 1.0);
         document.set_outline_child(ring, fill);
-        unstyled::set_button_child(document, button, ring);
+        unstyled::set_button_child(button, ring);
 
-        unstyled::set_button_on_hover_change(document, button, move |document, hovered| {
-            let active = unstyled::choice_selected(document, inner) == Some(index);
-            document.set_fill_color(fill, background(active, hovered));
+        let hovered = unstyled::button_hovered(document, button);
+        create_effect(move || {
+            let is_hovered = hovered.get();
+            with_document(|document| {
+                let active = unstyled::choice_selected(document, inner) == Some(index);
+                document.set_fill_color(fill, background(active, is_hovered));
+            });
+        });
+        let focused = unstyled::button_focused(document, button);
+        create_effect(move || {
+            let visible = focused.get();
+            with_document(|document| document.set_outline_visible(ring, visible));
         });
 
         fills.push(fill);
         label_nodes.push(label);
         marks.push(mark);
-        rings.push(ring);
     }
-
-    unstyled::set_choice_on_focus_change(document, inner, move |document, (index, focused)| {
-        document.set_outline_visible(rings[index], focused);
-    });
 
     let choice = document.create_shadow(kind_name(kind), inner, Vec::new());
     document.set_component_detail(choice, selected.map_or("", |index| labels[index]));
@@ -97,7 +101,7 @@ pub(super) fn choice(
         for (index, &fill) in fills.iter().enumerate() {
             let active = selected == Some(index);
             let button = unstyled::choice_option_button(document, inner, index);
-            let hovered = unstyled::button_hovered(document, button);
+            let hovered = unstyled::button_hovered(document, button).get();
             document.set_fill_color(fill, background(active, hovered));
             document.set_text_color(label_nodes[index], if active { TEXT } else { TEXT_MUTED });
             if let Some(mark) = marks[index] {

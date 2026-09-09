@@ -14,7 +14,7 @@ fn empty_choices_and_invalid_selection_do_not_break_tab_navigation() {
     assert_eq!(styled::tabs_selected(&document, tabs), 1);
     assert_eq!(styled::listbox_selected(&document, empty), None);
     let after = labelled_button(&mut document, "After");
-    let after_focus = focus_flag(&mut document, after);
+    let after_focus = unstyled::button_focused(&document, after);
     toolbar(&mut document, &[empty, tabs, after]);
     let mut harness = Harness::new(document);
     harness.key(Key::Tab, Modifiers::NONE);

@@ -249,34 +249,32 @@ fn key_event(key: Key, pressed: bool, modifiers: Modifiers) -> Event {
     }
 }
 
+pub(crate) fn with_installed<R>(document: &mut Document, f: impl FnOnce(&mut Document) -> R) -> R {
+    let _guard = crate::reactive::install(document);
+    crate::reactive::with_document(f)
+}
+
 pub(crate) fn labelled_button(document: &mut Document, label: &str) -> NodeId {
-    let button = unstyled::button(document);
-    let text = document.create_text(label, 14.0, Color32::WHITE);
-    let padding = document.create_padding(20.0, 12.0);
-    document.set_padding_child(padding, text);
-    let fill = document.create_fill(Color32::from_gray(60), 4);
-    document.set_fill_child(fill, padding);
-    unstyled::set_button_child(document, button, fill);
-    button
+    with_installed(document, |document| {
+        let button = unstyled::button();
+        let text = document.create_text(label, 14.0, Color32::WHITE);
+        let padding = document.create_padding(20.0, 12.0);
+        document.set_padding_child(padding, text);
+        let fill = document.create_fill(Color32::from_gray(60), 4);
+        document.set_fill_child(fill, padding);
+        unstyled::set_button_child(button, fill);
+        button
+    })
 }
 
 pub(crate) fn counting_button(document: &mut Document, label: &str) -> (NodeId, Rc<Cell<u32>>) {
     let button = labelled_button(document, label);
     let clicks = Rc::new(Cell::new(0));
     let counter = clicks.clone();
-    unstyled::set_button_on_click(document, button, move |_document| {
-        counter.set(counter.get() + 1)
+    with_installed(document, |_document| {
+        unstyled::set_button_on_click(button, move |_document| counter.set(counter.get() + 1));
     });
     (button, clicks)
-}
-
-pub(crate) fn focus_flag(document: &mut Document, button: NodeId) -> Rc<Cell<bool>> {
-    let focused = Rc::new(Cell::new(false));
-    let flag = focused.clone();
-    unstyled::set_button_on_focus_change(document, button, move |_document, is_focused| {
-        flag.set(is_focused);
-    });
-    focused
 }
 
 pub(crate) fn virtual_list(built: &Rc<RefCell<Vec<usize>>>) -> (Document, NodeId) {

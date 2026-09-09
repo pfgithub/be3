@@ -5,7 +5,9 @@ use crate::color::Color32;
 use crate::base::{ItemSize, TextAlign};
 use crate::document::Document;
 use crate::node::{Handler, NodeId};
-use crate::reactive::{current_component, set_component_detail, with_document, Children, Prop};
+use crate::reactive::{
+    create_effect, current_component, set_component_detail, with_document, Children, Prop,
+};
 use crate::styled::text::{code, heading_line};
 use crate::styled::theme::{ACCENT, RADIUS, SURFACE_RAISED, TEXT_MUTED};
 use crate::unstyled;
@@ -28,7 +30,7 @@ pub fn accordion(
     let shadow = current_component();
     let mut on_toggle = on_toggle;
 
-    let (disclosure, marker, header, title_node) = with_document(|document| {
+    let (disclosure, marker, header, ring, title_node) = with_document(|document| {
         let disclosure = unstyled::disclosure(document, SPACING, false);
 
         let marker = code(document, glyph(false));
@@ -51,13 +53,9 @@ pub fn accordion(
         let ring = document.create_outline(ACCENT, 2.0, RADIUS, 2.0);
         document.set_outline_child(ring, header);
         unstyled::set_disclosure_header(document, disclosure, ring);
-        unstyled::set_disclosure_on_focus_change(document, disclosure, move |document, focused| {
-            document.set_outline_visible(ring, focused);
-        });
-
         unstyled::set_disclosure_content(document, disclosure, child);
 
-        (disclosure, marker, header, title_node)
+        (disclosure, marker, header, ring, title_node)
     });
 
     title.apply(move |value| {
@@ -67,15 +65,23 @@ pub fn accordion(
         });
     });
 
+    let hovered = with_document(|document| unstyled::disclosure_hovered(document, disclosure));
+    let focused = with_document(|document| unstyled::disclosure_focused(document, disclosure));
+    create_effect(move || {
+        let color = header_fill(hovered.get());
+        with_document(|document| document.set_fill_color(header, color));
+    });
+    create_effect(move || {
+        let visible = focused.get();
+        with_document(|document| document.set_outline_visible(ring, visible));
+    });
+
     with_document(|document| {
         unstyled::set_disclosure_on_toggle(document, disclosure, move |document, open| {
             document.set_text(marker, glyph(open));
             if let Some(handler) = &mut on_toggle {
                 handler(document, open);
             }
-        });
-        unstyled::set_disclosure_on_hover_change(document, disclosure, move |document, hovered| {
-            document.set_fill_color(header, header_fill(hovered));
         });
     });
 

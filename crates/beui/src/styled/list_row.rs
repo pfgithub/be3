@@ -3,7 +3,7 @@ use beui_macros::component;
 use crate::color::Color32;
 
 use crate::node::{ClickHandler, NodeId};
-use crate::reactive::{with_document, Children};
+use crate::reactive::{create_effect, with_document, Children};
 use crate::styled::theme::{ACCENT, BORDER, RADIUS, SURFACE_RAISED};
 use crate::unstyled;
 
@@ -16,9 +16,12 @@ pub fn list_row(children: Children, on_click: Option<ClickHandler>) -> NodeId {
         .into_first()
         .expect("list_row requires a child, e.g. <list_row>{content}</list_row>");
 
-    let row = with_document(|document| {
-        let row = unstyled::button(document);
+    let row = unstyled::button();
+    let hovered = with_document(|document| unstyled::button_hovered(document, row));
+    let active = with_document(|document| unstyled::button_active(document, row));
+    let focused = with_document(|document| unstyled::button_focused(document, row));
 
+    with_document(|document| {
         let padding = document.create_padding(PADDING_HORIZONTAL, PADDING_VERTICAL);
         document.set_padding_child(padding, child);
 
@@ -26,26 +29,20 @@ pub fn list_row(children: Children, on_click: Option<ClickHandler>) -> NodeId {
         document.set_fill_child(fill, padding);
         let ring = document.create_outline(ACCENT, 2.0, RADIUS, 0.0);
         document.set_outline_child(ring, fill);
-        unstyled::set_button_child(document, row, ring);
-        unstyled::set_button_on_focus_change(document, row, move |document, focused| {
-            document.set_outline_visible(ring, focused);
-        });
+        unstyled::set_button_child(row, ring);
 
-        unstyled::set_button_on_hover_change(document, row, move |document, hovered| {
-            let active = unstyled::button_active(document, row);
-            document.set_fill_color(fill, background(hovered, active));
+        create_effect(move || {
+            let visible = focused.get();
+            with_document(|document| document.set_outline_visible(ring, visible));
         });
-
-        unstyled::set_button_on_active_change(document, row, move |document, active| {
-            let hovered = unstyled::button_hovered(document, row);
-            document.set_fill_color(fill, background(hovered, active));
+        create_effect(move || {
+            let color = background(hovered.get(), active.get());
+            with_document(|document| document.set_fill_color(fill, color));
         });
-
-        row
     });
 
     if let Some(on_click) = on_click {
-        with_document(|document| unstyled::set_button_on_click(document, row, on_click));
+        unstyled::set_button_on_click(row, on_click);
     }
 
     row

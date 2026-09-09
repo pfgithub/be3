@@ -4,7 +4,7 @@ use crate::base::TextAlign;
 use crate::color::Color32;
 use crate::document::Document;
 use crate::node::{Handler, NodeId};
-use crate::reactive::{with_document, Prop};
+use crate::reactive::{create_effect, with_document, Prop};
 use crate::styled::theme::{
     ACCENT, ACCENT_SOFT, BORDER, BORDER_WIDTH, FONT_BODY, RADIUS, SURFACE, SURFACE_RAISED, TEXT,
     TEXT_MUTED,
@@ -47,16 +47,18 @@ pub fn select(
         document.set_sized_child(sized, border);
         let ring = document.create_outline(ACCENT, FOCUS_RING_WIDTH, RADIUS, FOCUS_RING_OFFSET);
         document.set_outline_child(ring, sized);
-        unstyled::set_button_child(document, trigger, ring);
+        unstyled::set_button_child(trigger, ring);
 
-        unstyled::set_button_on_hover_change(document, trigger, move |document, hovered| {
-            let focused = unstyled::button_focused(document, trigger);
-            document.set_outline_color(border, border_color(focused, hovered));
+        let trigger_hovered = unstyled::button_hovered(document, trigger);
+        let trigger_focused = unstyled::button_focused(document, trigger);
+        let border_focused = trigger_focused.clone();
+        create_effect(move || {
+            let color = border_color(border_focused.get(), trigger_hovered.get());
+            with_document(|document| document.set_outline_color(border, color));
         });
-        unstyled::set_button_on_focus_change(document, trigger, move |document, focused| {
-            let hovered = unstyled::button_hovered(document, trigger);
-            document.set_outline_color(border, border_color(focused, hovered));
-            document.set_outline_visible(ring, focused);
+        create_effect(move || {
+            let visible = trigger_focused.get();
+            with_document(|document| document.set_outline_visible(ring, visible));
         });
 
         let search = unstyled::select_search(document, inner);
@@ -88,7 +90,6 @@ pub fn select(
             document.set_outline_color(search_border, border_color(focused, hovered));
         });
 
-        let mut row_fills = Vec::new();
         for index in 0..unstyled::select_option_count(document, inner) {
             let button = unstyled::select_option_button(document, inner, index);
             let label_node = unstyled::select_option_label_node(document, inner, index);
@@ -100,15 +101,26 @@ pub fn select(
             document.set_padding_child(row_padding, label_node);
             let row_fill = document.create_fill(Color32::TRANSPARENT, RADIUS);
             document.set_fill_child(row_fill, row_padding);
-            unstyled::set_button_child(document, button, row_fill);
-            row_fills.push(row_fill);
+            unstyled::set_button_child(button, row_fill);
 
-            unstyled::set_button_on_hover_change(document, button, move |document, hovered| {
-                if hovered {
-                    unstyled::set_select_highlighted(document, inner, Some(index));
+            let hovered = unstyled::button_hovered(document, button);
+            let highlight_hovered = hovered.clone();
+            create_effect(move || {
+                if highlight_hovered.get() {
+                    with_document(|document| {
+                        unstyled::set_select_highlighted(document, inner, Some(index));
+                    });
                 }
-                let highlighted = unstyled::select_highlighted(document, inner) == Some(index);
-                document.set_fill_color(row_fill, option_background(highlighted, hovered));
+            });
+
+            let highlighted = unstyled::select_highlighted_signal(document, inner);
+            create_effect(move || {
+                let is_highlighted = highlighted.get() == Some(index);
+                let is_hovered = hovered.get();
+                with_document(|document| {
+                    document
+                        .set_fill_color(row_fill, option_background(is_highlighted, is_hovered));
+                });
             });
         }
 
@@ -125,17 +137,6 @@ pub fn select(
         let popup_sized = document.create_sized(Some(POPUP_WIDTH), None);
         document.set_sized_child(popup_sized, popup_border);
         document.set_overlay_content(unstyled::select_overlay(document, inner), popup_sized);
-
-        unstyled::set_select_on_highlight_change(document, inner, move |document, highlighted| {
-            for (index, &row_fill) in row_fills.iter().enumerate() {
-                let button = unstyled::select_option_button(document, inner, index);
-                let hovered = unstyled::button_hovered(document, button);
-                document.set_fill_color(
-                    row_fill,
-                    option_background(Some(index) == highlighted, hovered),
-                );
-            }
-        });
 
         unstyled::set_select_on_change(document, inner, move |document, selected| {
             document.set_text(label, trigger_label(&options, selected));

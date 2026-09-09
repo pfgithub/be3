@@ -1,10 +1,7 @@
-use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
-use std::rc::{Rc, Weak};
-
 use beui::reactive::{
-    self, create_memo, create_signal, view, with_document, with_reactive_scope, CenteredRowBuilder,
-    ColumnBuilder, FillBuilder, PaddingBuilder, RowBuilder, ShowBuilder, WriteSignal,
+    create_effect, create_memo, create_signal, view, with_document, with_reactive_scope,
+    CenteredRowBuilder, ColumnBuilder, FillBuilder, PaddingBuilder, ReadSignal, RowBuilder,
+    ShowBuilder, VisibilityBuilder, WriteSignal,
 };
 use beui::styled::theme::{
     ACCENT, ACCENT_SOFT, BACKGROUND, RADIUS, SCROLLBAR_WIDTH, SEPARATOR_HEIGHT, SURFACE,
@@ -73,102 +70,64 @@ impl beui::App for DemoApp {
     }
 }
 
+#[derive(Clone)]
 struct Rows {
     set_status: WriteSignal<String>,
-    selected: Cell<Option<usize>>,
-    timings: Cell<bool>,
-    visuals: RefCell<HashMap<usize, Weak<RowVisual>>>,
+    selected: ReadSignal<Option<usize>>,
+    set_selected: WriteSignal<Option<usize>>,
+    timings: ReadSignal<bool>,
+    set_timings: WriteSignal<bool>,
 }
 
 impl Rows {
     fn new(set_status: WriteSignal<String>) -> Self {
+        let (selected, set_selected) = create_signal(None);
+        let (timings, set_timings) = create_signal(true);
         Self {
             set_status,
-            selected: Cell::new(None),
-            timings: Cell::new(true),
-            visuals: RefCell::new(HashMap::new()),
+            selected,
+            set_selected,
+            timings,
+            set_timings,
         }
     }
 
-    fn register(&self, visual: &Rc<RowVisual>) {
-        let mut visuals = self.visuals.borrow_mut();
-        visuals.retain(|_, visual| visual.strong_count() > 0);
-        visuals.insert(visual.index, Rc::downgrade(visual));
-    }
-
-    fn visual(&self, index: usize) -> Option<Rc<RowVisual>> {
-        self.visuals.borrow().get(&index)?.upgrade()
-    }
-
-    fn live(&self) -> Vec<Rc<RowVisual>> {
-        self.visuals
-            .borrow()
-            .values()
-            .filter_map(Weak::upgrade)
-            .collect()
-    }
-
-    fn select(&self, document: &mut Document, index: usize) {
-        let previous = self.selected.replace(Some(index));
-        if let Some(visual) = previous.and_then(|previous| self.visual(previous)) {
-            visual.apply(document);
-        }
-        if let Some(visual) = self.visual(index) {
-            visual.apply(document);
-        }
+    fn select(&self, index: usize) {
+        self.set_selected.set(Some(index));
         self.set_status.set(format!("Row {index} selected"));
     }
 
-    fn show_timings(&self, document: &mut Document, shown: bool) {
-        self.timings.set(shown);
-        for visual in self.live() {
-            visual.apply(document);
-        }
-    }
-}
-
-struct RowVisual {
-    index: usize,
-    fill: NodeId,
-    value: NodeId,
-    timing: NodeId,
-    hovered: Cell<bool>,
-    rows: Rc<Rows>,
-}
-
-impl RowVisual {
-    fn selected(&self) -> bool {
-        self.rows.selected.get() == Some(self.index)
-    }
-
-    fn apply(&self, document: &mut Document) {
-        let fill = match (self.selected(), self.hovered.get()) {
-            (true, _) => ACCENT_SOFT,
-            (false, true) => SURFACE_RAISED,
-            (false, false) => Color32::TRANSPARENT,
-        };
-        document.set_fill_color(self.fill, fill);
-        let value = if self.selected() { ACCENT } else { TEXT_MUTED };
-        document.set_text_color(self.value, value);
-        document.set_visible(self.timing, self.rows.timings.get());
+    fn show_timings(&self, shown: bool) {
+        self.set_timings.set(shown);
     }
 }
 
 #[component]
-fn scroll_row(index: usize, rows: Rc<Rows>, compact: bool) -> NodeId {
+fn scroll_row(index: usize, rows: Rows, compact: bool) -> NodeId {
+    let is_selected = {
+        let selected = rows.selected.clone();
+        create_memo(move || selected.get() == Some(index))
+    };
+
+    let button = unstyled::button();
+    let hovered = with_document(|document| unstyled::button_hovered(document, button));
+    let focused = with_document(|document| unstyled::button_focused(document, button));
+
     let label = view! { <body content={format!("Row {index}")} /> };
     let value =
         view! { <caption content={format!("{} ms", 7 + index * 3 % 91)} align={TextAlign::End} /> };
     let value_text = with_document(|document| document.shadow_root(value));
-
-    let (timing, fill, ring) = with_document(|document| {
-        let timing = document.create_visibility(rows.timings.get());
-        document.set_visibility_child(timing, value);
-        let fill = document.create_fill(Color32::TRANSPARENT, RADIUS);
-        let ring = document.create_outline(ACCENT, 2.0, RADIUS, 0.0);
-        document.set_outline_child(ring, fill);
-        (timing, fill, ring)
+    let value_selected = is_selected.clone();
+    create_effect(move || {
+        let color = if value_selected.get() {
+            ACCENT
+        } else {
+            TEXT_MUTED
+        };
+        with_document(|document| document.set_text_color(value_text, color));
     });
+
+    let timing = view! { <visibility visible={rows.timings.clone()}>{value}</visibility> };
 
     let vertical = if compact {
         COMPACT_ROW_PADDING_VERTICAL
@@ -186,37 +145,34 @@ fn scroll_row(index: usize, rows: Rc<Rows>, compact: bool) -> NodeId {
             {line}
         </padding>
     };
-    with_document(|document| document.set_fill_child(fill, padding));
 
-    let visual = Rc::new(RowVisual {
-        index,
-        fill,
-        value: value_text,
-        timing,
-        hovered: Cell::new(false),
-        rows: rows.clone(),
+    let fill = with_document(|document| document.create_fill(Color32::TRANSPARENT, RADIUS));
+    create_effect(move || {
+        let color = match (is_selected.get(), hovered.get()) {
+            (true, _) => ACCENT_SOFT,
+            (false, true) => SURFACE_RAISED,
+            (false, false) => Color32::TRANSPARENT,
+        };
+        with_document(|document| document.set_fill_color(fill, color));
     });
-    rows.register(&visual);
-    with_document(|document| visual.apply(document));
 
-    let hovered = visual.clone();
-    let clicked = visual;
-    reactive::ButtonBuilder::default()
-        .on_click(Box::new(move |document: &mut Document| {
-            clicked.rows.select(document, clicked.index);
-        }))
-        .on_hover_change(Box::new(move |document: &mut Document, is_hovered| {
-            hovered.hovered.set(is_hovered);
-            hovered.apply(document);
-        }))
-        .on_focus_change(Box::new(move |document: &mut Document, focused| {
-            document.set_outline_visible(ring, focused);
-        }))
-        .children([reactive::intrinsic(ring)])
-        .build()
+    let ring = with_document(|document| document.create_outline(ACCENT, 2.0, RADIUS, 0.0));
+    create_effect(move || {
+        let visible = focused.get();
+        with_document(|document| document.set_outline_visible(ring, visible));
+    });
+
+    with_document(|document| {
+        document.set_fill_child(fill, padding);
+        document.set_outline_child(ring, fill);
+    });
+    unstyled::set_button_child(button, ring);
+    unstyled::set_button_on_click(button, move |_document| rows.select(index));
+
+    button
 }
 
-fn install_rows(document: &mut Document, scroll: NodeId, rows: &Rc<Rows>, compact: bool) {
+fn install_rows(document: &mut Document, scroll: NodeId, rows: &Rows, compact: bool) {
     let height = if compact {
         COMPACT_ROW_HEIGHT
     } else {
@@ -305,7 +261,7 @@ fn build_sidebar() -> NodeId {
 #[component]
 fn build_main(value: NodeId) -> NodeId {
     let (status_text, set_status_text) = create_signal("Nothing selected".to_string());
-    let rows = Rc::new(Rows::new(set_status_text));
+    let rows = Rows::new(set_status_text);
     let scroll = with_document(Document::create_scroll);
     with_document(|document| install_rows(document, scroll, &rows, false));
 
@@ -337,7 +293,7 @@ fn build_main(value: NodeId) -> NodeId {
 }
 
 #[component]
-fn build_controls(scroll: NodeId, rows: Rc<Rows>) -> NodeId {
+fn build_controls(scroll: NodeId, rows: Rows) -> NodeId {
     let (selected_tab, set_selected_tab) = create_signal(0usize);
 
     let list_rows = rows.clone();
@@ -370,13 +326,13 @@ fn build_controls(scroll: NodeId, rows: Rc<Rows>) -> NodeId {
 }
 
 #[component]
-fn build_list_controls(scroll: NodeId, rows: Rc<Rows>) -> NodeId {
+fn build_list_controls(scroll: NodeId, rows: Rows) -> NodeId {
     let timing_rows = rows.clone();
     let compact_rows = rows.clone();
     view! {
         <column spacing={12.0}>
-            <checkbox label={"Show timings".to_string()} checked={true} on_change={Box::new(move |document: &mut Document, checked| {
-                timing_rows.show_timings(document, checked);
+            <checkbox label={"Show timings".to_string()} checked={true} on_change={Box::new(move |_document: &mut Document, checked| {
+                timing_rows.show_timings(checked);
             })} />
             <centered_row spacing={12.0}>
                 <switch on={false} on_change={Box::new(move |document: &mut Document, on| {

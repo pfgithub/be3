@@ -3,6 +3,7 @@ use crate::base::ItemSize;
 use crate::document::Document;
 use crate::input::{Key, KeyPress};
 use crate::node::{Handler, NodeId};
+use crate::reactive::{create_effect, with_document};
 use crate::unstyled;
 
 #[derive(Clone)]
@@ -70,8 +71,8 @@ fn build_menu_list(
     document.set_focusable_on_key(root, move |document, press| root_key(document, menu, press));
 
     for (index, item) in items.iter().enumerate() {
-        let button = unstyled::button(document);
-        unstyled::set_button_tab_stop(document, button, false);
+        let button = unstyled::button();
+        unstyled::set_button_tab_stop(button, false);
         document.append_child(column, button, ItemSize::Intrinsic);
 
         let (submenu, submenu_content) = if item.children.is_empty() {
@@ -98,7 +99,7 @@ fn build_menu_list(
         });
 
         let disabled = item.disabled;
-        unstyled::set_button_on_click(document, button, move |document| {
+        unstyled::set_button_on_click(button, move |document| {
             if disabled {
                 return;
             }
@@ -108,12 +109,13 @@ fn build_menu_list(
                     .call_component_handler(menu, path, |state: &mut State| &mut state.on_select);
             }
         });
-        unstyled::set_button_on_hover_change(document, button, move |document, hovered| {
-            if hovered {
-                hover_menu_list_row(document, menu, index);
+        let hovered = unstyled::button_hovered(document, button);
+        create_effect(move || {
+            if hovered.get() {
+                with_document(|document| hover_menu_list_row(document, menu, index));
             }
         });
-        unstyled::set_button_on_key(document, button, move |document, press| {
+        unstyled::set_button_on_key(button, move |document, press| {
             key(document, menu, index, parent, press)
         });
     }
@@ -216,9 +218,9 @@ fn focus_row(document: &mut Document, menu: NodeId, index: usize) {
         .map(|row| row.button)
         .collect();
     for (i, &button) in buttons.iter().enumerate() {
-        unstyled::set_button_tab_stop(document, button, i == index);
+        unstyled::set_button_tab_stop(button, i == index);
     }
-    unstyled::focus_button(document, buttons[index]);
+    unstyled::focus_button(buttons[index]);
 }
 
 fn root_key(document: &mut Document, menu: NodeId, press: KeyPress) -> bool {
@@ -296,7 +298,7 @@ fn key(
             if press.pressed {
                 let (overlay, trigger) = parent.expect("checked above");
                 document.close_overlay(overlay);
-                unstyled::focus_button(document, trigger);
+                unstyled::focus_button(trigger);
             }
             true
         }

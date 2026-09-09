@@ -27,5 +27,5 @@ fn escape_closes_an_open_select_popup_and_returns_focus_to_the_trigger() {
 
     assert!(!styled::select_open(harness.document(), select));
     assert_eq!(styled::select_selected(harness.document(), select), Some(0));
-    assert!(unstyled::button_focused(harness.document(), trigger));
+    assert!(unstyled::button_focused(harness.document(), trigger).get());
 }

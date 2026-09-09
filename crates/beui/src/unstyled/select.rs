@@ -4,6 +4,7 @@ use crate::color::Color32;
 use crate::document::Document;
 use crate::input::{Key, KeyPress};
 use crate::node::{Handler, NodeId};
+use crate::reactive::{create_signal, ReadSignal, WriteSignal};
 use crate::unstyled;
 
 const FONT_SIZE: f32 = 14.0;
@@ -24,13 +25,14 @@ struct State {
     rows: Vec<Row>,
     selected: Option<usize>,
     highlighted: Option<usize>,
+    highlighted_read: ReadSignal<Option<usize>>,
+    highlighted_write: WriteSignal<Option<usize>>,
     on_change: Option<Handler<Option<usize>>>,
-    on_highlight_change: Option<Handler<Option<usize>>>,
 }
 
 pub fn select(document: &mut Document, options: &[String], selected: Option<usize>) -> NodeId {
     let selected = selected.filter(|index| *index < options.len());
-    let trigger = unstyled::button(document);
+    let trigger = unstyled::button();
 
     let search = unstyled::text_input(document, "");
     let list = document.create_scroll();
@@ -45,6 +47,7 @@ pub fn select(document: &mut Document, options: &[String], selected: Option<usiz
     document.append_child(root, trigger, ItemSize::Intrinsic);
     document.append_child(root, overlay, ItemSize::Intrinsic);
 
+    let (highlighted_read, highlighted_write) = create_signal(selected);
     let select = document.create_shadow("select", root, Vec::new());
     document.set_component_state(
         select,
@@ -56,8 +59,9 @@ pub fn select(document: &mut Document, options: &[String], selected: Option<usiz
             rows: Vec::new(),
             selected,
             highlighted: selected,
+            highlighted_read,
+            highlighted_write,
             on_change: None,
-            on_highlight_change: None,
         },
     );
 
@@ -65,14 +69,14 @@ pub fn select(document: &mut Document, options: &[String], selected: Option<usiz
         add_row(document, select, label);
     }
 
-    unstyled::set_button_on_click(document, trigger, move |document| {
+    unstyled::set_button_on_click(trigger, move |document| {
         open(document, select);
     });
-    unstyled::set_button_on_key(document, trigger, move |document, press| {
+    unstyled::set_button_on_key(trigger, move |document, press| {
         trigger_key(document, select, press)
     });
-    document.set_overlay_on_dismiss(overlay, move |document| {
-        unstyled::focus_button(document, trigger);
+    document.set_overlay_on_dismiss(overlay, move |_document| {
+        unstyled::focus_button(trigger);
     });
     unstyled::set_text_input_on_change(document, search, move |document, text| {
         filter(document, select, &text);
@@ -91,10 +95,10 @@ pub fn select(document: &mut Document, options: &[String], selected: Option<usiz
 }
 
 fn add_row(document: &mut Document, select: NodeId, label: &str) {
-    let button = unstyled::button(document);
-    unstyled::set_button_tab_stop(document, button, false);
+    let button = unstyled::button();
+    unstyled::set_button_tab_stop(button, false);
     let text = document.create_text(label.to_owned(), FONT_SIZE, Color32::WHITE);
-    unstyled::set_button_child(document, button, text);
+    unstyled::set_button_child(button, text);
     let visibility = document.create_visibility(true);
     document.set_visibility_child(visibility, button);
 
@@ -111,7 +115,7 @@ fn add_row(document: &mut Document, select: NodeId, label: &str) {
             visible: true,
         });
 
-    unstyled::set_button_on_click(document, button, move |document| {
+    unstyled::set_button_on_click(button, move |document| {
         let index = document
             .component_state::<State>(select)
             .rows
@@ -167,6 +171,7 @@ pub fn set_select_options(document: &mut Document, select: NodeId, options: &[St
     let state = document.component_state_mut::<State>(select);
     state.selected = None;
     state.highlighted = None;
+    state.highlighted_write.set(None);
 }
 
 pub fn set_select_on_change(
@@ -179,7 +184,7 @@ pub fn set_select_on_change(
 
 pub fn focus_select(document: &mut Document, select: NodeId) {
     let trigger = document.component_state::<State>(select).trigger;
-    unstyled::focus_button(document, trigger);
+    unstyled::focus_button(trigger);
 }
 
 pub fn select_trigger(document: &Document, select: NodeId) -> NodeId {
@@ -210,28 +215,24 @@ pub fn select_highlighted(document: &Document, select: NodeId) -> Option<usize> 
     document.component_state::<State>(select).highlighted
 }
 
+pub fn select_highlighted_signal(document: &Document, select: NodeId) -> ReadSignal<Option<usize>> {
+    document
+        .component_state::<State>(select)
+        .highlighted_read
+        .clone()
+}
+
 pub fn set_select_highlighted(document: &mut Document, select: NodeId, highlighted: Option<usize>) {
     set_highlighted(document, select, highlighted);
 }
 
-pub fn set_select_on_highlight_change(
-    document: &mut Document,
-    select: NodeId,
-    handler: impl FnMut(&mut Document, Option<usize>) + 'static,
-) {
-    document
-        .component_state_mut::<State>(select)
-        .on_highlight_change = Some(Box::new(handler));
-}
-
 fn set_highlighted(document: &mut Document, select: NodeId, highlighted: Option<usize>) {
-    if document.component_state::<State>(select).highlighted == highlighted {
+    let state = document.component_state_mut::<State>(select);
+    if state.highlighted == highlighted {
         return;
     }
-    document.component_state_mut::<State>(select).highlighted = highlighted;
-    document.call_component_handler(select, highlighted, |state: &mut State| {
-        &mut state.on_highlight_change
-    });
+    state.highlighted = highlighted;
+    state.highlighted_write.set(highlighted);
 }
 
 fn trigger_key(document: &mut Document, select: NodeId, press: KeyPress) -> bool {
@@ -273,7 +274,7 @@ fn confirm(document: &mut Document, select: NodeId, index: usize) {
     let overlay = document.component_state::<State>(select).overlay;
     document.close_overlay(overlay);
     let trigger = document.component_state::<State>(select).trigger;
-    unstyled::focus_button(document, trigger);
+    unstyled::focus_button(trigger);
 }
 
 fn apply_selection(document: &mut Document, select: NodeId, selected: Option<usize>) {

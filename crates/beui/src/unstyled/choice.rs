@@ -5,6 +5,7 @@ use crate::color::Color32;
 use crate::document::Document;
 use crate::input::{Key, KeyPress};
 use crate::node::{Handler, NodeId};
+use crate::reactive::{create_effect, with_document, ReadSignal};
 use crate::unstyled;
 
 const FONT_SIZE: f32 = 14.0;
@@ -28,7 +29,6 @@ struct State {
     search: String,
     typed_at: Option<Instant>,
     on_change: Option<Handler<Option<usize>>>,
-    on_focus_change: Option<Handler<(usize, bool)>>,
 }
 
 pub fn choice(
@@ -54,29 +54,20 @@ pub fn choice(
             search: String::new(),
             typed_at: None,
             on_change: None,
-            on_focus_change: None,
         },
     );
+    let mut focused_signals = Vec::new();
     for (index, title) in labels.iter().enumerate() {
-        let button = unstyled::button(document);
-        unstyled::set_button_tab_stop(document, button, index == selected.unwrap_or(0));
+        let button = unstyled::button();
+        unstyled::set_button_tab_stop(button, index == selected.unwrap_or(0));
         let label = document.create_text(*title, FONT_SIZE, Color32::WHITE);
-        unstyled::set_button_child(document, button, label);
+        unstyled::set_button_child(button, label);
 
-        unstyled::set_button_on_click(document, button, move |document| {
+        unstyled::set_button_on_click(button, move |document| {
             set_choice_selected(document, choice, Some(index));
         });
-        unstyled::set_button_on_focus_change(document, button, move |document, focused| {
-            if !focused {
-                let state = document.component_state_mut::<State>(choice);
-                state.search.clear();
-                state.typed_at = None;
-            }
-            document.call_component_handler(choice, (index, focused), |state: &mut State| {
-                &mut state.on_focus_change
-            });
-        });
-        unstyled::set_button_on_key(document, button, move |document, press| {
+        focused_signals.push(unstyled::button_focused(document, button));
+        unstyled::set_button_on_key(button, move |document, press| {
             key(document, choice, index, press)
         });
         if kind == ChoiceKind::Listbox {
@@ -90,6 +81,18 @@ pub fn choice(
             .component_state_mut::<State>(choice)
             .options
             .push(Option_ { button, label });
+    }
+    if kind == ChoiceKind::Listbox {
+        create_effect(move || {
+            let any_focused = focused_signals.iter().any(ReadSignal::get);
+            if !any_focused {
+                with_document(|document| {
+                    let state = document.component_state_mut::<State>(choice);
+                    state.search.clear();
+                    state.typed_at = None;
+                });
+            }
+        });
     }
     choice
 }
@@ -106,11 +109,11 @@ pub fn set_choice_selected(document: &mut Document, choice: NodeId, selected: Op
     let focused = state
         .options
         .iter()
-        .any(|option| unstyled::button_focused(document, option.button));
+        .any(|option| unstyled::button_focused(document, option.button).get());
     let buttons: Vec<NodeId> = state.options.iter().map(|option| option.button).collect();
     document.component_state_mut::<State>(choice).selected = selected;
     for (index, button) in buttons.iter().copied().enumerate() {
-        unstyled::set_button_tab_stop(document, button, index == selected.unwrap_or(0));
+        unstyled::set_button_tab_stop(button, index == selected.unwrap_or(0));
     }
     let detail = match selected {
         Some(index) => document
@@ -121,7 +124,7 @@ pub fn set_choice_selected(document: &mut Document, choice: NodeId, selected: Op
     document.set_component_detail(choice, detail);
     if focused {
         if let Some(&button) = buttons.get(selected.unwrap_or(0)) {
-            unstyled::focus_button(document, button);
+            unstyled::focus_button(button);
         }
     }
     document.call_component_handler(choice, selected, |state: &mut State| &mut state.on_change);
@@ -135,21 +138,11 @@ pub fn set_choice_on_change(
     document.component_state_mut::<State>(choice).on_change = Some(Box::new(handler));
 }
 
-pub fn set_choice_on_focus_change(
-    document: &mut Document,
-    choice: NodeId,
-    handler: impl FnMut(&mut Document, (usize, bool)) + 'static,
-) {
-    document
-        .component_state_mut::<State>(choice)
-        .on_focus_change = Some(Box::new(handler));
-}
-
 pub fn focus_choice(document: &mut Document, choice: NodeId) {
     let state = document.component_state::<State>(choice);
     if let Some(option) = state.options.get(state.selected.unwrap_or(0)) {
         let button = option.button;
-        unstyled::focus_button(document, button);
+        unstyled::focus_button(button);
     }
 }
 
@@ -184,7 +177,7 @@ fn key(document: &mut Document, choice: NodeId, index: usize, press: KeyPress) -
     };
     if press.pressed {
         let button = state.options[next].button;
-        unstyled::focus_button(document, button);
+        unstyled::focus_button(button);
         set_choice_selected(document, choice, Some(next));
     }
     true
@@ -230,7 +223,7 @@ fn typeahead(document: &mut Document, choice: NodeId, index: usize, text: &str) 
                 .starts_with(&prefix)
         });
     if let Some(next) = matched {
-        unstyled::focus_button(document, labels[next].0);
+        unstyled::focus_button(labels[next].0);
         set_choice_selected(document, choice, Some(next));
         let state = document.component_state_mut::<State>(choice);
         state.search = search;

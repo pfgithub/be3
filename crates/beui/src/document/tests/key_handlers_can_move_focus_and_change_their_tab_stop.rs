@@ -5,14 +5,16 @@ fn key_handlers_can_move_focus_and_change_their_tab_stop() {
     let mut document = Document::new();
     let first = labelled_button(&mut document, "First");
     let second = labelled_button(&mut document, "Second");
-    let flag = focus_flag(&mut document, second);
-    unstyled::set_button_on_key(&mut document, first, move |document, press| {
-        if press.key != Key::ArrowRight || !press.pressed {
-            return false;
-        }
-        unstyled::set_button_tab_stop(document, first, false);
-        unstyled::focus_button(document, second);
-        true
+    let flag = unstyled::button_focused(&document, second);
+    with_installed(&mut document, |_document| {
+        unstyled::set_button_on_key(first, move |_document, press| {
+            if press.key != Key::ArrowRight || !press.pressed {
+                return false;
+            }
+            unstyled::set_button_tab_stop(first, false);
+            unstyled::focus_button(second);
+            true
+        });
     });
     toolbar(&mut document, &[first, second]);
     let mut harness = Harness::new(document);

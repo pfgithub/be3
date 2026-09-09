@@ -12,23 +12,20 @@ mod toggle;
 
 pub use button::{
     button, button_active, button_disabled, button_focusable, button_focused, button_hovered,
-    focus_button, set_button_child, set_button_disabled, set_button_on_active_change,
-    set_button_on_click, set_button_on_focus_change, set_button_on_hover_change, set_button_on_key,
+    focus_button, set_button_child, set_button_disabled, set_button_on_click, set_button_on_key,
     set_button_tab_stop,
 };
 pub use choice::{
     choice, choice_option_button, choice_option_count, choice_option_label_node, choice_selected,
-    focus_choice, set_choice_on_change, set_choice_on_focus_change, set_choice_selected,
-    ChoiceKind,
+    focus_choice, set_choice_on_change, set_choice_selected, ChoiceKind,
 };
 pub use context_menu::{
     context_menu, context_menu_menu, context_menu_overlay, set_context_menu_items,
     set_context_menu_on_select,
 };
 pub use disclosure::{
-    disclosure, disclosure_hovered, disclosure_open, focus_disclosure, set_disclosure_content,
-    set_disclosure_header, set_disclosure_on_focus_change, set_disclosure_on_hover_change,
-    set_disclosure_on_toggle, set_disclosure_open,
+    disclosure, disclosure_focused, disclosure_hovered, disclosure_open, focus_disclosure,
+    set_disclosure_content, set_disclosure_header, set_disclosure_on_toggle, set_disclosure_open,
 };
 pub use layout::{centered_row, column, row, spacer};
 pub use menu::{
@@ -41,9 +38,9 @@ pub use pressable::{
     set_pressable_on_focus_change, set_pressable_on_hover_change,
 };
 pub use select::{
-    focus_select, select, select_highlighted, select_open, select_option_button,
-    select_option_count, select_option_label_node, select_overlay, select_search, select_selected,
-    select_trigger, set_select_highlighted, set_select_on_change, set_select_on_highlight_change,
+    focus_select, select, select_highlighted, select_highlighted_signal, select_open,
+    select_option_button, select_option_count, select_option_label_node, select_overlay,
+    select_search, select_selected, select_trigger, set_select_highlighted, set_select_on_change,
     set_select_open, set_select_options, set_select_selected,
 };
 pub use slider::{

@@ -4,7 +4,7 @@ use crate::base::TextAlign;
 use crate::color::Color32;
 use crate::document::Document;
 use crate::node::{Handler, NodeId};
-use crate::reactive::{with_document, Prop};
+use crate::reactive::{create_effect, with_document, Prop};
 use crate::styled::theme::{
     ACCENT_SOFT, BORDER, BORDER_WIDTH, FONT_BODY, RADIUS, SURFACE_RAISED, TEXT, TEXT_MUTED,
 };
@@ -74,18 +74,13 @@ fn style_menu_rows(document: &mut Document, menu: NodeId, items: &[MenuItem]) {
         document.set_padding_child(padding, label);
         let fill = document.create_fill(Color32::TRANSPARENT, RADIUS);
         document.set_fill_child(fill, padding);
-        unstyled::set_button_child(document, button, fill);
+        unstyled::set_button_child(button, fill);
 
-        unstyled::set_button_on_hover_change(document, button, move |document, hovered| {
-            if hovered {
-                unstyled::hover_menu_list_row(document, menu, index);
-            }
-            let focused = unstyled::button_focused(document, button);
-            document.set_fill_color(fill, row_background(focused, hovered));
-        });
-        unstyled::set_button_on_focus_change(document, button, move |document, focused| {
-            let hovered = unstyled::button_hovered(document, button);
-            document.set_fill_color(fill, row_background(focused, hovered));
+        let hovered = unstyled::button_hovered(document, button);
+        let focused = unstyled::button_focused(document, button);
+        create_effect(move || {
+            let color = row_background(focused.get(), hovered.get());
+            with_document(|document| document.set_fill_color(fill, color));
         });
 
         if !item.children.is_empty() {
