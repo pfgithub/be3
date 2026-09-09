@@ -8,7 +8,7 @@ use reactive::create_effect;
 use crate::base::ItemSize;
 use crate::color::Color32;
 use crate::document::Document;
-use crate::node::{ClickHandler, NodeId};
+use crate::node::{ClickHandler, Handler, NodeId};
 use crate::unstyled;
 
 pub use beui_macros::{component, view};
@@ -277,6 +277,18 @@ pub fn fill(color: Color32, radius: u8, children: Children) -> NodeId {
 }
 
 #[component]
+pub fn outline(color: Color32, width: f32, radius: u8, offset: f32, children: Children) -> NodeId {
+    let child = children
+        .into_first()
+        .expect("outline requires a child, e.g. <outline>{content}</outline>");
+    with_document(|document| {
+        let outline = document.create_outline(color, width, radius, offset);
+        document.set_outline_child(outline, child);
+        outline
+    })
+}
+
+#[component]
 pub fn show(condition: Prop<bool>, then: Option<Box<dyn FnOnce() -> NodeId>>) -> NodeId {
     let mut then = then;
     let visibility = with_document(|document| document.create_visibility(false));
@@ -336,13 +348,29 @@ where
 }
 
 #[component]
-pub fn button(children: Children, disabled: Prop<bool>, on_click: Option<ClickHandler>) -> NodeId {
+pub fn button(
+    children: Children,
+    disabled: Prop<bool>,
+    on_click: Option<ClickHandler>,
+    on_hover_change: Option<Handler<bool>>,
+    on_focus_change: Option<Handler<bool>>,
+) -> NodeId {
     let button = with_document(unstyled::button);
     if let Some(child) = children.into_first() {
         with_document(|document| unstyled::set_button_child(document, button, child));
     }
     if let Some(on_click) = on_click {
         with_document(|document| unstyled::set_button_on_click(document, button, on_click));
+    }
+    if let Some(on_hover_change) = on_hover_change {
+        with_document(|document| {
+            unstyled::set_button_on_hover_change(document, button, on_hover_change)
+        });
+    }
+    if let Some(on_focus_change) = on_focus_change {
+        with_document(|document| {
+            unstyled::set_button_on_focus_change(document, button, on_focus_change)
+        });
     }
     disabled.apply(move |disabled| {
         with_document(|document| unstyled::set_button_disabled(document, button, disabled))

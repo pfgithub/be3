@@ -28,7 +28,7 @@ impl CounterUi {
         let mut document = Document::new();
         let (count, set_count) = create_signal(counter.value());
 
-        let (value, reset, decrement, increment, root) = with_reactive_scope(&mut document, || {
+        let root = with_reactive_scope(&mut document, || {
             let reset_counter = counter.clone();
             let reset_set_count = set_count.clone();
             let decrement_counter = counter.clone();
@@ -37,22 +37,22 @@ impl CounterUi {
             let increment_set_count = set_count.clone();
 
             let value = view! {
-                <display content={create_memo(move || count.get().to_string())} />
+                <display content={create_memo(move || count.get().to_string())} test_id={"counter.value"} />
             };
             let reset = view! {
-                <button label={"Reset".to_string()} variant={ButtonVariant::Secondary} on_click={Box::new(move |_document| {
+                <button label={"Reset".to_string()} variant={ButtonVariant::Secondary} test_id={"counter.reset"} on_click={Box::new(move |_document| {
                     reset_counter.reset();
                     reset_set_count.set(reset_counter.value());
                 })} />
             };
             let decrement = view! {
-                <button label={"-".to_string()} variant={ButtonVariant::Primary} on_click={Box::new(move |_document| {
+                <button label={"-".to_string()} variant={ButtonVariant::Primary} test_id={"counter.decrement"} on_click={Box::new(move |_document| {
                     decrement_counter.decrement();
                     decrement_set_count.set(decrement_counter.value());
                 })} />
             };
             let increment = view! {
-                <button label={"+".to_string()} variant={ButtonVariant::Primary} on_click={Box::new(move |_document| {
+                <button label={"+".to_string()} variant={ButtonVariant::Primary} test_id={"counter.increment"} on_click={Box::new(move |_document| {
                     increment_counter.increment();
                     increment_set_count.set(increment_counter.value());
                 })} />
@@ -73,13 +73,9 @@ impl CounterUi {
                 </fill>
             };
 
-            (value, reset, decrement, increment, root)
+            root
         });
 
-        document.set_test_id(document.shadow_root(value), "counter.value");
-        document.set_test_id(reset, "counter.reset");
-        document.set_test_id(decrement, "counter.decrement");
-        document.set_test_id(increment, "counter.increment");
         document.set_root(root);
 
         Self {

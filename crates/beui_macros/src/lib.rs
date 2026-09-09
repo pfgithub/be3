@@ -165,12 +165,14 @@ pub fn component(_attr: TokenStream, item: TokenStream) -> TokenStream {
         #(#attrs)*
         #vis struct #builder_ident #generics #where_clause {
             #(#fields,)*
+            test_id: Option<String>,
         }
 
         impl #generics ::core::default::Default for #builder_ident #generics #where_clause {
             fn default() -> Self {
                 Self {
                     #(#prop_idents: ::core::default::Default::default(),)*
+                    test_id: None,
                 }
             }
         }
@@ -178,9 +180,19 @@ pub fn component(_attr: TokenStream, item: TokenStream) -> TokenStream {
         impl #generics #builder_ident #generics #where_clause {
             #(#setters)*
 
+            pub fn test_id(mut self, value: impl Into<String>) -> Self {
+                self.test_id = Some(value.into());
+                self
+            }
+
             pub fn build(self) #output {
+                let test_id = self.test_id;
                 #(#field_lets)*
-                #finish
+                let node = #finish;
+                if let Some(test_id) = test_id {
+                    ::beui::reactive::with_document(|document| document.set_test_id(node, test_id));
+                }
+                node
             }
         }
     }

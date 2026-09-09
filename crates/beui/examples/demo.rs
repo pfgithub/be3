@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 
 use beui::reactive::{
-    create_memo, create_signal, view, with_document, with_reactive_scope, CenteredRowBuilder,
+    self, create_memo, create_signal, view, with_document, with_reactive_scope, CenteredRowBuilder,
     ColumnBuilder, FillBuilder, PaddingBuilder, RowBuilder, ShowBuilder, WriteSignal,
 };
 use beui::styled::theme::{
@@ -17,7 +17,8 @@ use beui::styled::{
     ShortcutBuilder, SliderBuilder, SwitchBuilder, TabsBuilder, TextInputBuilder, TitleBuilder,
     ToggleButtonBuilder,
 };
-use beui::{unstyled, Color32, Context, Document, ItemSize, NodeId, Rect, TextAlign};
+use beui::{unstyled, Color32, Context, Document, NodeId, Rect, TextAlign};
+use beui_macros::component;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     beui::run("beui demo", DemoApp::new())
@@ -46,14 +47,12 @@ impl DemoApp {
         let root = with_reactive_scope(&mut document, || {
             let value =
                 view! { <display content={create_memo(move || count.get().to_string())} /> };
-            let header = build_header(set_count);
-            let body = build_body(value);
             view! {
                 <fill color={BACKGROUND} radius={0}>
                     <column spacing={0.0}>
-                        @fixed(HEADER_HEIGHT) {header}
+                        @fixed(HEADER_HEIGHT) <build_header set_count={set_count} />
                         @fixed(SEPARATOR_HEIGHT) {with_document(styled::separator)}
-                        @percent(100.0) {body}
+                        @percent(100.0) <build_body value={value} />
                     </column>
                 </fill>
             }
@@ -155,39 +154,39 @@ impl RowVisual {
     }
 }
 
-fn scroll_row(document: &mut Document, index: usize, rows: &Rc<Rows>, compact: bool) -> NodeId {
-    let (label, value) = with_reactive_scope(document, || {
-        let label = view! { <body content={format!("Row {index}")} /> };
-        let value = view! { <caption content={format!("{} ms", 7 + index * 3 % 91)} /> };
-        (label, value)
-    });
-    let value_text = document.shadow_root(value);
-    document.set_text_align(value_text, TextAlign::End, TextAlign::Center);
-    let timing = document.create_visibility(rows.timings.get());
-    document.set_visibility_child(timing, value);
+#[component]
+fn scroll_row(index: usize, rows: Rc<Rows>, compact: bool) -> NodeId {
+    let label = view! { <body content={format!("Row {index}")} /> };
+    let value =
+        view! { <caption content={format!("{} ms", 7 + index * 3 % 91)} align={TextAlign::End} /> };
+    let value_text = with_document(|document| document.shadow_root(value));
 
-    let line = unstyled::centered_row(document, 12.0);
-    document.append_child(line, label, ItemSize::Percent(100.0));
-    document.append_child(line, timing, ItemSize::Intrinsic);
+    let (timing, fill, ring) = with_document(|document| {
+        let timing = document.create_visibility(rows.timings.get());
+        document.set_visibility_child(timing, value);
+        let fill = document.create_fill(Color32::TRANSPARENT, RADIUS);
+        let ring = document.create_outline(ACCENT, 2.0, RADIUS, 0.0);
+        document.set_outline_child(ring, fill);
+        (timing, fill, ring)
+    });
 
     let vertical = if compact {
         COMPACT_ROW_PADDING_VERTICAL
     } else {
         ROW_PADDING_VERTICAL
     };
-    let padding = document.create_padding(ROW_PADDING_HORIZONTAL, vertical);
-    document.set_padding_child(padding, line);
-
-    let fill = document.create_fill(Color32::TRANSPARENT, RADIUS);
-    document.set_fill_child(fill, padding);
-
-    let ring = document.create_outline(ACCENT, 2.0, RADIUS, 0.0);
-    document.set_outline_child(ring, fill);
-    let catcher = unstyled::button(document);
-    unstyled::set_button_child(document, catcher, ring);
-    unstyled::set_button_on_focus_change(document, catcher, move |document, focused| {
-        document.set_outline_visible(ring, focused);
-    });
+    let line = view! {
+        <centered_row spacing={12.0}>
+            @percent(100.0) {label}
+            {timing}
+        </centered_row>
+    };
+    let padding = view! {
+        <padding horizontal={ROW_PADDING_HORIZONTAL} vertical={vertical}>
+            {line}
+        </padding>
+    };
+    with_document(|document| document.set_fill_child(fill, padding));
 
     let visual = Rc::new(RowVisual {
         index,
@@ -198,20 +197,23 @@ fn scroll_row(document: &mut Document, index: usize, rows: &Rc<Rows>, compact: b
         rows: rows.clone(),
     });
     rows.register(&visual);
-    visual.apply(document);
+    with_document(|document| visual.apply(document));
 
     let hovered = visual.clone();
-    unstyled::set_button_on_hover_change(document, catcher, move |document, is_hovered| {
-        hovered.hovered.set(is_hovered);
-        hovered.apply(document);
-    });
-
     let clicked = visual;
-    unstyled::set_button_on_click(document, catcher, move |document| {
-        clicked.rows.select(document, clicked.index);
-    });
-
-    catcher
+    reactive::ButtonBuilder::default()
+        .on_click(Box::new(move |document: &mut Document| {
+            clicked.rows.select(document, clicked.index);
+        }))
+        .on_hover_change(Box::new(move |document: &mut Document, is_hovered| {
+            hovered.hovered.set(is_hovered);
+            hovered.apply(document);
+        }))
+        .on_focus_change(Box::new(move |document: &mut Document, focused| {
+            document.set_outline_visible(ring, focused);
+        }))
+        .children([reactive::intrinsic(ring)])
+        .build()
 }
 
 fn install_rows(document: &mut Document, scroll: NodeId, rows: &Rc<Rows>, compact: bool) {
@@ -222,10 +224,18 @@ fn install_rows(document: &mut Document, scroll: NodeId, rows: &Rc<Rows>, compac
     };
     let rows = rows.clone();
     document.set_scroll_virtual_items(scroll, ROW_COUNT, height, move |document, index| {
-        scroll_row(document, index, &rows, compact)
+        let rows = rows.clone();
+        with_reactive_scope(document, move || {
+            ScrollRowBuilder::default()
+                .index(index)
+                .rows(rows)
+                .compact(compact)
+                .build()
+        })
     });
 }
 
+#[component]
 fn build_header(set_count: WriteSignal<i64>) -> NodeId {
     let reset_count = set_count.clone();
     let decrement_count = set_count.clone();
@@ -253,19 +263,19 @@ fn build_header(set_count: WriteSignal<i64>) -> NodeId {
     }
 }
 
+#[component]
 fn build_body(value: NodeId) -> NodeId {
-    let sidebar = build_sidebar();
-    let main = build_main(value);
     view! {
         <padding horizontal={BODY_PADDING} vertical={BODY_PADDING}>
             <row spacing={20.0}>
-                @percent(32.0) {sidebar}
-                @percent(68.0) {main}
+                @percent(32.0) <build_sidebar />
+                @percent(68.0) <build_main value={value} />
             </row>
         </padding>
     }
 }
 
+#[component]
 fn build_sidebar() -> NodeId {
     view! {
         <card>
@@ -292,19 +302,12 @@ fn build_sidebar() -> NodeId {
     }
 }
 
+#[component]
 fn build_main(value: NodeId) -> NodeId {
     let (status_text, set_status_text) = create_signal("Nothing selected".to_string());
     let rows = Rc::new(Rows::new(set_status_text));
     let scroll = with_document(Document::create_scroll);
     with_document(|document| install_rows(document, scroll, &rows, false));
-
-    let status = view! { <caption content={status_text} /> };
-    with_document(|document| {
-        let status_text_node = document.shadow_root(status);
-        document.set_text_align(status_text_node, TextAlign::End, TextAlign::Center);
-    });
-
-    let controls_card = build_controls(scroll, &rows);
 
     view! {
         <column spacing={20.0}>
@@ -315,12 +318,12 @@ fn build_main(value: NodeId) -> NodeId {
                     <paragraph content={"Click the header buttons, or focus one with Tab and press Enter.".to_string()} />
                 </column>
             </card>
-            {controls_card}
+            <build_controls scroll={scroll} rows={rows.clone()} />
             @percent(100.0) <card>
                 <column spacing={12.0}>
                     <centered_row spacing={12.0}>
                         <heading content={format!("Rows ({ROW_COUNT})")} />
-                        @percent(100.0) {status}
+                        @percent(100.0) <caption content={status_text} align={TextAlign::End} />
                     </centered_row>
                     @fixed(SEPARATOR_HEIGHT) {with_document(styled::separator)}
                     @percent(100.0) <row spacing={10.0}>
@@ -333,7 +336,8 @@ fn build_main(value: NodeId) -> NodeId {
     }
 }
 
-fn build_controls(scroll: NodeId, rows: &Rc<Rows>) -> NodeId {
+#[component]
+fn build_controls(scroll: NodeId, rows: Rc<Rows>) -> NodeId {
     let (selected_tab, set_selected_tab) = create_signal(0usize);
 
     let list_rows = rows.clone();
@@ -354,18 +358,19 @@ fn build_controls(scroll: NodeId, rows: &Rc<Rows>) -> NodeId {
                     set_selected_tab.set(selected);
                 })} />
                 <column spacing={0.0}>
-                    <show condition={list_condition} then={Box::new(move || build_list_controls(scroll, &list_rows))} />
-                    <show condition={load_condition} then={Box::new(build_load_controls)} />
-                    <show condition={name_condition} then={Box::new(build_name_controls)} />
-                    <show condition={choices_condition} then={Box::new(build_choice_controls)} />
-                    <show condition={menus_condition} then={Box::new(build_menu_controls)} />
+                    <show condition={list_condition} then={Box::new(move || view! { <build_list_controls scroll={scroll} rows={list_rows} /> })} />
+                    <show condition={load_condition} then={Box::new(|| view! { <build_load_controls /> })} />
+                    <show condition={name_condition} then={Box::new(|| view! { <build_name_controls /> })} />
+                    <show condition={choices_condition} then={Box::new(|| view! { <build_choice_controls /> })} />
+                    <show condition={menus_condition} then={Box::new(|| view! { <build_menu_controls /> })} />
                 </column>
             </column>
         </card>
     }
 }
 
-fn build_list_controls(scroll: NodeId, rows: &Rc<Rows>) -> NodeId {
+#[component]
+fn build_list_controls(scroll: NodeId, rows: Rc<Rows>) -> NodeId {
     let timing_rows = rows.clone();
     let compact_rows = rows.clone();
     view! {
@@ -383,21 +388,16 @@ fn build_list_controls(scroll: NodeId, rows: &Rc<Rows>) -> NodeId {
     }
 }
 
+#[component]
 fn build_load_controls() -> NodeId {
     let (progress_value, set_progress_value) = create_signal(0.4f32);
     let readout_value = progress_value.clone();
-    let readout =
-        view! { <caption content={create_memo(move || percent_label(readout_value.get()))} /> };
-    with_document(|document| {
-        let readout_text_node = document.shadow_root(readout);
-        document.set_text_align(readout_text_node, TextAlign::End, TextAlign::Center);
-    });
 
     view! {
         <column spacing={12.0}>
             <centered_row spacing={12.0}>
                 <caption content={"Simulated load".to_string()} />
-                @percent(100.0) {readout}
+                @percent(100.0) <caption content={create_memo(move || percent_label(readout_value.get()))} align={TextAlign::End} />
             </centered_row>
             <slider value={0.4} on_change={Box::new(move |_document: &mut Document, value| {
                 set_progress_value.set(value);
@@ -407,19 +407,15 @@ fn build_load_controls() -> NodeId {
     }
 }
 
+#[component]
 fn build_name_controls() -> NodeId {
     let (greeting_text, set_greeting_text) = create_signal(greeting_label(""));
-    let greeting = view! { <caption content={greeting_text} /> };
-    with_document(|document| {
-        let greeting_text_node = document.shadow_root(greeting);
-        document.set_text_align(greeting_text_node, TextAlign::End, TextAlign::Center);
-    });
 
     view! {
         <column spacing={12.0}>
             <centered_row spacing={12.0}>
                 <caption content={"Display name".to_string()} />
-                @percent(100.0) {greeting}
+                @percent(100.0) <caption content={greeting_text} align={TextAlign::End} />
             </centered_row>
             <text_input value={String::new()} placeholder={"Type a name".to_string()} on_change={Box::new(move |_document: &mut Document, value| {
                 set_greeting_text.set(greeting_label(&value));
@@ -441,6 +437,7 @@ fn percent_label(value: f32) -> String {
     format!("{}%", (value * 100.0).round())
 }
 
+#[component]
 fn build_choice_controls() -> NodeId {
     let modes = ["Automatic", "Manual", "Scheduled"];
     let (mode_status_text, set_mode_status_text) = create_signal("Automatic updates".to_string());
@@ -484,6 +481,7 @@ fn build_choice_controls() -> NodeId {
     }
 }
 
+#[component]
 fn build_menu_controls() -> NodeId {
     let fruits: Vec<String> = ["Apple", "Banana", "Cherry", "Date", "Grape", "Mango"]
         .iter()
