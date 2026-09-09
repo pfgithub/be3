@@ -10,6 +10,9 @@ use crate::painter::Painter;
 
 use crate::document::Document;
 use crate::node::{ChangeHandler, ClickHandler, Element, Handler, InteractInput, NodeId};
+use crate::reactive::{with_document, Children};
+
+use beui_macros::component;
 
 pub(crate) type StepHandler = Box<dyn FnMut(&mut Document, f32)>;
 pub(crate) type KeyHandler = Box<dyn FnMut(&mut Document, KeyPress) -> bool>;
@@ -102,17 +105,17 @@ impl Element for FocusableNode {
 }
 
 impl Document {
-    pub fn create_focusable(&mut self) -> NodeId {
+    pub(crate) fn create_focusable(&mut self) -> NodeId {
         self.arena.insert(FocusableNode::new())
     }
 
-    pub fn set_focusable_child(&mut self, focusable: NodeId, child: NodeId) {
+    pub(crate) fn set_focusable_child(&mut self, focusable: NodeId, child: NodeId) {
         if self.arena.get_as::<FocusableNode>(focusable).child != Some(child) {
             self.arena.get_mut_as::<FocusableNode>(focusable).child = Some(child);
         }
     }
 
-    pub fn set_focusable_on_focus_change(
+    pub(crate) fn set_focusable_on_focus_change(
         &mut self,
         focusable: NodeId,
         handler: impl FnMut(&mut Document, bool) + 'static,
@@ -122,7 +125,7 @@ impl Document {
             .on_focus_change = Some(Box::new(handler));
     }
 
-    pub fn set_focusable_on_activate(
+    pub(crate) fn set_focusable_on_activate(
         &mut self,
         focusable: NodeId,
         handler: impl FnMut(&mut Document) + 'static,
@@ -132,7 +135,7 @@ impl Document {
             .on_activate = Some(Box::new(handler));
     }
 
-    pub fn set_focusable_on_activate_change(
+    pub(crate) fn set_focusable_on_activate_change(
         &mut self,
         focusable: NodeId,
         handler: impl FnMut(&mut Document, bool) + 'static,
@@ -142,7 +145,7 @@ impl Document {
             .on_activate_change = Some(Box::new(handler));
     }
 
-    pub fn set_focusable_on_step(
+    pub(crate) fn set_focusable_on_step(
         &mut self,
         focusable: NodeId,
         handler: impl FnMut(&mut Document, f32) + 'static,
@@ -409,4 +412,45 @@ impl Document {
             }
         }
     }
+}
+
+#[component(base)]
+pub fn focusable(
+    tab_stop: Option<bool>,
+    on_focus_change: Option<ChangeHandler>,
+    on_activate_change: Option<ChangeHandler>,
+    on_activate: Option<ClickHandler>,
+    on_step: Option<StepHandler>,
+    on_text: Option<Handler<String>>,
+    on_key: Option<KeyHandler>,
+    children: Children,
+) -> NodeId {
+    with_document(|document| {
+        let focusable = document.create_focusable();
+        if let Some(child) = children.into_first() {
+            document.set_focusable_child(focusable, child);
+        }
+        if let Some(tab_stop) = tab_stop {
+            document.set_focusable_tab_stop(focusable, tab_stop);
+        }
+        if let Some(on_focus_change) = on_focus_change {
+            document.set_focusable_on_focus_change(focusable, on_focus_change);
+        }
+        if let Some(on_activate_change) = on_activate_change {
+            document.set_focusable_on_activate_change(focusable, on_activate_change);
+        }
+        if let Some(on_activate) = on_activate {
+            document.set_focusable_on_activate(focusable, on_activate);
+        }
+        if let Some(on_step) = on_step {
+            document.set_focusable_on_step(focusable, on_step);
+        }
+        if let Some(on_text) = on_text {
+            document.set_focusable_on_text(focusable, on_text);
+        }
+        if let Some(on_key) = on_key {
+            document.set_focusable_on_key(focusable, on_key);
+        }
+        focusable
+    })
 }

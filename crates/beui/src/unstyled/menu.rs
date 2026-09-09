@@ -1,9 +1,12 @@
+use std::cell::Cell;
+use std::rc::Rc;
+
 use crate::base::overlay::{OverlayAnchor, Placement};
 use crate::base::ItemSize;
 use crate::document::Document;
 use crate::input::{Key, KeyPress};
 use crate::node::{Handler, NodeId};
-use crate::reactive::{create_effect, with_document};
+use crate::reactive::{create_effect, with_document, with_reactive_scope, FocusableBuilder};
 use crate::unstyled;
 
 #[derive(Clone)]
@@ -54,12 +57,23 @@ fn build_menu_list(
     parent: Option<(NodeId, NodeId)>,
 ) -> NodeId {
     let column = unstyled::column(document, 2.0);
-    let root = document.create_focusable();
-    document.set_focusable_tab_stop(root, true);
+    let menu_cell: Rc<Cell<Option<NodeId>>> = Rc::new(Cell::new(None));
+    let key_cell = menu_cell.clone();
+    let root = with_reactive_scope(document, || {
+        FocusableBuilder::default()
+            .tab_stop(true)
+            .on_key(Box::new(move |document: &mut Document, press: KeyPress| {
+                let menu = key_cell.get().expect("menu not yet initialized");
+                root_key(document, menu, press)
+            }))
+            .children([])
+            .build()
+    });
     let wrapper = unstyled::column(document, 0.0);
     document.append_child(wrapper, root, ItemSize::Intrinsic);
     document.append_child(wrapper, column, ItemSize::Intrinsic);
     let menu = document.create_shadow("menu", wrapper, Vec::new());
+    menu_cell.set(Some(menu));
     document.set_component_state(
         menu,
         State {
@@ -68,7 +82,6 @@ fn build_menu_list(
             on_select: None,
         },
     );
-    document.set_focusable_on_key(root, move |document, press| root_key(document, menu, press));
 
     for (index, item) in items.iter().enumerate() {
         let button = unstyled::ButtonBuilder::default().build();

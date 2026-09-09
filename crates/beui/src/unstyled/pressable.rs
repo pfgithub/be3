@@ -4,7 +4,10 @@ use crate::input::CursorIcon;
 
 use crate::document::Document;
 use crate::node::{ClickHandler, Handler, NodeId};
-use crate::reactive::{current_component, set_component_state, with_document, ClickCatcherBuilder};
+use crate::reactive::{
+    current_component, intrinsic, set_component_state, with_document, ClickCatcherBuilder,
+    FocusableBuilder,
+};
 
 struct State {
     click_catcher: NodeId,
@@ -40,8 +43,21 @@ pub fn pressable() -> NodeId {
             }))
             .children([])
             .build();
-        let focusable = document.create_focusable();
-        document.set_focusable_child(focusable, click_catcher);
+        let focusable = FocusableBuilder::default()
+            .on_focus_change(Box::new(move |document: &mut Document, focused: bool| {
+                document.component_state_mut::<State>(pressable).focused = focused;
+                document.call_component_handler(pressable, focused, |state: &mut State| {
+                    &mut state.on_focus_change
+                });
+            }))
+            .on_activate_change(Box::new(move |document: &mut Document, pressed: bool| {
+                document.set_click_catcher_key_active(click_catcher, pressed);
+            }))
+            .on_activate(Box::new(move |document: &mut Document| {
+                document.click_click_catcher(click_catcher);
+            }))
+            .children([intrinsic(click_catcher)])
+            .build();
 
         set_component_state(
             document,
@@ -57,19 +73,6 @@ pub fn pressable() -> NodeId {
                 on_active_change: None,
             },
         );
-
-        document.set_focusable_on_focus_change(focusable, move |document, focused| {
-            document.component_state_mut::<State>(pressable).focused = focused;
-            document.call_component_handler(pressable, focused, |state: &mut State| {
-                &mut state.on_focus_change
-            });
-        });
-        document.set_focusable_on_activate_change(focusable, move |document, pressed| {
-            document.set_click_catcher_key_active(click_catcher, pressed);
-        });
-        document.set_focusable_on_activate(focusable, move |document| {
-            document.click_click_catcher(click_catcher);
-        });
 
         focusable
     })

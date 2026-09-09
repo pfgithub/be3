@@ -238,6 +238,7 @@ impl<I: IntoIterator<Item = (NodeId, ItemSize)>> From<I> for Children {
 
 pub use crate::base::click_catcher::ClickCatcherBuilder;
 pub use crate::base::fill::FillBuilder;
+pub use crate::base::focusable::FocusableBuilder;
 pub use crate::base::outline::OutlineBuilder;
 pub use crate::base::padding::PaddingBuilder;
 pub use crate::base::sized::SizedBuilder;

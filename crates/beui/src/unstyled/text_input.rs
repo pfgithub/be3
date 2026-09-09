@@ -14,7 +14,7 @@ use crate::input::{CursorIcon, Key, KeyPress, PointerPress};
 use crate::base::TextAlign;
 use crate::document::Document;
 use crate::node::{Handler, NodeId};
-use crate::reactive::{intrinsic, with_reactive_scope, ClickCatcherBuilder};
+use crate::reactive::{intrinsic, with_reactive_scope, ClickCatcherBuilder, FocusableBuilder};
 
 const FONT_SIZE: f32 = 14.0;
 const WORD_CLICKS: u32 = 2;
@@ -78,8 +78,51 @@ pub fn text_input(document: &mut Document, value: impl Into<String>) -> NodeId {
             .children([intrinsic(slot)])
             .build()
     });
-    let focusable = document.create_focusable();
-    document.set_focusable_child(focusable, click_catcher);
+    let focus_cell = input_cell.clone();
+    let text_cell = input_cell.clone();
+    let key_cell = input_cell.clone();
+    let focusable = with_reactive_scope(document, || {
+        FocusableBuilder::default()
+            .on_focus_change(Box::new(move |document: &mut Document, focused: bool| {
+                let input = focus_cell.get().expect("text_input not yet initialized");
+                let state = document.component_state_mut::<State>(input);
+                state.focused = focused;
+                if !focused {
+                    state.dragging = false;
+                    state.core.external_edit();
+                }
+                show(document, input);
+                document.call_component_handler(input, focused, |state: &mut State| {
+                    &mut state.on_focus_change
+                });
+            }))
+            .on_text(Box::new(move |document: &mut Document, typed: String| {
+                let input = text_cell.get().expect("text_input not yet initialized");
+                insert(document, input, &typed);
+            }))
+            .on_key(Box::new(move |document: &mut Document, press: KeyPress| {
+                let input = key_cell.get().expect("text_input not yet initialized");
+                let overridden = document
+                    .component_state_mut::<State>(input)
+                    .on_key_override
+                    .take();
+                if let Some(mut handler) = overridden {
+                    let handled = handler(document, press);
+                    if document.contains(input) {
+                        let state = document.component_state_mut::<State>(input);
+                        if state.on_key_override.is_none() {
+                            state.on_key_override = Some(handler);
+                        }
+                    }
+                    if handled {
+                        return true;
+                    }
+                }
+                key(document, input, press)
+            }))
+            .children([intrinsic(click_catcher)])
+            .build()
+    });
 
     let input = document.create_shadow("text-input", focusable, vec![slot]);
     input_cell.set(Some(input));
@@ -101,41 +144,6 @@ pub fn text_input(document: &mut Document, value: impl Into<String>) -> NodeId {
             on_key_override: None,
         },
     );
-
-    document.set_focusable_on_focus_change(focusable, move |document, focused| {
-        let state = document.component_state_mut::<State>(input);
-        state.focused = focused;
-        if !focused {
-            state.dragging = false;
-            state.core.external_edit();
-        }
-        show(document, input);
-        document.call_component_handler(input, focused, |state: &mut State| {
-            &mut state.on_focus_change
-        });
-    });
-    document.set_focusable_on_text(focusable, move |document, typed| {
-        insert(document, input, &typed);
-    });
-    document.set_focusable_on_key(focusable, move |document, press| {
-        let overridden = document
-            .component_state_mut::<State>(input)
-            .on_key_override
-            .take();
-        if let Some(mut handler) = overridden {
-            let handled = handler(document, press);
-            if document.contains(input) {
-                let state = document.component_state_mut::<State>(input);
-                if state.on_key_override.is_none() {
-                    state.on_key_override = Some(handler);
-                }
-            }
-            if handled {
-                return true;
-            }
-        }
-        key(document, input, press)
-    });
 
     input
 }

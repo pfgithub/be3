@@ -1,11 +1,11 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use crate::input::{CursorIcon, Key, PointerPress};
+use crate::input::{CursorIcon, Key, KeyPress, PointerPress};
 
 use crate::document::Document;
 use crate::node::{Handler, NodeId};
-use crate::reactive::{intrinsic, with_reactive_scope, ClickCatcherBuilder};
+use crate::reactive::{intrinsic, with_reactive_scope, ClickCatcherBuilder, FocusableBuilder};
 
 const STEP: f32 = 0.05;
 
@@ -44,8 +44,45 @@ pub fn slider(document: &mut Document, value: f32) -> NodeId {
             .children([intrinsic(slot)])
             .build()
     });
-    let focusable = document.create_focusable();
-    document.set_focusable_child(focusable, click_catcher);
+
+    let focus_cell = slider_cell.clone();
+    let step_cell = slider_cell.clone();
+    let key_cell = slider_cell.clone();
+    let focusable = with_reactive_scope(document, || {
+        FocusableBuilder::default()
+            .on_focus_change(Box::new(move |document: &mut Document, focused: bool| {
+                let slider = focus_cell.get().expect("slider not yet initialized");
+                document.component_state_mut::<State>(slider).focused = focused;
+                document.call_component_handler(slider, focused, |state: &mut State| {
+                    &mut state.on_focus_change
+                });
+            }))
+            .on_step(Box::new(move |document: &mut Document, delta: f32| {
+                let slider = step_cell.get().expect("slider not yet initialized");
+                let value = slider_value(document, slider) + delta * STEP;
+                set_slider_value(document, slider, value);
+            }))
+            .on_key(Box::new(move |document: &mut Document, press: KeyPress| {
+                let slider = key_cell.get().expect("slider not yet initialized");
+                if press.modifiers.ctrl || press.modifiers.alt {
+                    return false;
+                }
+                let value = slider_value(document, slider);
+                let next = match press.key {
+                    Key::Home => 0.0,
+                    Key::End => 1.0,
+                    Key::PageDown => value - STEP * 4.0,
+                    Key::PageUp => value + STEP * 4.0,
+                    _ => return false,
+                };
+                if press.pressed {
+                    set_slider_value(document, slider, next);
+                }
+                true
+            }))
+            .children([intrinsic(click_catcher)])
+            .build()
+    });
 
     let slider = document.create_shadow("slider", focusable, vec![slot]);
     slider_cell.set(Some(slider));
@@ -63,34 +100,6 @@ pub fn slider(document: &mut Document, value: f32) -> NodeId {
         },
     );
 
-    document.set_focusable_on_focus_change(focusable, move |document, focused| {
-        document.component_state_mut::<State>(slider).focused = focused;
-        document.call_component_handler(slider, focused, |state: &mut State| {
-            &mut state.on_focus_change
-        });
-    });
-    document.set_focusable_on_step(focusable, move |document, delta| {
-        let value = slider_value(document, slider) + delta * STEP;
-        set_slider_value(document, slider, value);
-    });
-
-    document.set_focusable_on_key(focusable, move |document, press| {
-        if press.modifiers.ctrl || press.modifiers.alt {
-            return false;
-        }
-        let value = slider_value(document, slider);
-        let next = match press.key {
-            Key::Home => 0.0,
-            Key::End => 1.0,
-            Key::PageDown => value - STEP * 4.0,
-            Key::PageUp => value + STEP * 4.0,
-            _ => return false,
-        };
-        if press.pressed {
-            set_slider_value(document, slider, next);
-        }
-        true
-    });
     slider
 }
 
