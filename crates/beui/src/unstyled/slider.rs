@@ -1,7 +1,11 @@
-use crate::input::{CursorIcon, Key};
+use std::cell::Cell;
+use std::rc::Rc;
+
+use crate::input::{CursorIcon, Key, PointerPress};
 
 use crate::document::Document;
 use crate::node::{Handler, NodeId};
+use crate::reactive::{intrinsic, with_reactive_scope, ClickCatcherBuilder};
 
 const STEP: f32 = 0.05;
 
@@ -17,12 +21,34 @@ struct State {
 
 pub fn slider(document: &mut Document, value: f32) -> NodeId {
     let slot = document.create_slot("track");
-    let click_catcher = document.create_click_catcher(CursorIcon::PointingHand);
-    document.set_click_catcher_child(click_catcher, slot);
+
+    let slider_cell: Rc<Cell<Option<NodeId>>> = Rc::new(Cell::new(None));
+    let drag_cell = slider_cell.clone();
+    let active_cell = slider_cell.clone();
+    let click_catcher = with_reactive_scope(document, || {
+        ClickCatcherBuilder::default()
+            .cursor(CursorIcon::PointingHand)
+            .on_drag(Box::new(
+                move |document: &mut Document, press: PointerPress| {
+                    let slider = drag_cell.get().expect("slider not yet initialized");
+                    set_slider_value(document, slider, press.fraction.x);
+                },
+            ))
+            .on_active_change(Box::new(move |document: &mut Document, dragging: bool| {
+                let slider = active_cell.get().expect("slider not yet initialized");
+                document.component_state_mut::<State>(slider).dragging = dragging;
+                document.call_component_handler(slider, dragging, |state: &mut State| {
+                    &mut state.on_drag_change
+                });
+            }))
+            .children([intrinsic(slot)])
+            .build()
+    });
     let focusable = document.create_focusable();
     document.set_focusable_child(focusable, click_catcher);
 
     let slider = document.create_shadow("slider", focusable, vec![slot]);
+    slider_cell.set(Some(slider));
     document.set_component_detail(slider, detail(value));
     document.set_component_state(
         slider,
@@ -37,15 +63,6 @@ pub fn slider(document: &mut Document, value: f32) -> NodeId {
         },
     );
 
-    document.set_click_catcher_on_drag(click_catcher, move |document, press| {
-        set_slider_value(document, slider, press.fraction.x);
-    });
-    document.set_click_catcher_on_active_change(click_catcher, move |document, dragging| {
-        document.component_state_mut::<State>(slider).dragging = dragging;
-        document.call_component_handler(slider, dragging, |state: &mut State| {
-            &mut state.on_drag_change
-        });
-    });
     document.set_focusable_on_focus_change(focusable, move |document, focused| {
         document.component_state_mut::<State>(slider).focused = focused;
         document.call_component_handler(slider, focused, |state: &mut State| {

@@ -1,9 +1,13 @@
+use std::cell::Cell;
+use std::rc::Rc;
+
 use crate::base::overlay::{OverlayAnchor, Placement};
 use crate::base::ItemSize;
 use crate::document::Document;
 use crate::geometry::Pos2;
-use crate::input::CursorIcon;
+use crate::input::{CursorIcon, PointerPress};
 use crate::node::{Handler, NodeId};
+use crate::reactive::{intrinsic, with_reactive_scope, ClickCatcherBuilder};
 use crate::unstyled;
 use crate::unstyled::menu::{self, MenuItem};
 
@@ -22,10 +26,28 @@ pub fn context_menu(document: &mut Document, region: NodeId, items: Vec<MenuItem
     document.append_child(root, region, ItemSize::Intrinsic);
     document.append_child(root, overlay, ItemSize::Intrinsic);
 
-    let catcher = document.create_click_catcher(CursorIcon::Default);
-    document.set_click_catcher_child(catcher, root);
+    let context_menu_cell: Rc<Cell<Option<NodeId>>> = Rc::new(Cell::new(None));
+    let secondary_press_cell = context_menu_cell.clone();
+    let catcher = with_reactive_scope(document, || {
+        ClickCatcherBuilder::default()
+            .cursor(CursorIcon::Default)
+            .on_secondary_press(Box::new(
+                move |document: &mut Document, press: PointerPress| {
+                    let context_menu = secondary_press_cell
+                        .get()
+                        .expect("context_menu not yet initialized");
+                    document.set_overlay_anchor(overlay, OverlayAnchor::Point(press.pos));
+                    document.open_overlay(overlay);
+                    let content = document.component_state::<State>(context_menu).content;
+                    menu::focus_menu_list_root(document, content);
+                },
+            ))
+            .children([intrinsic(root)])
+            .build()
+    });
 
     let context_menu = document.create_shadow("context-menu", catcher, Vec::new());
+    context_menu_cell.set(Some(context_menu));
     document.set_component_state(
         context_menu,
         State {
@@ -36,13 +58,6 @@ pub fn context_menu(document: &mut Document, region: NodeId, items: Vec<MenuItem
     );
 
     wire_on_select(document, context_menu, overlay, content);
-
-    document.set_click_catcher_on_secondary_press(catcher, move |document, press| {
-        document.set_overlay_anchor(overlay, OverlayAnchor::Point(press.pos));
-        document.open_overlay(overlay);
-        let content = document.component_state::<State>(context_menu).content;
-        menu::focus_menu_list_root(document, content);
-    });
 
     context_menu
 }

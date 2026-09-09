@@ -1,12 +1,15 @@
 use std::any::Any;
+use std::cell::Cell;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use crate::geometry::{pos2, Pos2, Rect, Vec2};
-use crate::input::CursorIcon;
+use crate::input::{CursorIcon, PointerPress};
 use crate::painter::Painter;
 
 use crate::document::Document;
 use crate::node::{ClickHandler, Element, InteractInput, NodeId};
+use crate::reactive::{with_reactive_scope, ClickCatcherBuilder};
 
 #[derive(Clone, Copy)]
 pub(crate) enum OverlayAnchor {
@@ -153,13 +156,22 @@ impl Element for OverlayNode {
 
 impl Document {
     pub(crate) fn create_overlay(&mut self, anchor: OverlayAnchor, placement: Placement) -> NodeId {
-        let scrim = self.create_click_catcher(CursorIcon::Default);
+        let overlay_cell: Rc<Cell<Option<NodeId>>> = Rc::new(Cell::new(None));
+        let press_cell = overlay_cell.clone();
+        let scrim = with_reactive_scope(self, || {
+            ClickCatcherBuilder::default()
+                .cursor(CursorIcon::Default)
+                .on_press(Box::new(move |doc: &mut Document, press: PointerPress| {
+                    let id = press_cell.get().expect("overlay not yet initialized");
+                    doc.dismiss_overlay_if_outside(id, press.pos);
+                }))
+                .children([])
+                .build()
+        });
         let id = self
             .arena
             .insert(OverlayNode::new(scrim, anchor, placement));
-        self.set_click_catcher_on_press(scrim, move |doc, press| {
-            doc.dismiss_overlay_if_outside(id, press.pos);
-        });
+        overlay_cell.set(Some(id));
         id
     }
 

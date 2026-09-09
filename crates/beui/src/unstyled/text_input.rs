@@ -1,4 +1,6 @@
+use std::cell::Cell;
 use std::ops::Range;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use text_editor_core::{
@@ -12,6 +14,7 @@ use crate::input::{CursorIcon, Key, KeyPress, PointerPress};
 use crate::base::TextAlign;
 use crate::document::Document;
 use crate::node::{Handler, NodeId};
+use crate::reactive::{intrinsic, with_reactive_scope, ClickCatcherBuilder};
 
 const FONT_SIZE: f32 = 14.0;
 const WORD_CLICKS: u32 = 2;
@@ -45,12 +48,41 @@ pub fn text_input(document: &mut Document, value: impl Into<String>) -> NodeId {
     document.set_padding_child(field, text);
     let slot = document.create_slot("field");
     document.set_slot_child(slot, field);
-    let click_catcher = document.create_click_catcher(CursorIcon::Text);
-    document.set_click_catcher_child(click_catcher, slot);
+
+    let input_cell: Rc<Cell<Option<NodeId>>> = Rc::new(Cell::new(None));
+    let press_cell = input_cell.clone();
+    let drag_cell = input_cell.clone();
+    let hover_cell = input_cell.clone();
+    let click_catcher = with_reactive_scope(document, || {
+        ClickCatcherBuilder::default()
+            .cursor(CursorIcon::Text)
+            .on_press(Box::new(
+                move |document: &mut Document, press: PointerPress| {
+                    let input = press_cell.get().expect("text_input not yet initialized");
+                    point(document, input, press);
+                },
+            ))
+            .on_drag(Box::new(
+                move |document: &mut Document, press: PointerPress| {
+                    let input = drag_cell.get().expect("text_input not yet initialized");
+                    extend(document, input, press);
+                },
+            ))
+            .on_hover_change(Box::new(move |document: &mut Document, hovered: bool| {
+                let input = hover_cell.get().expect("text_input not yet initialized");
+                document.component_state_mut::<State>(input).hovered = hovered;
+                document.call_component_handler(input, hovered, |state: &mut State| {
+                    &mut state.on_hover_change
+                });
+            }))
+            .children([intrinsic(slot)])
+            .build()
+    });
     let focusable = document.create_focusable();
     document.set_focusable_child(focusable, click_catcher);
 
     let input = document.create_shadow("text-input", focusable, vec![slot]);
+    input_cell.set(Some(input));
     document.set_component_detail(input, detail(&value));
     document.set_component_state(
         input,
@@ -70,18 +102,6 @@ pub fn text_input(document: &mut Document, value: impl Into<String>) -> NodeId {
         },
     );
 
-    document.set_click_catcher_on_press(click_catcher, move |document, press| {
-        point(document, input, press);
-    });
-    document.set_click_catcher_on_drag(click_catcher, move |document, press| {
-        extend(document, input, press);
-    });
-    document.set_click_catcher_on_hover_change(click_catcher, move |document, hovered| {
-        document.component_state_mut::<State>(input).hovered = hovered;
-        document.call_component_handler(input, hovered, |state: &mut State| {
-            &mut state.on_hover_change
-        });
-    });
     document.set_focusable_on_focus_change(focusable, move |document, focused| {
         let state = document.component_state_mut::<State>(input);
         state.focused = focused;
