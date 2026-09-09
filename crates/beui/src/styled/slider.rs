@@ -1,8 +1,11 @@
+use beui_macros::component;
+
 use crate::color::Color32;
 
 use crate::base::ItemSize;
 use crate::document::Document;
 use crate::node::{Handler, NodeId};
+use crate::reactive::{current_component, set_component_detail, with_document, Prop};
 use crate::styled::theme::{ACCENT, ACCENT_HOVER, KNOB, RADIUS, TRACK};
 use crate::unstyled;
 
@@ -14,75 +17,69 @@ const KNOB_RADIUS: u8 = 8;
 const FOCUS_RING_WIDTH: f32 = 2.0;
 const FOCUS_RING_OFFSET: f32 = 3.0;
 
-struct State {
-    on_change: Option<Handler<f32>>,
-}
+#[component]
+pub fn slider(value: Prop<f32>, on_change: Option<Handler<f32>>) -> NodeId {
+    let shadow = current_component();
+    let mut on_change = on_change;
 
-pub fn slider(document: &mut Document, value: f32) -> NodeId {
-    let value = value.clamp(0.0, 1.0);
-    let slider = unstyled::slider(document, value);
+    let (slider, line, filled, rest, knob_fill, ring) = with_document(|document| {
+        let slider = unstyled::slider(document, 0.0);
 
-    let filled_fill = document.create_fill(ACCENT, TRACK_RADIUS);
-    let filled = document.create_sized(None, Some(TRACK_HEIGHT));
-    document.set_sized_child(filled, filled_fill);
+        let filled_fill = document.create_fill(ACCENT, TRACK_RADIUS);
+        let filled = document.create_sized(None, Some(TRACK_HEIGHT));
+        document.set_sized_child(filled, filled_fill);
 
-    let rest_fill = document.create_fill(TRACK, TRACK_RADIUS);
-    let rest = document.create_sized(None, Some(TRACK_HEIGHT));
-    document.set_sized_child(rest, rest_fill);
+        let rest_fill = document.create_fill(TRACK, TRACK_RADIUS);
+        let rest = document.create_sized(None, Some(TRACK_HEIGHT));
+        document.set_sized_child(rest, rest_fill);
 
-    let knob_fill = document.create_fill(KNOB, KNOB_RADIUS);
-    let knob = document.create_sized(Some(KNOB_SIZE), Some(KNOB_SIZE));
-    document.set_sized_child(knob, knob_fill);
+        let knob_fill = document.create_fill(KNOB, KNOB_RADIUS);
+        let knob = document.create_sized(Some(KNOB_SIZE), Some(KNOB_SIZE));
+        document.set_sized_child(knob, knob_fill);
 
-    let line = unstyled::centered_row(document, 0.0);
-    document.append_child(line, filled, filled_size(value));
-    document.append_child(line, knob, ItemSize::Intrinsic);
-    document.append_child(line, rest, rest_size(value));
+        let line = unstyled::centered_row(document, 0.0);
+        document.append_child(line, filled, filled_size(0.0));
+        document.append_child(line, knob, ItemSize::Intrinsic);
+        document.append_child(line, rest, rest_size(0.0));
 
-    let sized = document.create_sized(None, Some(HEIGHT));
-    document.set_sized_child(sized, line);
+        let sized = document.create_sized(None, Some(HEIGHT));
+        document.set_sized_child(sized, line);
 
-    let ring = document.create_outline(ACCENT, FOCUS_RING_WIDTH, RADIUS, FOCUS_RING_OFFSET);
-    document.set_outline_child(ring, sized);
-    unstyled::set_slider_child(document, slider, ring);
+        let ring = document.create_outline(ACCENT, FOCUS_RING_WIDTH, RADIUS, FOCUS_RING_OFFSET);
+        document.set_outline_child(ring, sized);
+        unstyled::set_slider_child(document, slider, ring);
 
-    let styled = document.create_shadow("slider", slider, Vec::new());
-    document.set_component_detail(styled, detail(value));
-    document.set_component_state(styled, State { on_change: None });
-
-    unstyled::set_slider_on_change(document, slider, move |document, value| {
-        document.set_child_size(line, filled, filled_size(value));
-        document.set_child_size(line, rest, rest_size(value));
-        document.set_component_detail(styled, detail(value));
-        document.call_component_handler(styled, value, |state: &mut State| &mut state.on_change);
+        (slider, line, filled, rest, knob_fill, ring)
     });
 
-    unstyled::set_slider_on_drag_change(document, slider, move |document, dragging| {
-        document.set_fill_color(knob_fill, knob_fill_color(dragging));
+    with_document(|document| {
+        unstyled::set_slider_on_change(document, slider, move |document, value| {
+            document.set_child_size(line, filled, filled_size(value));
+            document.set_child_size(line, rest, rest_size(value));
+            set_component_detail(document, shadow, detail(value));
+            if let Some(handler) = &mut on_change {
+                handler(document, value);
+            }
+        });
+        unstyled::set_slider_on_drag_change(document, slider, move |document, dragging| {
+            document.set_fill_color(knob_fill, knob_fill_color(dragging));
+        });
+        unstyled::set_slider_on_focus_change(document, slider, move |document, focused| {
+            document.set_outline_visible(ring, focused);
+        });
+
+        set_component_detail(document, shadow, detail(0.0));
     });
 
-    unstyled::set_slider_on_focus_change(document, slider, move |document, focused| {
-        document.set_outline_visible(ring, focused);
+    value.apply(move |value| {
+        with_document(|document| unstyled::set_slider_value(document, slider, value));
     });
 
-    styled
+    slider
 }
 
 pub fn slider_value(document: &Document, slider: NodeId) -> f32 {
     unstyled::slider_value(document, document.shadow_root(slider))
-}
-
-pub fn set_slider_value(document: &mut Document, slider: NodeId, value: f32) {
-    let inner = document.shadow_root(slider);
-    unstyled::set_slider_value(document, inner, value);
-}
-
-pub fn set_slider_on_change(
-    document: &mut Document,
-    slider: NodeId,
-    handler: impl FnMut(&mut Document, f32) + 'static,
-) {
-    document.component_state_mut::<State>(slider).on_change = Some(Box::new(handler));
 }
 
 fn detail(value: f32) -> String {

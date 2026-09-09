@@ -32,7 +32,7 @@ pub use select::{
     set_select_selected,
 };
 pub use shortcut::ShortcutBuilder;
-pub use slider::{set_slider_on_change, set_slider_value, slider, slider_value};
+pub use slider::{slider_value, SliderBuilder};
 pub use switch::{switch_on, SwitchBuilder};
 pub use tabs::{focus_tabs, set_tabs_on_change, set_tabs_selected, tabs, tabs_selected};
 pub use text::{

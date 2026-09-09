@@ -1,9 +1,11 @@
 use super::*;
+use crate::reactive::{view, with_reactive_scope};
+use crate::styled::SliderBuilder;
 
 #[test]
 fn arrow_keys_step_the_focused_slider() {
     let mut document = Document::new();
-    let slider = styled::slider(&mut document, 0.5);
+    let slider = with_reactive_scope(&mut document, || view! { <slider value={0.5} /> });
     toolbar(&mut document, &[slider]);
     let mut harness = Harness::new(document);
 

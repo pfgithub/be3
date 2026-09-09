@@ -10,7 +10,7 @@ use beui::styled::theme::{
 use beui::styled::{
     self, BodyBuilder, ButtonBuilder, ButtonVariant, CaptionBuilder, CardBuilder, CheckboxBuilder,
     DisplayBuilder, HeadingBuilder, ParagraphBuilder, ProgressBuilder, ShortcutBuilder,
-    SwitchBuilder, TitleBuilder, ToggleButtonBuilder,
+    SliderBuilder, SwitchBuilder, TitleBuilder, ToggleButtonBuilder,
 };
 use beui::{unstyled, Color32, Context, Document, ItemSize, NodeId, Rect, TextAlign};
 
@@ -452,12 +452,15 @@ fn build_list_controls(document: &mut Document, scroll: NodeId, rows: &Rc<Rows>)
 
 fn build_load_controls(document: &mut Document) -> NodeId {
     let (progress_value, set_progress_value) = create_signal(0.4f32);
-    let (label, readout, bar) = with_reactive_scope(document, || {
+    let (label, readout, bar, slider) = with_reactive_scope(document, || {
         let readout_value = progress_value.clone();
         (
             view! { <caption content={"Simulated load".to_string()} /> },
             view! { <caption content={create_memo(move || percent_label(readout_value.get()))} /> },
             view! { <progress value={progress_value} /> },
+            view! { <slider value={0.4} on_change={Box::new(move |document: &mut Document, value| {
+                with_reactive_scope(document, || set_progress_value.set(value));
+            })} /> },
         )
     });
     let readout_text_node = document.shadow_root(readout);
@@ -465,11 +468,6 @@ fn build_load_controls(document: &mut Document) -> NodeId {
     let header = unstyled::centered_row(document, 12.0);
     document.append_child(header, label, ItemSize::Intrinsic);
     document.append_child(header, readout, ItemSize::Percent(100.0));
-
-    let slider = styled::slider(document, 0.4);
-    styled::set_slider_on_change(document, slider, move |document, value| {
-        with_reactive_scope(document, || set_progress_value.set(value));
-    });
 
     let column = unstyled::column(document, 12.0);
     document.append_child(column, header, ItemSize::Intrinsic);

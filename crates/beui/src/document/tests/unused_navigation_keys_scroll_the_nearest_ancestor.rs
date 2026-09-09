@@ -1,4 +1,6 @@
 use super::*;
+use crate::reactive::{view, with_reactive_scope};
+use crate::styled::SliderBuilder;
 
 #[test]
 fn unused_navigation_keys_scroll_the_nearest_ancestor() {
@@ -6,7 +8,7 @@ fn unused_navigation_keys_scroll_the_nearest_ancestor() {
     let scroll = document.create_scroll();
     let tabs = styled::tabs(&mut document, &["One", "Two"], 0);
     document.append_scroll_item(scroll, tabs);
-    let slider = styled::slider(&mut document, 0.5);
+    let slider = with_reactive_scope(&mut document, || view! { <slider value={0.5} /> });
     document.append_scroll_item(scroll, slider);
     for _ in 0..20 {
         let text = document.create_text("Content", 14.0, Color32::WHITE);
