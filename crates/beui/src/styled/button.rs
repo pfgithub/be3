@@ -6,7 +6,7 @@ use crate::base::TextAlign;
 use crate::document::Document;
 use crate::node::{ClickHandler, NodeId};
 use crate::reactive::{
-    create_effect, with_document, FillBuilder, OutlineBuilder, PaddingBuilder, Prop,
+    create_effect, with_document, FillBuilder, OutlineBuilder, PaddingBuilder, Prop, TextBuilder,
 };
 use crate::styled::theme::{
     ACCENT, ACCENT_ACTIVE, ACCENT_HOVER, BORDER, BORDER_WIDTH, FONT_BODY, ON_ACCENT, RADIUS,
@@ -57,11 +57,12 @@ pub fn button(
     let active = with_document(|document| unstyled::button_active(document, button));
     let focused = with_document(|document| unstyled::button_focused(document, button));
 
-    let label_node = with_document(|document| {
-        let label_node = document.create_text(String::new(), FONT_BODY, variant.label());
-        document.set_text_align(label_node, TextAlign::Center, TextAlign::Center);
-        label_node
-    });
+    let label_node = TextBuilder::default()
+        .string(label)
+        .font_size(FONT_BODY)
+        .color(variant.label())
+        .align(TextAlign::Center)
+        .build();
 
     let padding = view! {
         <padding horizontal={PADDING_HORIZONTAL} vertical={PADDING_VERTICAL}>
@@ -82,8 +83,6 @@ pub fn button(
         let color = variant.fill(hovered.get(), active.get());
         with_document(|document| document.set_fill_color(fill, color));
     });
-
-    label.apply(move |value| with_document(|document| document.set_text(label_node, value)));
 
     if let Some(on_click) = on_click {
         unstyled::set_button_on_click(button, on_click);

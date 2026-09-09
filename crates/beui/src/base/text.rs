@@ -378,9 +378,39 @@ impl Document {
 }
 
 #[component(base)]
-pub fn text(string: Prop<String>) -> NodeId {
-    let node =
-        with_document(|document| document.create_text(String::new(), 14.0, crate::Color32::WHITE));
+pub fn text(
+    string: Prop<String>,
+    font_size: Option<f32>,
+    color: Option<Color32>,
+    align: Option<TextAlign>,
+    wrap: Option<bool>,
+    monospace: Option<bool>,
+    icon: Option<bool>,
+    clip: Option<bool>,
+) -> NodeId {
+    let node = with_document(|document| {
+        let node = document.create_text(
+            String::new(),
+            font_size.unwrap_or(14.0),
+            color.unwrap_or(crate::Color32::WHITE),
+        );
+        if let Some(align) = align {
+            document.set_text_align(node, align, TextAlign::Center);
+        }
+        if wrap.unwrap_or(false) {
+            document.set_text_wrap(node, true);
+        }
+        if monospace.unwrap_or(false) {
+            document.set_text_monospace(node, true);
+        }
+        if icon.unwrap_or(false) {
+            document.set_text_icon(node, true);
+        }
+        if clip.unwrap_or(false) {
+            document.set_text_clip(node, true);
+        }
+        node
+    });
     string.apply(move |value| with_document(|document| document.set_text(node, value)));
     node
 }

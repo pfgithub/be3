@@ -6,6 +6,7 @@ use crate::document::Document;
 use crate::node::{Handler, NodeId};
 use crate::reactive::{
     create_effect, with_document, FillBuilder, OutlineBuilder, PaddingBuilder, Prop, SizedBuilder,
+    TextBuilder,
 };
 use crate::styled::theme::{
     ACCENT_SOFT, BORDER, BORDER_WIDTH, FONT_BODY, RADIUS, SURFACE_RAISED, TEXT, TEXT_MUTED,
@@ -69,8 +70,12 @@ fn style_menu_rows(document: &mut Document, menu: NodeId, items: &[MenuItem]) {
     for (index, item) in items.iter().enumerate() {
         let button = unstyled::menu_list_row_button(document, menu, index);
         let color = if item.disabled { TEXT_MUTED } else { TEXT };
-        let label = document.create_text(item.label.clone(), FONT_BODY, color);
-        document.set_text_align(label, TextAlign::Start, TextAlign::Center);
+        let label = TextBuilder::default()
+            .string(item.label.clone())
+            .font_size(FONT_BODY)
+            .color(color)
+            .align(TextAlign::Start)
+            .build();
 
         let padding = view! {
             <padding horizontal={PADDING_HORIZONTAL} vertical={PADDING_VERTICAL}>{label}</padding>

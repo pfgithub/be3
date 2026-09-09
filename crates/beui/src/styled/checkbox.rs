@@ -1,16 +1,17 @@
 use beui_macros::{component, view};
 
+use crate::base::TextAlign;
 use crate::color::Color32;
 
 use crate::document::Document;
 use crate::node::{Handler, NodeId};
 use crate::reactive::{
     current_component, set_component_detail, with_document, CenteredRowBuilder, FillBuilder,
-    OutlineBuilder, Prop, SizedBuilder, VisibilityBuilder,
+    OutlineBuilder, Prop, SizedBuilder, TextBuilder, VisibilityBuilder,
 };
-use crate::styled::text::body_line;
 use crate::styled::theme::{
-    ACCENT, ACCENT_HOVER, BORDER, BORDER_WIDTH, CHIP_RADIUS, ON_ACCENT, RADIUS, SURFACE_RAISED,
+    ACCENT, ACCENT_HOVER, BORDER, BORDER_WIDTH, CHIP_RADIUS, FONT_BODY, ON_ACCENT, RADIUS,
+    SURFACE_RAISED, TEXT,
 };
 use crate::unstyled;
 
@@ -55,7 +56,12 @@ pub fn checkbox(
     };
     let boxed = view! { <sized width={BOX_SIZE} height={BOX_SIZE}>{border}</sized> };
 
-    let label_node = with_document(|document| body_line(document, String::new()));
+    let label_node = TextBuilder::default()
+        .string(label)
+        .font_size(FONT_BODY)
+        .color(TEXT)
+        .align(TextAlign::Start)
+        .build();
     let line = view! {
         <centered_row spacing={SPACING}>
             {boxed}
@@ -68,10 +74,6 @@ pub fn checkbox(
         </outline>
     };
     with_document(|document| unstyled::set_toggle_child(document, toggle, ring));
-
-    label.apply(move |value| {
-        with_document(|document| document.set_text(label_node, value));
-    });
 
     with_document(|document| {
         unstyled::set_toggle_on_change(document, toggle, move |document, checked| {

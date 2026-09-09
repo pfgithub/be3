@@ -4,6 +4,7 @@ use crate::base::TextAlign;
 use crate::node::NodeId;
 use crate::reactive::{
     current_component, set_component_detail, with_document, FillBuilder, PaddingBuilder, Prop,
+    TextBuilder,
 };
 use crate::styled::theme::{CHIP_RADIUS, FONT_SMALL, SURFACE_RAISED, TEXT};
 use crate::styled::BorderedBuilder;
@@ -15,11 +16,11 @@ const PADDING_VERTICAL: f32 = 3.0;
 pub fn chip(label: Prop<String>) -> NodeId {
     let shadow = current_component();
 
-    let label_node = with_document(|document| {
-        let label_node = document.create_text(String::new(), FONT_SMALL, TEXT);
-        document.set_text_align(label_node, TextAlign::Center, TextAlign::Center);
-        label_node
-    });
+    let label_node = TextBuilder::default()
+        .font_size(FONT_SMALL)
+        .color(TEXT)
+        .align(TextAlign::Center)
+        .build();
 
     let frame = view! {
         <bordered corner_radius={CHIP_RADIUS}>

@@ -6,6 +6,7 @@ use crate::document::Document;
 use crate::node::{Handler, NodeId};
 use crate::reactive::{
     create_effect, with_document, FillBuilder, OutlineBuilder, PaddingBuilder, Prop, SizedBuilder,
+    TextBuilder,
 };
 use crate::styled::theme::{
     ACCENT, ACCENT_SOFT, BORDER, BORDER_WIDTH, FONT_BODY, RADIUS, SURFACE, SURFACE_RAISED, TEXT,
@@ -34,9 +35,13 @@ pub fn select(
         let inner = unstyled::select(document, &options, None);
         let trigger = unstyled::select_trigger(document, inner);
 
-        let label = document.create_text(trigger_label(&options, None), FONT_BODY, TEXT);
-        document.set_text_align(label, TextAlign::Start, TextAlign::Center);
-        document.set_text_clip(label, true);
+        let label = TextBuilder::default()
+            .string(trigger_label(&options, None))
+            .font_size(FONT_BODY)
+            .color(TEXT)
+            .align(TextAlign::Start)
+            .clip(true)
+            .build();
 
         let fill = view! {
             <fill color={SURFACE_RAISED} radius={RADIUS}>

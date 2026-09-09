@@ -5,33 +5,10 @@ use beui_macros::component;
 use crate::base::TextAlign;
 use crate::document::Document;
 use crate::node::NodeId;
-use crate::reactive::{current_component, set_component_detail, with_document, Prop};
+use crate::reactive::{current_component, set_component_detail, with_document, Prop, TextBuilder};
 use crate::styled::theme::{
     FONT_BODY, FONT_DISPLAY, FONT_HEADING, FONT_SMALL, FONT_TITLE, ICON_SIZE, TEXT, TEXT_MUTED,
 };
-
-pub(crate) fn heading_line(document: &mut Document, content: impl Into<String>) -> NodeId {
-    line(document, content, FONT_HEADING, TEXT)
-}
-
-pub(crate) fn body_line(document: &mut Document, content: impl Into<String>) -> NodeId {
-    line(document, content, FONT_BODY, TEXT)
-}
-
-pub(crate) fn caption_line(document: &mut Document, content: impl Into<String>) -> NodeId {
-    line(document, content, FONT_SMALL, TEXT_MUTED)
-}
-
-fn line(
-    document: &mut Document,
-    content: impl Into<String>,
-    font_size: f32,
-    color: Color32,
-) -> NodeId {
-    let line = document.create_text(content, font_size, color);
-    document.set_text_align(line, TextAlign::Start, TextAlign::Center);
-    line
-}
 
 pub fn code(document: &mut Document, content: impl Into<String>) -> NodeId {
     let code = document.create_text(content, FONT_SMALL, TEXT);
@@ -57,11 +34,12 @@ fn reactive_line(
     color: Color32,
     align: Option<TextAlign>,
 ) -> NodeId {
-    let node = with_document(|document| line(document, String::new(), font_size, color));
-    if let Some(align) = align {
-        with_document(|document| document.set_text_align(node, align, TextAlign::Center));
-    }
     let shadow = current_component();
+    let node = TextBuilder::default()
+        .font_size(font_size)
+        .color(color)
+        .align(align.unwrap_or(TextAlign::Start))
+        .build();
     content.apply(move |value| {
         with_document(|document| {
             set_component_detail(document, shadow, format!("{value:?}"));
@@ -98,12 +76,12 @@ pub fn caption(content: Prop<String>, align: Option<TextAlign>) -> NodeId {
 
 #[component]
 pub fn paragraph(content: Prop<String>) -> NodeId {
-    let node = with_document(|document| {
-        let node = document.create_text(String::new(), FONT_BODY, TEXT_MUTED);
-        document.set_text_wrap(node, true);
-        node
-    });
     let shadow = current_component();
+    let node = TextBuilder::default()
+        .font_size(FONT_BODY)
+        .color(TEXT_MUTED)
+        .wrap(true)
+        .build();
     content.apply(move |value| {
         with_document(|document| {
             set_component_detail(document, shadow, format!("{value:?}"));

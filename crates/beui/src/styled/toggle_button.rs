@@ -4,7 +4,7 @@ use crate::document::Document;
 use crate::node::{Handler, NodeId};
 use crate::reactive::{
     current_component, set_component_detail, with_document, FillBuilder, OutlineBuilder,
-    PaddingBuilder, Prop,
+    PaddingBuilder, Prop, TextBuilder,
 };
 use crate::styled::theme::{
     ACCENT, ACCENT_SOFT, BORDER, FONT_BODY, RADIUS, SURFACE, SURFACE_RAISED, TEXT,
@@ -21,7 +21,10 @@ pub fn toggle_button(
     let mut on_change = on_change;
 
     let toggle = unstyled::ToggleBuilder::default().checked(false).build();
-    let text = with_document(|document| document.create_text(String::new(), FONT_BODY, TEXT));
+    let text = TextBuilder::default()
+        .font_size(FONT_BODY)
+        .color(TEXT)
+        .build();
     let padding = view! { <padding horizontal={14.0} vertical={8.0}>{text}</padding> };
     let fill = view! { <fill color={SURFACE} radius={RADIUS}>{padding}</fill> };
     let border = view! {

@@ -7,10 +7,11 @@ use crate::document::Document;
 use crate::node::{Handler, NodeId};
 use crate::reactive::{
     create_effect, current_component, set_component_detail, with_document, CenteredRowBuilder,
-    Children, FillBuilder, OutlineBuilder, PaddingBuilder, Prop, SizedBuilder,
+    Children, FillBuilder, OutlineBuilder, PaddingBuilder, Prop, SizedBuilder, TextBuilder,
 };
-use crate::styled::text::{code, heading_line};
-use crate::styled::theme::{ACCENT, RADIUS, SURFACE_RAISED, TEXT_MUTED};
+use crate::styled::theme::{
+    ACCENT, FONT_HEADING, FONT_SMALL, RADIUS, SURFACE_RAISED, TEXT, TEXT_MUTED,
+};
 use crate::unstyled;
 
 const SPACING: f32 = 10.0;
@@ -35,15 +36,20 @@ pub fn accordion(
     let hovered = with_document(|document| unstyled::disclosure_hovered(document, disclosure));
     let focused = with_document(|document| unstyled::disclosure_focused(document, disclosure));
 
-    let marker = with_document(|document| {
-        let marker = code(document, glyph(false));
-        document.set_text_color(marker, TEXT_MUTED);
-        document.set_text_align(marker, TextAlign::Center, TextAlign::Center);
-        marker
-    });
+    let marker = TextBuilder::default()
+        .string(glyph(false).to_owned())
+        .font_size(FONT_SMALL)
+        .color(TEXT_MUTED)
+        .monospace(true)
+        .align(TextAlign::Center)
+        .build();
     let marker_box = view! { <sized width={MARKER_WIDTH}>{marker}</sized> };
 
-    let title_node = with_document(|document| heading_line(document, String::new()));
+    let title_node = TextBuilder::default()
+        .font_size(FONT_HEADING)
+        .color(TEXT)
+        .align(TextAlign::Start)
+        .build();
 
     let line = view! {
         <centered_row spacing={SPACING}>
