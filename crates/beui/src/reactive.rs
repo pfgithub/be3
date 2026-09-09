@@ -158,6 +158,13 @@ pub enum Prop<T> {
 }
 
 impl<T: 'static> Prop<T> {
+    pub fn get(self) -> T {
+        match self {
+            Prop::Static(value) => value,
+            Prop::Dynamic(read) => read(),
+        }
+    }
+
     pub fn apply(self, mut set: impl FnMut(T) + 'static) {
         match self {
             Prop::Static(value) => set(value),
@@ -203,27 +210,35 @@ impl<T: Clone + PartialEq + 'static> IntoProp<T> for Memo<T> {
     }
 }
 
-pub fn intrinsic(node: NodeId) -> (NodeId, ItemSize) {
-    (node, ItemSize::Intrinsic)
+pub fn intrinsic(node: NodeId) -> (NodeId, Prop<ItemSize>) {
+    (node, Prop::Static(ItemSize::Intrinsic))
 }
 
-pub fn fixed(node: NodeId, size: f32) -> (NodeId, ItemSize) {
-    (node, ItemSize::Fixed(size))
+pub fn fixed(node: NodeId, size: impl IntoProp<f32>) -> (NodeId, Prop<ItemSize>) {
+    (node, size.into_prop().map(ItemSize::Fixed))
 }
 
-pub fn percent(node: NodeId, weight: f32) -> (NodeId, ItemSize) {
-    (node, ItemSize::Percent(weight))
+pub fn percent(node: NodeId, weight: impl IntoProp<f32>) -> (NodeId, Prop<ItemSize>) {
+    (node, weight.into_prop().map(ItemSize::Percent))
 }
 
-pub struct Children(Vec<(NodeId, ItemSize)>);
+pub struct Children(Vec<(NodeId, Prop<ItemSize>)>);
 
 impl Children {
     fn mount(self, parent: NodeId) {
-        with_document(|document| {
-            for (child, size) in self.0 {
-                document.append_child(parent, child, size);
-            }
-        });
+        for (child, size) in self.0 {
+            let mut appended = false;
+            size.apply(move |size| {
+                with_document(|document| {
+                    if appended {
+                        document.set_child_size(parent, child, size);
+                    } else {
+                        document.append_child(parent, child, size);
+                        appended = true;
+                    }
+                });
+            });
+        }
     }
 
     pub(crate) fn into_first(self) -> Option<NodeId> {
@@ -231,7 +246,7 @@ impl Children {
     }
 }
 
-impl<I: IntoIterator<Item = (NodeId, ItemSize)>> From<I> for Children {
+impl<I: IntoIterator<Item = (NodeId, Prop<ItemSize>)>> From<I> for Children {
     fn from(children: I) -> Self {
         Children(children.into_iter().collect())
     }
@@ -288,7 +303,7 @@ pub fn show(condition: Prop<bool>, then: Option<Box<dyn FnOnce() -> NodeId>>) ->
     visibility
 }
 
-type ForEachView<T> = Box<dyn Fn(&T) -> (NodeId, ItemSize)>;
+type ForEachView<T> = Box<dyn Fn(&T) -> (NodeId, Prop<ItemSize>)>;
 
 #[component]
 pub fn for_each<T, K>(
@@ -310,7 +325,10 @@ where
         let mut existing = existing.borrow_mut();
         let mut next = Vec::with_capacity(items.len());
         for item in &items {
-            let entry = existing.remove(&key(item)).unwrap_or_else(|| view(item));
+            let entry = existing.remove(&key(item)).unwrap_or_else(|| {
+                let (node, size) = view(item);
+                (node, size.get())
+            });
             next.push((key(item), entry));
         }
         with_document(|document| {

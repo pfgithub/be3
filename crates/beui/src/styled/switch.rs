@@ -2,7 +2,6 @@ use beui_macros::{component, view};
 
 use crate::color::Color32;
 
-use crate::base::ItemSize;
 use crate::document::Document;
 use crate::node::{Handler, NodeId};
 use crate::reactive::{
@@ -36,42 +35,41 @@ pub fn switch(on: Prop<bool>, on_change: Option<Handler<bool>>) -> NodeId {
         )
     });
 
-    let before = view! { <spacer /> };
-    let after = view! { <spacer /> };
-    let line = view! {
-        <centered_row spacing={0.0}>
-            @percent(0.0) {before}
-            <sized width={KNOB_SIZE} height={KNOB_SIZE}>
-                <fill color={KNOB} radius={KNOB_RADIUS}></fill>
-            </sized>
-            @percent(100.0) {after}
-        </centered_row>
+    let before_percent = {
+        let checked = checked.clone();
+        Prop::Dynamic(Box::new(move || before_size(checked.get())))
     };
-
+    let after_percent = {
+        let checked = checked.clone();
+        Prop::Dynamic(Box::new(move || after_size(checked.get())))
+    };
     let track_color = {
         let checked = checked.clone();
-        let hovered = hovered.clone();
         Prop::Dynamic(Box::new(move || track_fill(checked.get(), hovered.get())))
     };
-    let track = view! {
-        <fill color={track_color} radius={TRACK_RADIUS}>
-            <padding horizontal={PADDING} vertical={PADDING}>{line}</padding>
-        </fill>
-    };
+
     let ring = view! {
         <outline color={ACCENT} width={FOCUS_RING_WIDTH} radius={RADIUS} offset={FOCUS_RING_OFFSET} visible={focused}>
-            <sized width={WIDTH} height={HEIGHT}>{track}</sized>
+            <sized width={WIDTH} height={HEIGHT}>
+                <fill color={track_color} radius={TRACK_RADIUS}>
+                    <padding horizontal={PADDING} vertical={PADDING}>
+                        <centered_row spacing={0.0}>
+                            @percent(before_percent) <spacer />
+                            <sized width={KNOB_SIZE} height={KNOB_SIZE}>
+                                <fill color={KNOB} radius={KNOB_RADIUS}></fill>
+                            </sized>
+                            @percent(after_percent) <spacer />
+                        </centered_row>
+                    </padding>
+                </fill>
+            </sized>
         </outline>
     };
     with_document(|document| unstyled::set_toggle_child(document, toggle, ring));
 
     create_effect(move || {
         let on = checked.get();
-        with_document(|document| {
-            document.set_child_size(line, before, before_size(on));
-            document.set_child_size(line, after, after_size(on));
-            set_component_detail(document, shadow, detail(on));
-        });
+        with_document(|document| set_component_detail(document, shadow, detail(on)));
     });
 
     with_document(|document| {
@@ -101,12 +99,20 @@ fn detail(on: bool) -> &'static str {
     }
 }
 
-fn before_size(on: bool) -> ItemSize {
-    ItemSize::Percent(if on { 100.0 } else { 0.0 })
+fn before_size(on: bool) -> f32 {
+    if on {
+        100.0
+    } else {
+        0.0
+    }
 }
 
-fn after_size(on: bool) -> ItemSize {
-    ItemSize::Percent(if on { 0.0 } else { 100.0 })
+fn after_size(on: bool) -> f32 {
+    if on {
+        0.0
+    } else {
+        100.0
+    }
 }
 
 fn track_fill(on: bool, hovered: bool) -> Color32 {

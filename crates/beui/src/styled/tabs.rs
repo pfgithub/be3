@@ -15,18 +15,10 @@ pub fn tabs(
     let mut on_change = on_change;
     let option_count = labels.len();
     let label_refs: Vec<&str> = labels.iter().map(String::as_str).collect();
-    let tabs = with_document(|document| {
-        choice::choice(
-            document,
-            &label_refs,
-            None,
-            Kind::Tabs,
-            move |document, selected| {
-                if let (Some(selected), Some(handler)) = (selected, &mut on_change) {
-                    handler(document, selected);
-                }
-            },
-        )
+    let tabs = choice::choice(&label_refs, None, Kind::Tabs, move |document, selected| {
+        if let (Some(selected), Some(handler)) = (selected, &mut on_change) {
+            handler(document, selected);
+        }
     });
 
     selected.apply(move |selected| {
@@ -41,6 +33,6 @@ pub fn tabs_selected(document: &Document, tabs: NodeId) -> usize {
     choice::selected_index(document, tabs).unwrap_or(0)
 }
 
-pub fn focus_tabs(document: &mut Document, tabs: NodeId) {
-    choice::focus(document, tabs);
+pub fn focus_tabs(tabs: NodeId) {
+    choice::focus(tabs);
 }

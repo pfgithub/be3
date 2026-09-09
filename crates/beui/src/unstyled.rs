@@ -24,8 +24,9 @@ pub use context_menu::{
     set_context_menu_on_select,
 };
 pub use disclosure::{
-    disclosure, disclosure_focused, disclosure_hovered, disclosure_open, focus_disclosure,
-    set_disclosure_content, set_disclosure_header, set_disclosure_on_toggle, set_disclosure_open,
+    disclosure, disclosure_focused, disclosure_hovered, disclosure_open, disclosure_open_signal,
+    focus_disclosure, set_disclosure_content, set_disclosure_header, set_disclosure_on_toggle,
+    set_disclosure_open,
 };
 pub use layout::{centered_row, column, row};
 pub use menu::{

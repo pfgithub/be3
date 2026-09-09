@@ -28,9 +28,14 @@ pub fn text_input(
     let input = unstyled::TextInputBuilder::default()
         .value(String::new())
         .build();
-    let field = with_document(|document| unstyled::text_input_field(document, input));
-
-    let text = with_document(|document| unstyled::text_input_text(document, input));
+    let (field, text, hovered, focused) = with_document(|document| {
+        (
+            unstyled::text_input_field(document, input),
+            unstyled::text_input_text(document, input),
+            unstyled::text_input_hovered(document, input),
+            unstyled::text_input_focused(document, input),
+        )
+    });
     with_document(|document| {
         document.set_text_font_size(text, FONT_BODY);
         document.set_text_color(text, TEXT);
@@ -41,15 +46,18 @@ pub fn text_input(
     unstyled::set_text_input_caret_color(input, ACCENT);
     unstyled::set_text_input_padding(input, PADDING_HORIZONTAL, 0.0);
 
-    let border = view! {
-        <outline color={BORDER} width={BORDER_WIDTH} radius={RADIUS} offset={0.0} visible={true}>
-            <fill color={SURFACE_RAISED} radius={RADIUS}>{field}</fill>
-        </outline>
+    let border_color = {
+        let focused = focused.clone();
+        Prop::Dynamic(Box::new(move || border_color(focused.get(), hovered.get())))
     };
 
     let ring = view! {
-        <outline color={ACCENT} width={FOCUS_RING_WIDTH} radius={RADIUS} offset={FOCUS_RING_OFFSET}>
-            <sized height={HEIGHT}>{border}</sized>
+        <outline color={ACCENT} width={FOCUS_RING_WIDTH} radius={RADIUS} offset={FOCUS_RING_OFFSET} visible={focused}>
+            <sized height={HEIGHT}>
+                <outline color={border_color} width={BORDER_WIDTH} radius={RADIUS} offset={0.0} visible={true}>
+                    <fill color={SURFACE_RAISED} radius={RADIUS}>{field}</fill>
+                </outline>
+            </sized>
         </outline>
     };
     unstyled::set_text_input_child(input, ring);
@@ -63,15 +71,6 @@ pub fn text_input(
         if let Some(handler) = &mut on_submit {
             handler(document, value);
         }
-    });
-    unstyled::set_text_input_on_hover_change(input, move |document, hovered| {
-        let focused = unstyled::text_input_focused(document, input).get();
-        document.set_outline_color(border, border_color(focused, hovered));
-    });
-    unstyled::set_text_input_on_focus_change(input, move |document, focused| {
-        let hovered = unstyled::text_input_hovered(document, input).get();
-        document.set_outline_color(border, border_color(focused, hovered));
-        document.set_outline_visible(ring, focused);
     });
 
     placeholder.apply(move |placeholder| {

@@ -14,19 +14,16 @@ pub fn listbox(
 ) -> NodeId {
     let mut on_change = on_change;
     let label_refs: Vec<&str> = labels.iter().map(String::as_str).collect();
-    let control = with_document(|document| {
-        choice::choice(
-            document,
-            &label_refs,
-            None,
-            Kind::Listbox,
-            move |document, selected| {
-                if let Some(handler) = &mut on_change {
-                    handler(document, selected);
-                }
-            },
-        )
-    });
+    let control = choice::choice(
+        &label_refs,
+        None,
+        Kind::Listbox,
+        move |document, selected| {
+            if let Some(handler) = &mut on_change {
+                handler(document, selected);
+            }
+        },
+    );
 
     selected.apply(move |selected| {
         with_document(|document| unstyled::set_choice_selected(document, control, selected));
@@ -39,6 +36,6 @@ pub fn listbox_selected(document: &Document, control: NodeId) -> Option<usize> {
     choice::selected_index(document, control)
 }
 
-pub fn focus_listbox(document: &mut Document, control: NodeId) {
-    choice::focus(document, control);
+pub fn focus_listbox(control: NodeId) {
+    choice::focus(control);
 }

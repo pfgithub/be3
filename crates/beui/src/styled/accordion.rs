@@ -6,8 +6,9 @@ use crate::base::TextAlign;
 use crate::document::Document;
 use crate::node::{Handler, NodeId};
 use crate::reactive::{
-    current_component, set_component_detail, with_document, CenteredRowBuilder, Children,
-    FillBuilder, OutlineBuilder, PaddingBuilder, Prop, SizedBuilder, TextBuilder,
+    create_effect, create_signal, current_component, set_component_detail, with_document,
+    CenteredRowBuilder, Children, FillBuilder, OutlineBuilder, PaddingBuilder, Prop, SizedBuilder,
+    TextBuilder,
 };
 use crate::styled::theme::{
     ACCENT, FONT_HEADING, FONT_SMALL, RADIUS, SURFACE_RAISED, TEXT, TEXT_MUTED,
@@ -33,49 +34,51 @@ pub fn accordion(
     let mut on_toggle = on_toggle;
 
     let disclosure = unstyled::disclosure(SPACING, false);
-    let hovered = with_document(|document| unstyled::disclosure_hovered(document, disclosure));
-    let focused = with_document(|document| unstyled::disclosure_focused(document, disclosure));
-
-    let marker = view! {
-        <text
-            string={glyph(false).to_owned()}
-            font_size={FONT_SMALL}
-            color={TEXT_MUTED}
-            monospace={true}
-            align={TextAlign::Center}
-        />
-    };
-    let title_node =
-        view! { <text font_size={FONT_HEADING} color={TEXT} align={TextAlign::Start} /> };
+    let (hovered, focused, disclosure_open) = with_document(|document| {
+        (
+            unstyled::disclosure_hovered(document, disclosure),
+            unstyled::disclosure_focused(document, disclosure),
+            unstyled::disclosure_open_signal(document, disclosure),
+        )
+    });
 
     let header_color = Prop::Dynamic(Box::new(move || header_fill(hovered.get())));
-    let header = view! {
-        <fill color={header_color} radius={RADIUS}>
-            <padding horizontal={PADDING_HORIZONTAL} vertical={PADDING_VERTICAL}>
-                <centered_row spacing={SPACING}>
-                    <sized width={MARKER_WIDTH}>{marker}</sized>
-                    @percent(100.0) {title_node}
-                </centered_row>
-            </padding>
-        </fill>
-    };
+    let marker_glyph = Prop::Dynamic(Box::new(move || glyph(disclosure_open.get()).to_owned()));
+
+    let (title_text, set_title_text) = create_signal(String::new());
+    title.apply(move |value| set_title_text.set(value));
+    create_effect({
+        let title_text = title_text.clone();
+        move || {
+            let value = title_text.get();
+            with_document(|document| set_component_detail(document, shadow, value));
+        }
+    });
+
     let ring = view! {
         <outline color={ACCENT} width={2.0} radius={RADIUS} offset={2.0} visible={focused}>
-            {header}
+            <fill color={header_color} radius={RADIUS}>
+                <padding horizontal={PADDING_HORIZONTAL} vertical={PADDING_VERTICAL}>
+                    <centered_row spacing={SPACING}>
+                        <sized width={MARKER_WIDTH}>
+                            <text
+                                string={marker_glyph}
+                                font_size={FONT_SMALL}
+                                color={TEXT_MUTED}
+                                monospace={true}
+                                align={TextAlign::Center}
+                            />
+                        </sized>
+                        @percent(100.0) <text string={title_text} font_size={FONT_HEADING} color={TEXT} align={TextAlign::Start} />
+                    </centered_row>
+                </padding>
+            </fill>
         </outline>
     };
     unstyled::set_disclosure_header(disclosure, ring);
     unstyled::set_disclosure_content(disclosure, child);
 
-    title.apply(move |value| {
-        with_document(|document| {
-            document.set_text(title_node, value.clone());
-            set_component_detail(document, shadow, value);
-        });
-    });
-
     unstyled::set_disclosure_on_toggle(disclosure, move |document, open| {
-        document.set_text(marker, glyph(open));
         if let Some(handler) = &mut on_toggle {
             handler(document, open);
         }

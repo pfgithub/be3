@@ -37,31 +37,23 @@ pub fn toggle_button(
         let hovered = toggle_hovered;
         Prop::Dynamic(Box::new(move || fill_for(checked.get(), hovered.get())))
     };
-    let border_color = {
-        let checked = toggle_checked.clone();
-        Prop::Dynamic(Box::new(
-            move || {
-                if checked.get() {
-                    ACCENT
-                } else {
-                    BORDER
-                }
-            },
-        ))
-    };
-    let fill = view! {
-        <fill color={fill_color} radius={RADIUS}>
-            <padding horizontal={14.0} vertical={8.0}>{text}</padding>
-        </fill>
-    };
-    let border = view! {
-        <outline color={border_color} width={1.0} radius={RADIUS} offset={0.0} visible={true}>
-            {fill}
-        </outline>
-    };
+    let border_color = Prop::Dynamic(Box::new(
+        move || {
+            if toggle_checked.get() {
+                ACCENT
+            } else {
+                BORDER
+            }
+        },
+    ));
+
     let ring = view! {
         <outline color={ACCENT} width={2.0} radius={RADIUS} offset={3.0} visible={toggle_focused}>
-            {border}
+            <outline color={border_color} width={1.0} radius={RADIUS} offset={0.0} visible={true}>
+                <fill color={fill_color} radius={RADIUS}>
+                    <padding horizontal={14.0} vertical={8.0}>{text}</padding>
+                </fill>
+            </outline>
         </outline>
     };
     with_document(|document| unstyled::set_toggle_child(document, toggle, ring));

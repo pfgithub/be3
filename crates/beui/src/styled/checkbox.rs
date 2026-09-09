@@ -41,52 +41,47 @@ pub fn checkbox(
         )
     });
 
-    let mark_visibility = view! {
-        <visibility visible={toggle_checked.clone()}>
-            <sized width={MARK_SIZE} height={MARK_SIZE}>
-                <fill color={ON_ACCENT} radius={MARK_RADIUS}></fill>
-            </sized>
-        </visibility>
-    };
-
     let fill_color = {
         let checked = toggle_checked.clone();
-        let hovered = toggle_hovered.clone();
+        let hovered = toggle_hovered;
         Prop::Dynamic(Box::new(move || box_fill(checked.get(), hovered.get())))
-    };
-    let fill = view! {
-        <fill color={fill_color} radius={CHIP_RADIUS}>
-            <centered_row spacing={0.0}>
-                @percent(100.0) <spacer />
-                {mark_visibility}
-                @percent(100.0) <spacer />
-            </centered_row>
-        </fill>
     };
     let border_visible = {
         let checked = toggle_checked.clone();
         Prop::Dynamic(Box::new(move || !checked.get()))
     };
-    let border = view! {
-        <outline color={BORDER} width={BORDER_WIDTH} radius={CHIP_RADIUS} offset={0.0} visible={border_visible}>
-            {fill}
-        </outline>
-    };
+
+    create_effect({
+        let toggle_checked = toggle_checked.clone();
+        move || {
+            let checked = toggle_checked.get();
+            with_document(|document| set_component_detail(document, shadow, detail(checked)));
+        }
+    });
 
     let ring = view! {
         <outline color={ACCENT} width={FOCUS_RING_WIDTH} radius={RADIUS} offset={FOCUS_RING_OFFSET} visible={toggle_focused}>
             <centered_row spacing={SPACING}>
-                <sized width={BOX_SIZE} height={BOX_SIZE}>{border}</sized>
+                <sized width={BOX_SIZE} height={BOX_SIZE}>
+                    <outline color={BORDER} width={BORDER_WIDTH} radius={CHIP_RADIUS} offset={0.0} visible={border_visible}>
+                        <fill color={fill_color} radius={CHIP_RADIUS}>
+                            <centered_row spacing={0.0}>
+                                @percent(100.0) <spacer />
+                                <visibility visible={toggle_checked}>
+                                    <sized width={MARK_SIZE} height={MARK_SIZE}>
+                                        <fill color={ON_ACCENT} radius={MARK_RADIUS}></fill>
+                                    </sized>
+                                </visibility>
+                                @percent(100.0) <spacer />
+                            </centered_row>
+                        </fill>
+                    </outline>
+                </sized>
                 @percent(100.0) <text string={label} font_size={FONT_BODY} color={TEXT} align={TextAlign::Start} />
             </centered_row>
         </outline>
     };
     with_document(|document| unstyled::set_toggle_child(document, toggle, ring));
-
-    create_effect(move || {
-        let checked = toggle_checked.get();
-        with_document(|document| set_component_detail(document, shadow, detail(checked)));
-    });
 
     with_document(|document| {
         unstyled::set_toggle_on_change(document, toggle, move |document, checked| {
