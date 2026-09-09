@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn clicking_an_accordion_header_hides_its_content() {
     let mut document = Document::new();
-    let body = styled::body(&mut document, "beui keeps a retained tree of nodes.");
+    let body = document.create_text("beui keeps a retained tree of nodes.", 14.0, Color32::WHITE);
     let accordion = styled::accordion(&mut document, "About", body, true);
     toolbar(&mut document, &[accordion]);
     let mut harness = Harness::new(document);

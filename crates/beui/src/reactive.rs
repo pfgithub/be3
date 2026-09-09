@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::hash::Hash;
 use std::rc::Rc;
 
-use reactive::{create_effect, ReadSignal};
+use reactive::create_effect;
 
 use crate::base::ItemSize;
 use crate::document::Document;
@@ -11,7 +11,9 @@ use crate::node::{ClickHandler, NodeId};
 use crate::unstyled;
 
 pub use beui_macros::{component, view};
-pub use reactive::{batch, create_memo, create_signal, on_cleanup, untrack, Memo, Scope};
+pub use reactive::{
+    batch, create_memo, create_signal, on_cleanup, untrack, Memo, ReadSignal, Scope, WriteSignal,
+};
 
 thread_local! {
     static CURRENT_DOCUMENT: RefCell<Option<Document>> = const { RefCell::new(None) };
@@ -45,6 +47,10 @@ pub(crate) fn enter<R>(document: &mut Document, f: impl FnOnce() -> R) -> R {
     let context = document.reactive_scope().context();
     let _guard = install(document);
     context.run(f)
+}
+
+pub fn with_reactive_scope<R>(document: &mut Document, f: impl FnOnce() -> R) -> R {
+    enter(document, f)
 }
 
 pub fn with_document<R>(f: impl FnOnce(&mut Document) -> R) -> R {
@@ -150,7 +156,7 @@ impl Children {
         });
     }
 
-    fn into_first(self) -> Option<NodeId> {
+    pub(crate) fn into_first(self) -> Option<NodeId> {
         self.0.into_iter().next().map(|(child, _)| child)
     }
 }

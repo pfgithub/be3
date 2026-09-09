@@ -12,6 +12,7 @@ use crate::input::{CursorIcon, Event, Key as InputKey};
 
 use crate::document::Document;
 use crate::node::NodeId;
+use crate::reactive::{with_reactive_scope, WriteSignal};
 use crate::styled::theme::ACCENT;
 
 use panel::{Panel, Summary};
@@ -88,7 +89,7 @@ pub(crate) struct Inspector {
     pub(crate) rows: Vec<Row>,
     pub(crate) state: Rc<State>,
     scroll: NodeId,
-    count: NodeId,
+    set_count: WriteSignal<String>,
     toggle: NodeId,
     toggle_label: NodeId,
     selection: NodeId,
@@ -117,7 +118,7 @@ impl Inspector {
             rows: panel.rows,
             state,
             scroll: panel.scroll,
-            count: panel.count,
+            set_count: panel.set_count,
             toggle: panel.toggle,
             toggle_label: panel.toggle_label,
             selection: panel.selection,
@@ -219,7 +220,7 @@ impl Inspector {
     fn adopt(&mut self, panel: Panel) {
         self.document = panel.document;
         self.scroll = panel.scroll;
-        self.count = panel.count;
+        self.set_count = panel.set_count;
         self.toggle = panel.toggle;
         self.toggle_label = panel.toggle_label;
         self.selection = panel.selection;
@@ -255,8 +256,9 @@ impl Inspector {
 
     fn apply(&mut self, summary: Summary) {
         if summary.total != self.summary.total {
-            self.document
-                .set_text(self.count, panel::total_label(summary.total));
+            let set_count = self.set_count.clone();
+            let text = panel::total_label(summary.total);
+            with_reactive_scope(&mut self.document, move || set_count.set(text));
         }
         if summary.picking != self.summary.picking {
             self.document

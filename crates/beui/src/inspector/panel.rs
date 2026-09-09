@@ -6,7 +6,9 @@ use crate::input::CursorIcon;
 use crate::base::{ItemSize, TextAlign};
 use crate::document::Document;
 use crate::node::NodeId;
+use crate::reactive::{create_signal, view, with_reactive_scope, WriteSignal};
 use crate::styled;
+use crate::styled::reactive::{CaptionBuilder, HeadingBuilder};
 use crate::styled::theme::{
     ACCENT, BORDER_WIDTH, CHIP_RADIUS, ON_ACCENT, RADIUS, SCROLLBAR_WIDTH, SEPARATOR_HEIGHT,
     SURFACE, SURFACE_RAISED, TEXT, TEXT_MUTED,
@@ -47,7 +49,7 @@ pub(crate) struct Row {
 pub(crate) struct Panel {
     pub(crate) document: Document,
     pub(crate) scroll: NodeId,
-    pub(crate) count: NodeId,
+    pub(crate) set_count: WriteSignal<String>,
     pub(crate) toggle: NodeId,
     pub(crate) toggle_label: NodeId,
     pub(crate) selection: NodeId,
@@ -59,7 +61,7 @@ pub(crate) fn build(entries: &[Entry], summary: &Summary, state: &Rc<State>, off
     let mut document = Document::new();
     document.inspectable = false;
 
-    let count = count_label(&mut document, summary.total);
+    let (count, set_count) = count_label(&mut document, summary.total);
     let (picker, fill, label) = pick_toggle(&mut document, state, summary.picking);
     let header = header(&mut document, count, picker);
 
@@ -99,7 +101,7 @@ pub(crate) fn build(entries: &[Entry], summary: &Summary, state: &Rc<State>, off
     Panel {
         document,
         scroll,
-        count,
+        set_count,
         toggle: fill,
         toggle_label: label,
         selection,
@@ -131,14 +133,19 @@ pub(crate) fn toggle_text(picking: bool) -> Color32 {
     }
 }
 
-fn count_label(document: &mut Document, total: usize) -> NodeId {
-    let count = styled::caption(document, total_label(total));
-    document.set_text_align(count, TextAlign::End, TextAlign::Center);
-    count
+fn count_label(document: &mut Document, total: usize) -> (NodeId, WriteSignal<String>) {
+    let (count_text, set_count_text) = create_signal(total_label(total));
+    let count = with_reactive_scope(document, || view! { <caption content={count_text} /> });
+    let count_text_node = document.shadow_root(count);
+    document.set_text_align(count_text_node, TextAlign::End, TextAlign::Center);
+    (count, set_count_text)
 }
 
 fn header(document: &mut Document, count: NodeId, toggle: NodeId) -> NodeId {
-    let title = styled::heading(document, "Inspector");
+    let title = with_reactive_scope(
+        document,
+        || view! { <heading content={"Inspector".to_string()} /> },
+    );
     let line = unstyled::centered_row(document, HEADER_SPACING);
     document.append_child(line, title, ItemSize::Intrinsic);
     document.append_child(line, count, ItemSize::Percent(100.0));

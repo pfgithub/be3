@@ -9,7 +9,7 @@ fn unused_navigation_keys_scroll_the_nearest_ancestor() {
     let slider = styled::slider(&mut document, 0.5);
     document.append_scroll_item(scroll, slider);
     for _ in 0..20 {
-        let text = styled::body(&mut document, "Content");
+        let text = document.create_text("Content", 14.0, Color32::WHITE);
         document.append_scroll_item(scroll, text);
     }
     document.set_root(scroll);

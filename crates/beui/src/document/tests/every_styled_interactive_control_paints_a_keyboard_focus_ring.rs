@@ -1,9 +1,15 @@
 use super::*;
+use crate::reactive::{view, with_reactive_scope};
+use crate::styled::reactive::ButtonBuilder;
 
 #[test]
 fn every_styled_interactive_control_paints_a_keyboard_focus_ring() {
     let builders: &[fn(&mut Document) -> NodeId] = &[
-        |doc| styled::button(doc, "Button", styled::ButtonVariant::Primary),
+        |doc| {
+            with_reactive_scope(doc, || {
+                view! { <button label={"Button".to_string()} variant={styled::ButtonVariant::Primary} /> }
+            })
+        },
         |doc| styled::checkbox(doc, "Check", false),
         |doc| styled::switch(doc, false),
         |doc| styled::slider(doc, 0.5),
@@ -13,11 +19,11 @@ fn every_styled_interactive_control_paints_a_keyboard_focus_ring() {
         |doc| styled::listbox(doc, &["One", "Two"], Some(0)),
         |doc| styled::toggle_button(doc, "Toggle", false),
         |doc| {
-            let text = styled::body(doc, "Content");
+            let text = doc.create_text("Content", 14.0, Color32::WHITE);
             styled::accordion(doc, "Header", text, false)
         },
         |doc| {
-            let text = styled::body(doc, "Row");
+            let text = doc.create_text("Row", 14.0, Color32::WHITE);
             styled::list_row(doc, text)
         },
     ];
