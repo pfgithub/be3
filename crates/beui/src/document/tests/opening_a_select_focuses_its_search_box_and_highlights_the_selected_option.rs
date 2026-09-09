@@ -1,4 +1,6 @@
 use super::*;
+use crate::reactive::{view, with_reactive_scope};
+use crate::styled::SelectBuilder;
 
 #[test]
 fn opening_a_select_focuses_its_search_box_and_highlights_the_selected_option() {
@@ -7,7 +9,9 @@ fn opening_a_select_focuses_its_search_box_and_highlights_the_selected_option() 
         .iter()
         .map(|label| (*label).to_owned())
         .collect();
-    let select = styled::select(&mut document, &options, Some(1));
+    let select = with_reactive_scope(&mut document, || {
+        view! { <select options={options} selected={Some(1)} /> }
+    });
     toolbar(&mut document, &[select]);
     let mut harness = Harness::new(document);
     harness.frame(Vec::new());

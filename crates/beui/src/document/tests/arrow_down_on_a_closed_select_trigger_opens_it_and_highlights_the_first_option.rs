@@ -1,4 +1,6 @@
 use super::*;
+use crate::reactive::{view, with_reactive_scope};
+use crate::styled::SelectBuilder;
 
 #[test]
 fn arrow_down_on_a_closed_select_trigger_opens_it_and_highlights_the_first_option() {
@@ -7,7 +9,9 @@ fn arrow_down_on_a_closed_select_trigger_opens_it_and_highlights_the_first_optio
         .iter()
         .map(|label| (*label).to_owned())
         .collect();
-    let select = styled::select(&mut document, &options, None);
+    let select = with_reactive_scope(&mut document, || {
+        view! { <select options={options} selected={None} /> }
+    });
     toolbar(&mut document, &[select]);
     let mut harness = Harness::new(document);
     harness.frame(Vec::new());

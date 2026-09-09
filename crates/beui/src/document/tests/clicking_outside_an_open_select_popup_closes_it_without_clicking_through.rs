@@ -1,4 +1,6 @@
 use super::*;
+use crate::reactive::{view, with_reactive_scope};
+use crate::styled::SelectBuilder;
 
 #[test]
 fn clicking_outside_an_open_select_popup_closes_it_without_clicking_through() {
@@ -7,7 +9,9 @@ fn clicking_outside_an_open_select_popup_closes_it_without_clicking_through() {
         .iter()
         .map(|label| (*label).to_owned())
         .collect();
-    let select = styled::select(&mut document, &options, Some(0));
+    let select = with_reactive_scope(&mut document, || {
+        view! { <select options={options} selected={Some(0)} /> }
+    });
     let (other, other_clicks) = counting_button(&mut document, "Other");
     let row = document.create_list(Direction::Horizontal, 20.0);
     document.append_child(row, select, ItemSize::Intrinsic);

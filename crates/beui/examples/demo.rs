@@ -10,8 +10,8 @@ use beui::styled::theme::{
 use beui::styled::{
     self, AccordionBuilder, BodyBuilder, ButtonBuilder, ButtonVariant, CaptionBuilder, CardBuilder,
     CheckboxBuilder, DisplayBuilder, HeadingBuilder, ListboxBuilder, ParagraphBuilder,
-    ProgressBuilder, RadioGroupBuilder, ScrollbarBuilder, ShortcutBuilder, SliderBuilder,
-    SwitchBuilder, TabsBuilder, TextInputBuilder, TitleBuilder, ToggleButtonBuilder,
+    ProgressBuilder, RadioGroupBuilder, ScrollbarBuilder, SelectBuilder, ShortcutBuilder,
+    SliderBuilder, SwitchBuilder, TabsBuilder, TextInputBuilder, TitleBuilder, ToggleButtonBuilder,
 };
 use beui::{unstyled, Color32, Context, Document, ItemSize, NodeId, Rect, TextAlign};
 
@@ -597,24 +597,24 @@ fn build_menu_controls(document: &mut Document) -> NodeId {
         .iter()
         .map(|label| (*label).to_owned())
         .collect();
-    let fruit_label = with_reactive_scope(document, || {
-        view! { <caption content={"Favorite fruit (type to search)".to_string()} /> }
-    });
-    let fruit = styled::select(document, &fruits, Some(0));
     let (fruit_status_text, set_fruit_status_text) = create_signal("Apple selected".to_string());
-    let fruit_status = with_reactive_scope(
-        document,
-        || view! { <caption content={fruit_status_text} /> },
-    );
     let fruit_names = fruits.clone();
-    styled::set_select_on_change(document, fruit, move |document, selected| {
-        let text = selected
-            .and_then(|index| fruit_names.get(index))
-            .map_or_else(
-                || "Nothing selected".to_owned(),
-                |label| format!("{label} selected"),
-            );
-        with_reactive_scope(document, || set_fruit_status_text.set(text));
+    let (fruit_label, fruit, fruit_status) = with_reactive_scope(document, || {
+        (
+            view! { <caption content={"Favorite fruit (type to search)".to_string()} /> },
+            view! {
+                <select options={fruits} selected={Some(0)} on_change={Box::new(move |document: &mut Document, selected| {
+                    let text = selected
+                        .and_then(|index| fruit_names.get(index))
+                        .map_or_else(
+                            || "Nothing selected".to_owned(),
+                            |label| format!("{label} selected"),
+                        );
+                    with_reactive_scope(document, || set_fruit_status_text.set(text));
+                })} />
+            },
+            view! { <caption content={fruit_status_text} /> },
+        )
     });
     let left = unstyled::column(document, 8.0);
     document.append_child(left, fruit_label, ItemSize::Intrinsic);

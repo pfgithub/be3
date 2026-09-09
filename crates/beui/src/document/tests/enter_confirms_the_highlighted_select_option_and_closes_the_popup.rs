@@ -1,4 +1,6 @@
 use super::*;
+use crate::reactive::{view, with_reactive_scope};
+use crate::styled::SelectBuilder;
 
 #[test]
 fn enter_confirms_the_highlighted_select_option_and_closes_the_popup() {
@@ -7,11 +9,12 @@ fn enter_confirms_the_highlighted_select_option_and_closes_the_popup() {
         .iter()
         .map(|label| (*label).to_owned())
         .collect();
-    let select = styled::select(&mut document, &options, None);
     let changes = Rc::new(RefCell::new(Vec::new()));
     let sink = changes.clone();
-    styled::set_select_on_change(&mut document, select, move |_document, selected| {
-        sink.borrow_mut().push(selected);
+    let select = with_reactive_scope(&mut document, || {
+        view! { <select options={options} selected={None} on_change={Box::new(move |_document: &mut Document, selected| {
+            sink.borrow_mut().push(selected);
+        })} /> }
     });
     toolbar(&mut document, &[select]);
     let mut harness = Harness::new(document);
