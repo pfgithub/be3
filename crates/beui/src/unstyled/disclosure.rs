@@ -14,7 +14,7 @@ struct State {
 
 pub fn disclosure(document: &mut Document, spacing: f32, open: bool) -> NodeId {
     let header = document.create_slot("header");
-    let button = unstyled::button();
+    let button = unstyled::ButtonBuilder::default().build();
     unstyled::set_button_child(button, header);
 
     let content = document.create_slot("content");

@@ -29,7 +29,7 @@ pub fn checkbox(
     let shadow = current_component();
     let mut on_change = on_change;
 
-    let toggle = with_document(|document| unstyled::toggle(document, false));
+    let toggle = unstyled::ToggleBuilder::default().checked(false).build();
 
     let mark = with_document(|document| document.create_fill(ON_ACCENT, MARK_RADIUS));
     let mark_size = view! { <sized width={MARK_SIZE} height={MARK_SIZE}>{mark}</sized> };

@@ -11,7 +11,9 @@ fn list_rows_and_pressables_activate_from_the_keyboard() {
         let text = with_document(|document| document.create_text("Row", 14.0, Color32::WHITE));
         view! { <list_row on_click={Box::new(move |_document: &mut Document| sink.set(sink.get() + 1))}>{text}</list_row> }
     });
-    let pressable = unstyled::pressable(&mut document);
+    let pressable = with_reactive_scope(&mut document, || {
+        unstyled::PressableBuilder::default().build()
+    });
     let text = document.create_text("Press", 14.0, Color32::WHITE);
     unstyled::set_pressable_child(&mut document, pressable, text);
     let sink = count.clone();

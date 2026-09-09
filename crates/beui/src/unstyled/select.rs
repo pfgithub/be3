@@ -32,7 +32,7 @@ struct State {
 
 pub fn select(document: &mut Document, options: &[String], selected: Option<usize>) -> NodeId {
     let selected = selected.filter(|index| *index < options.len());
-    let trigger = unstyled::button();
+    let trigger = unstyled::ButtonBuilder::default().build();
 
     let search = unstyled::text_input(document, "");
     let list = document.create_scroll();
@@ -95,7 +95,7 @@ pub fn select(document: &mut Document, options: &[String], selected: Option<usiz
 }
 
 fn add_row(document: &mut Document, select: NodeId, label: &str) {
-    let button = unstyled::button();
+    let button = unstyled::ButtonBuilder::default().build();
     unstyled::set_button_tab_stop(button, false);
     let text = document.create_text(label.to_owned(), FONT_SIZE, Color32::WHITE);
     unstyled::set_button_child(button, text);

@@ -16,7 +16,7 @@ pub fn list_row(children: Children, on_click: Option<ClickHandler>) -> NodeId {
         .into_first()
         .expect("list_row requires a child, e.g. <list_row>{content}</list_row>");
 
-    let row = unstyled::button();
+    let row = unstyled::ButtonBuilder::default().build();
     let hovered = with_document(|document| unstyled::button_hovered(document, row));
     let active = with_document(|document| unstyled::button_active(document, row));
     let focused = with_document(|document| unstyled::button_focused(document, row));

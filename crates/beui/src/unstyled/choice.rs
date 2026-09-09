@@ -58,7 +58,7 @@ pub fn choice(
     );
     let mut focused_signals = Vec::new();
     for (index, title) in labels.iter().enumerate() {
-        let button = unstyled::button();
+        let button = unstyled::ButtonBuilder::default().build();
         unstyled::set_button_tab_stop(button, index == selected.unwrap_or(0));
         let label = document.create_text(*title, FONT_SIZE, Color32::WHITE);
         unstyled::set_button_child(button, label);

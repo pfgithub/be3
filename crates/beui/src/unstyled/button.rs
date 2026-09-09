@@ -1,10 +1,15 @@
+use beui_macros::component;
+
 use crate::input::CursorIcon;
 
 use crate::document::Document;
 use crate::node::{ClickHandler, NodeId};
-use crate::reactive::{create_signal, with_document, ReadSignal, WriteSignal};
+use crate::reactive::{
+    create_signal, current_component, set_component_state, with_document, ReadSignal, WriteSignal,
+};
 
 struct State {
+    click_catcher: NodeId,
     focusable: NodeId,
     hovered_read: ReadSignal<bool>,
     hovered_write: WriteSignal<bool>,
@@ -16,22 +21,22 @@ struct State {
     on_click: Option<ClickHandler>,
 }
 
+#[component]
 pub fn button() -> NodeId {
+    let button = current_component();
     with_document(|document| {
-        let slot = document.create_slot("content");
         let click_catcher = document.create_click_catcher(CursorIcon::PointingHand);
-        document.set_click_catcher_child(click_catcher, slot);
         let focusable = document.create_focusable();
         document.set_focusable_child(focusable, click_catcher);
-
-        let button = document.create_shadow("button", focusable, vec![slot]);
 
         let (hovered_read, hovered_write) = create_signal(false);
         let (active_read, active_write) = create_signal(false);
         let (focused_read, focused_write) = create_signal(false);
-        document.set_component_state(
+        set_component_state(
+            document,
             button,
             State {
+                click_catcher,
                 focusable,
                 hovered_read,
                 hovered_write,
@@ -75,12 +80,15 @@ pub fn button() -> NodeId {
             document.click_click_catcher(click_catcher);
         });
 
-        button
+        focusable
     })
 }
 
 pub fn set_button_child(button: NodeId, child: NodeId) {
-    with_document(|document| document.set_shadow_child(button, child));
+    with_document(|document| {
+        let click_catcher = document.component_state::<State>(button).click_catcher;
+        document.set_click_catcher_child(click_catcher, child);
+    });
 }
 
 pub fn button_hovered(document: &Document, button: NodeId) -> ReadSignal<bool> {

@@ -1,3 +1,4 @@
+use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::hash::Hash;
@@ -20,6 +21,7 @@ thread_local! {
     static ACTIVE_DOCUMENT: Cell<*mut Document> = const { Cell::new(std::ptr::null_mut()) };
     static CURRENT_COMPONENT: Cell<Option<NodeId>> = const { Cell::new(None) };
     static PENDING_DETAIL: RefCell<HashMap<NodeId, String>> = RefCell::new(HashMap::new());
+    static PENDING_STATE: RefCell<HashMap<NodeId, Box<dyn Any>>> = RefCell::new(HashMap::new());
 }
 
 struct ActiveDocumentGuard;
@@ -117,6 +119,9 @@ pub fn component(name: &'static str, f: impl FnOnce() -> NodeId) -> NodeId {
     if let Some(detail) = PENDING_DETAIL.with(|cell| cell.borrow_mut().remove(&shadow)) {
         with_document(|document| document.set_component_detail(shadow, detail));
     }
+    if let Some(state) = PENDING_STATE.with(|cell| cell.borrow_mut().remove(&shadow)) {
+        with_document(|document| document.set_component_state_dyn(shadow, state));
+    }
     shadow
 }
 
@@ -133,6 +138,16 @@ pub fn set_component_detail(document: &mut Document, shadow: NodeId, detail: imp
     } else {
         PENDING_DETAIL.with(|cell| {
             cell.borrow_mut().insert(shadow, detail);
+        });
+    }
+}
+
+pub fn set_component_state<T: 'static>(document: &mut Document, shadow: NodeId, state: T) {
+    if document.contains(shadow) {
+        document.set_component_state(shadow, state);
+    } else {
+        PENDING_STATE.with(|cell| {
+            cell.borrow_mut().insert(shadow, Box::new(state));
         });
     }
 }
@@ -385,7 +400,7 @@ where
 
 #[component]
 pub fn button(children: Children, disabled: Prop<bool>, on_click: Option<ClickHandler>) -> NodeId {
-    let button = unstyled::button();
+    let button = unstyled::ButtonBuilder::default().build();
     if let Some(child) = children.into_first() {
         unstyled::set_button_child(button, child);
     }

@@ -23,7 +23,7 @@ pub fn switch(on: Prop<bool>, on_change: Option<Handler<bool>>) -> NodeId {
     let shadow = current_component();
     let mut on_change = on_change;
 
-    let toggle = with_document(|document| unstyled::toggle(document, false));
+    let toggle = unstyled::ToggleBuilder::default().checked(false).build();
 
     let knob = with_document(|document| document.create_fill(KNOB, KNOB_RADIUS));
     let knob = view! { <sized width={KNOB_SIZE} height={KNOB_SIZE}>{knob}</sized> };

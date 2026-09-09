@@ -256,7 +256,7 @@ pub(crate) fn with_installed<R>(document: &mut Document, f: impl FnOnce(&mut Doc
 
 pub(crate) fn labelled_button(document: &mut Document, label: &str) -> NodeId {
     with_installed(document, |document| {
-        let button = unstyled::button();
+        let button = unstyled::ButtonBuilder::default().build();
         let text = document.create_text(label, 14.0, Color32::WHITE);
         let padding = document.create_padding(20.0, 12.0);
         document.set_padding_child(padding, text);

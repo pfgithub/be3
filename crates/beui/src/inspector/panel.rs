@@ -176,7 +176,7 @@ fn pick_toggle(
     let bordered = with_reactive_scope(document, || {
         view! { <bordered corner_radius={CHIP_RADIUS}>{fill}</bordered> }
     });
-    let pressable = unstyled::pressable(document);
+    let pressable = with_reactive_scope(document, || unstyled::PressableBuilder::default().build());
     unstyled::set_pressable_child(document, pressable, bordered);
 
     let picker = state.clone();
@@ -260,7 +260,7 @@ fn marker(document: &mut Document, entry: &Entry, state: &Rc<State>) -> NodeId {
         return glyph;
     }
 
-    let marker = unstyled::pressable(document);
+    let marker = with_reactive_scope(document, || unstyled::PressableBuilder::default().build());
     unstyled::set_pressable_child(document, marker, glyph);
 
     let expansion = state.clone();

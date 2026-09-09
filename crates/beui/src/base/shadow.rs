@@ -199,6 +199,10 @@ impl Document {
         self.arena.get_mut_as::<ShadowNode>(shadow).state = Some(Box::new(state));
     }
 
+    pub(crate) fn set_component_state_dyn(&mut self, shadow: NodeId, state: Box<dyn Any>) {
+        self.arena.get_mut_as::<ShadowNode>(shadow).state = Some(state);
+    }
+
     pub fn set_component_detail(&mut self, shadow: NodeId, detail: impl Into<String>) {
         let value = Some(detail.into());
         if self.arena.get_as::<ShadowNode>(shadow).detail != value {

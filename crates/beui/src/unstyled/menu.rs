@@ -71,7 +71,7 @@ fn build_menu_list(
     document.set_focusable_on_key(root, move |document, press| root_key(document, menu, press));
 
     for (index, item) in items.iter().enumerate() {
-        let button = unstyled::button();
+        let button = unstyled::ButtonBuilder::default().build();
         unstyled::set_button_tab_stop(button, false);
         document.append_child(column, button, ItemSize::Intrinsic);
 

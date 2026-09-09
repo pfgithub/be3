@@ -19,7 +19,7 @@ pub fn toggle_button(
     let shadow = current_component();
     let mut on_change = on_change;
 
-    let toggle = with_document(|document| unstyled::toggle(document, false));
+    let toggle = unstyled::ToggleBuilder::default().checked(false).build();
     let text = with_document(|document| document.create_text(String::new(), FONT_BODY, TEXT));
     let padding = view! { <padding horizontal={14.0} vertical={8.0}>{text}</padding> };
     let fill = with_document(|document| {
