@@ -113,8 +113,7 @@ impl Rows {
         if let Some(visual) = self.visual(index) {
             visual.apply(document);
         }
-        let set_status = self.set_status.clone();
-        with_reactive_scope(document, || set_status.set(format!("Row {index} selected")));
+        self.set_status.set(format!("Row {index} selected"));
     }
 
     fn show_timings(&self, document: &mut Document, shown: bool) {
@@ -467,8 +466,8 @@ fn build_load_controls(document: &mut Document) -> NodeId {
             view! { <caption content={"Simulated load".to_string()} /> },
             view! { <caption content={create_memo(move || percent_label(readout_value.get()))} /> },
             view! { <progress value={progress_value} /> },
-            view! { <slider value={0.4} on_change={Box::new(move |document: &mut Document, value| {
-                with_reactive_scope(document, || set_progress_value.set(value));
+            view! { <slider value={0.4} on_change={Box::new(move |_document: &mut Document, value| {
+                set_progress_value.set(value);
             })} /> },
         )
     });
@@ -499,8 +498,8 @@ fn build_name_controls(document: &mut Document) -> NodeId {
 
     let input = with_reactive_scope(document, || {
         view! {
-            <text_input value={String::new()} placeholder={"Type a name".to_string()} on_change={Box::new(move |document: &mut Document, value| {
-                with_reactive_scope(document, || set_greeting_text.set(greeting_label(&value)));
+            <text_input value={String::new()} placeholder={"Type a name".to_string()} on_change={Box::new(move |_document: &mut Document, value| {
+                set_greeting_text.set(greeting_label(&value));
             })} />
         }
     });
@@ -535,10 +534,10 @@ fn build_choice_controls(document: &mut Document) -> NodeId {
         (
             view! { <caption content={"Update mode".to_string()} /> },
             view! {
-                <radio_group labels={vec!["Automatic".to_string(), "Manual".to_string(), "Scheduled".to_string()]} selected={Some(0)} on_change={Box::new(move |document: &mut Document, selected| {
+                <radio_group labels={vec!["Automatic".to_string(), "Manual".to_string(), "Scheduled".to_string()]} selected={Some(0)} on_change={Box::new(move |_document: &mut Document, selected| {
                     if let Some(index) = selected {
                         let text = format!("{} updates", modes[index]);
-                        with_reactive_scope(document, || set_mode_status_text.set(text));
+                        set_mode_status_text.set(text);
                     }
                 })} />
             },
@@ -552,10 +551,10 @@ fn build_choice_controls(document: &mut Document) -> NodeId {
         (
             view! { <caption content={"Highlight color (type to search)".to_string()} /> },
             view! {
-                <listbox labels={vec!["Amber".to_string(), "Blue".to_string(), "Green".to_string(), "Purple".to_string()]} selected={Some(1)} on_change={Box::new(move |document: &mut Document, selected| {
+                <listbox labels={vec!["Amber".to_string(), "Blue".to_string(), "Green".to_string(), "Purple".to_string()]} selected={Some(1)} on_change={Box::new(move |_document: &mut Document, selected| {
                     if let Some(index) = selected {
                         let text = format!("{} selected", colors[index]);
-                        with_reactive_scope(document, || set_color_status_text.set(text));
+                        set_color_status_text.set(text);
                     }
                 })} />
             },
@@ -566,14 +565,14 @@ fn build_choice_controls(document: &mut Document) -> NodeId {
     let (pin, pin_status) = with_reactive_scope(document, || {
         (
             view! {
-                <toggle_button label={"Pin selection".to_string()} pressed={false} on_change={Box::new(move |document: &mut Document, pressed| {
+                <toggle_button label={"Pin selection".to_string()} pressed={false} on_change={Box::new(move |_document: &mut Document, pressed| {
                     let text = if pressed {
                         "Selection is pinned"
                     } else {
                         "Selection is unpinned"
                     }
                     .to_string();
-                    with_reactive_scope(document, || set_pin_status_text.set(text));
+                    set_pin_status_text.set(text);
                 })} />
             },
             view! { <caption content={pin_status_text} /> },
@@ -604,14 +603,14 @@ fn build_menu_controls(document: &mut Document) -> NodeId {
         (
             view! { <caption content={"Favorite fruit (type to search)".to_string()} /> },
             view! {
-                <select options={fruits} selected={Some(0)} on_change={Box::new(move |document: &mut Document, selected| {
+                <select options={fruits} selected={Some(0)} on_change={Box::new(move |_document: &mut Document, selected| {
                     let text = selected
                         .and_then(|index| fruit_names.get(index))
                         .map_or_else(
                             || "Nothing selected".to_owned(),
                             |label| format!("{label} selected"),
                         );
-                    with_reactive_scope(document, || set_fruit_status_text.set(text));
+                    set_fruit_status_text.set(text);
                 })} />
             },
             view! { <caption content={fruit_status_text} /> },
@@ -651,7 +650,7 @@ fn build_menu_controls(document: &mut Document) -> NodeId {
     ];
     let context_menu = with_reactive_scope(document, || {
         view! {
-            <context_menu region={region_card} items={items} on_select={Box::new(move |document: &mut Document, path: Vec<usize>| {
+            <context_menu region={region_card} items={items} on_select={Box::new(move |_document: &mut Document, path: Vec<usize>| {
                 let label = match path.as_slice() {
                     [0] => "Copy".to_owned(),
                     [1] => "Paste".to_owned(),
@@ -659,9 +658,7 @@ fn build_menu_controls(document: &mut Document) -> NodeId {
                     [2, 1] => "Share > Link".to_owned(),
                     other => format!("{other:?}"),
                 };
-                with_reactive_scope(document, || {
-                    set_menu_status_text.set(format!("Chose: {label}"))
-                });
+                set_menu_status_text.set(format!("Chose: {label}"));
             })} />
         }
     });
