@@ -493,15 +493,6 @@ fn build_menu_controls() -> NodeId {
     let (fruit_status_text, set_fruit_status_text) = create_signal("Apple selected".to_string());
     let (menu_status_text, set_menu_status_text) = create_signal("Nothing chosen yet".to_string());
 
-    let region_card = view! {
-        <card>
-            <column spacing={4.0}>
-                <caption content={"Right-click the card below".to_string()} />
-                <paragraph content={"The Share item opens a submenu on hover or Right Arrow; Left Arrow closes it.".to_string()} />
-            </column>
-        </card>
-    };
-
     let items = vec![
         unstyled::MenuItem::new("Copy"),
         unstyled::MenuItem::new("Paste"),
@@ -530,7 +521,16 @@ fn build_menu_controls() -> NodeId {
                 <caption content={fruit_status_text} />
             </column>
             @percent(50.0) <column spacing={8.0}>
-                <context_menu region={region_card} items={items} on_select={Box::new(move |_document: &mut Document, path: Vec<usize>| {
+                <context_menu region={
+                    view! {
+                        <card>
+                            <column spacing={4.0}>
+                                <caption content={"Right-click the card below".to_string()} />
+                                <paragraph content={"The Share item opens a submenu on hover or Right Arrow; Left Arrow closes it.".to_string()} />
+                            </column>
+                        </card>
+                    }
+                } items={items} on_select={Box::new(move |_document: &mut Document, path: Vec<usize>| {
                     let label = match path.as_slice() {
                         [0] => "Copy".to_owned(),
                         [1] => "Paste".to_owned(),
