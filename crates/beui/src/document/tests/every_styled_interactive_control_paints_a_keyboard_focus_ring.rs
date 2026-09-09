@@ -1,6 +1,6 @@
 use super::*;
 use crate::reactive::{view, with_reactive_scope};
-use crate::styled::{ButtonBuilder, CheckboxBuilder, SwitchBuilder};
+use crate::styled::{ButtonBuilder, CheckboxBuilder, SwitchBuilder, ToggleButtonBuilder};
 
 #[test]
 fn every_styled_interactive_control_paints_a_keyboard_focus_ring() {
@@ -21,7 +21,11 @@ fn every_styled_interactive_control_paints_a_keyboard_focus_ring() {
         |doc| styled::tabs(doc, &["One", "Two"], 0),
         |doc| styled::radio_group(doc, &["One", "Two"], Some(0)),
         |doc| styled::listbox(doc, &["One", "Two"], Some(0)),
-        |doc| styled::toggle_button(doc, "Toggle", false),
+        |doc| {
+            with_reactive_scope(doc, || {
+                view! { <toggle_button label={"Toggle".to_string()} pressed={false} /> }
+            })
+        },
         |doc| {
             let text = doc.create_text("Content", 14.0, Color32::WHITE);
             styled::accordion(doc, "Header", text, false)

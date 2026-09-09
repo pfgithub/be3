@@ -10,7 +10,7 @@ use beui::styled::theme::{
 use beui::styled::{
     self, BodyBuilder, ButtonBuilder, ButtonVariant, CaptionBuilder, CardBuilder, CheckboxBuilder,
     DisplayBuilder, HeadingBuilder, ParagraphBuilder, ProgressBuilder, ShortcutBuilder,
-    SwitchBuilder, TitleBuilder,
+    SwitchBuilder, TitleBuilder, ToggleButtonBuilder,
 };
 use beui::{unstyled, Color32, Context, Document, ItemSize, NodeId, Rect, TextAlign};
 
@@ -552,18 +552,22 @@ fn build_choice_controls(document: &mut Document) -> NodeId {
             with_reactive_scope(document, || set_color_status_text.set(text));
         }
     });
-    let pin = styled::toggle_button(document, "Pin selection", false);
     let (pin_status_text, set_pin_status_text) = create_signal("Selection is unpinned".to_string());
-    let pin_status =
-        with_reactive_scope(document, || view! { <caption content={pin_status_text} /> });
-    styled::set_toggle_button_on_change(document, pin, move |document, pressed| {
-        let text = if pressed {
-            "Selection is pinned"
-        } else {
-            "Selection is unpinned"
-        }
-        .to_string();
-        with_reactive_scope(document, || set_pin_status_text.set(text));
+    let (pin, pin_status) = with_reactive_scope(document, || {
+        (
+            view! {
+                <toggle_button label={"Pin selection".to_string()} pressed={false} on_change={Box::new(move |document: &mut Document, pressed| {
+                    let text = if pressed {
+                        "Selection is pinned"
+                    } else {
+                        "Selection is unpinned"
+                    }
+                    .to_string();
+                    with_reactive_scope(document, || set_pin_status_text.set(text));
+                })} />
+            },
+            view! { <caption content={pin_status_text} /> },
+        )
     });
     let left = unstyled::column(document, 8.0);
     for child in [mode_label, mode, mode_status, pin, pin_status] {

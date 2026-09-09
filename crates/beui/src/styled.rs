@@ -55,7 +55,4 @@ pub use radio_group::{
     focus_radio_group, radio_group, radio_group_selected, set_radio_group_on_change,
     set_radio_group_selected,
 };
-pub use toggle_button::{
-    focus_toggle_button, set_toggle_button_on_change, set_toggle_button_pressed, toggle_button,
-    toggle_button_pressed,
-};
+pub use toggle_button::{focus_toggle_button, toggle_button_pressed, ToggleButtonBuilder};
