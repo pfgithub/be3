@@ -1,11 +1,11 @@
-use beui_macros::component;
+use beui_macros::{component, view};
 
 use crate::color::Color32;
 
 use crate::base::ItemSize;
 use crate::document::Document;
 use crate::node::{Handler, NodeId};
-use crate::reactive::{current_component, set_component_detail, with_document, Prop};
+use crate::reactive::{current_component, set_component_detail, with_document, Prop, SizedBuilder};
 use crate::styled::theme::{ACCENT, ACCENT_HOVER, KNOB, RADIUS, TRACK};
 use crate::unstyled;
 
@@ -22,35 +22,32 @@ pub fn slider(value: Prop<f32>, on_change: Option<Handler<f32>>) -> NodeId {
     let shadow = current_component();
     let mut on_change = on_change;
 
-    let (slider, line, filled, rest, knob_fill, ring) = with_document(|document| {
-        let slider = unstyled::slider(document, 0.0);
+    let slider = with_document(|document| unstyled::slider(document, 0.0));
 
-        let filled_fill = document.create_fill(ACCENT, TRACK_RADIUS);
-        let filled = document.create_sized(None, Some(TRACK_HEIGHT));
-        document.set_sized_child(filled, filled_fill);
+    let filled_fill = with_document(|document| document.create_fill(ACCENT, TRACK_RADIUS));
+    let filled = view! { <sized height={TRACK_HEIGHT}>{filled_fill}</sized> };
 
-        let rest_fill = document.create_fill(TRACK, TRACK_RADIUS);
-        let rest = document.create_sized(None, Some(TRACK_HEIGHT));
-        document.set_sized_child(rest, rest_fill);
+    let rest_fill = with_document(|document| document.create_fill(TRACK, TRACK_RADIUS));
+    let rest = view! { <sized height={TRACK_HEIGHT}>{rest_fill}</sized> };
 
-        let knob_fill = document.create_fill(KNOB, KNOB_RADIUS);
-        let knob = document.create_sized(Some(KNOB_SIZE), Some(KNOB_SIZE));
-        document.set_sized_child(knob, knob_fill);
+    let knob_fill = with_document(|document| document.create_fill(KNOB, KNOB_RADIUS));
+    let knob = view! { <sized width={KNOB_SIZE} height={KNOB_SIZE}>{knob_fill}</sized> };
 
+    let line = with_document(|document| {
         let line = unstyled::centered_row(document, 0.0);
         document.append_child(line, filled, filled_size(0.0));
         document.append_child(line, knob, ItemSize::Intrinsic);
         document.append_child(line, rest, rest_size(0.0));
+        line
+    });
 
-        let sized = document.create_sized(None, Some(HEIGHT));
-        document.set_sized_child(sized, line);
-
+    let sized = view! { <sized height={HEIGHT}>{line}</sized> };
+    let ring = with_document(|document| {
         let ring = document.create_outline(ACCENT, FOCUS_RING_WIDTH, RADIUS, FOCUS_RING_OFFSET);
         document.set_outline_child(ring, sized);
-        unstyled::set_slider_child(document, slider, ring);
-
-        (slider, line, filled, rest, knob_fill, ring)
+        ring
     });
+    with_document(|document| unstyled::set_slider_child(document, slider, ring));
 
     with_document(|document| {
         unstyled::set_slider_on_change(document, slider, move |document, value| {

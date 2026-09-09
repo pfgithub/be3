@@ -1,12 +1,13 @@
-use beui_macros::component;
+use beui_macros::{component, view};
 
 use crate::color::Color32;
 
-use crate::base::{ItemSize, TextAlign};
+use crate::base::TextAlign;
 use crate::document::Document;
 use crate::node::{Handler, NodeId};
 use crate::reactive::{
-    create_effect, current_component, set_component_detail, with_document, Children, Prop,
+    create_effect, current_component, set_component_detail, with_document, CenteredRowBuilder,
+    Children, OutlineBuilder, PaddingBuilder, Prop, SizedBuilder,
 };
 use crate::styled::text::{code, heading_line};
 use crate::styled::theme::{ACCENT, RADIUS, SURFACE_RAISED, TEXT_MUTED};
@@ -30,32 +31,42 @@ pub fn accordion(
     let shadow = current_component();
     let mut on_toggle = on_toggle;
 
-    let (disclosure, marker, header, ring, title_node) = with_document(|document| {
-        let disclosure = unstyled::disclosure(document, SPACING, false);
+    let disclosure = with_document(|document| unstyled::disclosure(document, SPACING, false));
+    let hovered = with_document(|document| unstyled::disclosure_hovered(document, disclosure));
+    let focused = with_document(|document| unstyled::disclosure_focused(document, disclosure));
 
+    let marker = with_document(|document| {
         let marker = code(document, glyph(false));
         document.set_text_color(marker, TEXT_MUTED);
         document.set_text_align(marker, TextAlign::Center, TextAlign::Center);
-        let marker_box = document.create_sized(Some(MARKER_WIDTH), None);
-        document.set_sized_child(marker_box, marker);
+        marker
+    });
+    let marker_box = view! { <sized width={MARKER_WIDTH}>{marker}</sized> };
 
-        let title_node = heading_line(document, String::new());
+    let title_node = with_document(|document| heading_line(document, String::new()));
 
-        let line = unstyled::centered_row(document, SPACING);
-        document.append_child(line, marker_box, ItemSize::Intrinsic);
-        document.append_child(line, title_node, ItemSize::Percent(100.0));
-
-        let padding = document.create_padding(PADDING_HORIZONTAL, PADDING_VERTICAL);
-        document.set_padding_child(padding, line);
-
+    let line = view! {
+        <centered_row spacing={SPACING}>
+            {marker_box}
+            @percent(100.0) {title_node}
+        </centered_row>
+    };
+    let padding = view! {
+        <padding horizontal={PADDING_HORIZONTAL} vertical={PADDING_VERTICAL}>{line}</padding>
+    };
+    let header = with_document(|document| {
         let header = document.create_fill(Color32::TRANSPARENT, RADIUS);
         document.set_fill_child(header, padding);
-        let ring = document.create_outline(ACCENT, 2.0, RADIUS, 2.0);
-        document.set_outline_child(ring, header);
+        header
+    });
+    let ring = view! {
+        <outline color={ACCENT} width={2.0} radius={RADIUS} offset={2.0} visible={focused}>
+            {header}
+        </outline>
+    };
+    with_document(|document| {
         unstyled::set_disclosure_header(document, disclosure, ring);
         unstyled::set_disclosure_content(document, disclosure, child);
-
-        (disclosure, marker, header, ring, title_node)
     });
 
     title.apply(move |value| {
@@ -65,15 +76,9 @@ pub fn accordion(
         });
     });
 
-    let hovered = with_document(|document| unstyled::disclosure_hovered(document, disclosure));
-    let focused = with_document(|document| unstyled::disclosure_focused(document, disclosure));
     create_effect(move || {
         let color = header_fill(hovered.get());
         with_document(|document| document.set_fill_color(header, color));
-    });
-    create_effect(move || {
-        let visible = focused.get();
-        with_document(|document| document.set_outline_visible(ring, visible));
     });
 
     with_document(|document| {

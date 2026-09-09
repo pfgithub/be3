@@ -1,10 +1,12 @@
-use beui_macros::component;
+use beui_macros::{component, view};
 
 use crate::base::TextAlign;
 use crate::color::Color32;
 use crate::document::Document;
 use crate::node::{Handler, NodeId};
-use crate::reactive::{create_effect, with_document, Prop};
+use crate::reactive::{
+    create_effect, with_document, FillBuilder, OutlineBuilder, PaddingBuilder, Prop, SizedBuilder,
+};
 use crate::styled::theme::{
     ACCENT_SOFT, BORDER, BORDER_WIDTH, FONT_BODY, RADIUS, SURFACE_RAISED, TEXT, TEXT_MUTED,
 };
@@ -51,15 +53,15 @@ fn style_menu_panel(document: &mut Document, overlay: NodeId, items: &[MenuItem]
         .expect("menu overlay always has content");
     style_menu_rows(document, menu, items);
 
-    let padding = document.create_padding(MENU_PADDING, MENU_PADDING);
-    document.set_padding_child(padding, menu);
-    let fill = document.create_fill(SURFACE_RAISED, RADIUS);
-    document.set_fill_child(fill, padding);
-    let border = document.create_outline(BORDER, BORDER_WIDTH, RADIUS, 0.0);
-    document.set_outline_visible(border, true);
-    document.set_outline_child(border, fill);
-    let sized = document.create_sized(Some(MENU_WIDTH), None);
-    document.set_sized_child(sized, border);
+    let sized = view! {
+        <sized width={MENU_WIDTH}>
+            <outline color={BORDER} width={BORDER_WIDTH} radius={RADIUS} offset={0.0} visible={true}>
+                <fill color={SURFACE_RAISED} radius={RADIUS}>
+                    <padding horizontal={MENU_PADDING} vertical={MENU_PADDING}>{menu}</padding>
+                </fill>
+            </outline>
+        </sized>
+    };
     document.set_overlay_content(overlay, sized);
 }
 
@@ -70,8 +72,9 @@ fn style_menu_rows(document: &mut Document, menu: NodeId, items: &[MenuItem]) {
         let label = document.create_text(item.label.clone(), FONT_BODY, color);
         document.set_text_align(label, TextAlign::Start, TextAlign::Center);
 
-        let padding = document.create_padding(PADDING_HORIZONTAL, PADDING_VERTICAL);
-        document.set_padding_child(padding, label);
+        let padding = view! {
+            <padding horizontal={PADDING_HORIZONTAL} vertical={PADDING_VERTICAL}>{label}</padding>
+        };
         let fill = document.create_fill(Color32::TRANSPARENT, RADIUS);
         document.set_fill_child(fill, padding);
         unstyled::set_button_child(button, fill);

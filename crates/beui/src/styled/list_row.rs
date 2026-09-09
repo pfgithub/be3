@@ -1,9 +1,9 @@
-use beui_macros::component;
+use beui_macros::{component, view};
 
 use crate::color::Color32;
 
 use crate::node::{ClickHandler, NodeId};
-use crate::reactive::{create_effect, with_document, Children};
+use crate::reactive::{create_effect, with_document, Children, OutlineBuilder, PaddingBuilder};
 use crate::styled::theme::{ACCENT, BORDER, RADIUS, SURFACE_RAISED};
 use crate::unstyled;
 
@@ -21,24 +21,24 @@ pub fn list_row(children: Children, on_click: Option<ClickHandler>) -> NodeId {
     let active = with_document(|document| unstyled::button_active(document, row));
     let focused = with_document(|document| unstyled::button_focused(document, row));
 
-    with_document(|document| {
-        let padding = document.create_padding(PADDING_HORIZONTAL, PADDING_VERTICAL);
-        document.set_padding_child(padding, child);
-
+    let padding = view! {
+        <padding horizontal={PADDING_HORIZONTAL} vertical={PADDING_VERTICAL}>{child}</padding>
+    };
+    let fill = with_document(|document| {
         let fill = document.create_fill(Color32::TRANSPARENT, RADIUS);
         document.set_fill_child(fill, padding);
-        let ring = document.create_outline(ACCENT, 2.0, RADIUS, 0.0);
-        document.set_outline_child(ring, fill);
-        unstyled::set_button_child(row, ring);
+        fill
+    });
+    let ring = view! {
+        <outline color={ACCENT} width={2.0} radius={RADIUS} offset={0.0} visible={focused}>
+            {fill}
+        </outline>
+    };
+    unstyled::set_button_child(row, ring);
 
-        create_effect(move || {
-            let visible = focused.get();
-            with_document(|document| document.set_outline_visible(ring, visible));
-        });
-        create_effect(move || {
-            let color = background(hovered.get(), active.get());
-            with_document(|document| document.set_fill_color(fill, color));
-        });
+    create_effect(move || {
+        let color = background(hovered.get(), active.get());
+        with_document(|document| document.set_fill_color(fill, color));
     });
 
     if let Some(on_click) = on_click {

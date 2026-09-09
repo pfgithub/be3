@@ -1,10 +1,10 @@
-use beui_macros::component;
+use beui_macros::{component, view};
 
 use crate::color::Color32;
 
 use crate::base::{ItemSize, ScrollPosition};
 use crate::node::NodeId;
-use crate::reactive::with_document;
+use crate::reactive::{with_document, FillBuilder};
 use crate::styled::theme::{ACCENT, SCROLL_THUMB, SURFACE_RAISED};
 use crate::unstyled;
 
@@ -13,20 +13,22 @@ const MINIMUM_THUMB: f32 = 0.08;
 
 #[component]
 pub fn scrollbar(scroll: NodeId) -> NodeId {
-    with_document(|document| {
-        document.set_scroll_focus_color(scroll, ACCENT);
-        let before = unstyled::spacer(document);
-        let thumb = document.create_fill(Color32::TRANSPARENT, RADIUS);
-        let after = unstyled::spacer(document);
+    with_document(|document| document.set_scroll_focus_color(scroll, ACCENT));
 
+    let before = with_document(unstyled::spacer);
+    let thumb = with_document(|document| document.create_fill(Color32::TRANSPARENT, RADIUS));
+    let after = with_document(unstyled::spacer);
+
+    let track = with_document(|document| {
         let track = unstyled::column(document, 0.0);
         document.append_child(track, before, ItemSize::Percent(0.0));
         document.append_child(track, thumb, ItemSize::Percent(100.0));
         document.append_child(track, after, ItemSize::Percent(0.0));
+        track
+    });
+    let background = view! { <fill color={SURFACE_RAISED} radius={RADIUS}>{track}</fill> };
 
-        let background = document.create_fill(SURFACE_RAISED, RADIUS);
-        document.set_fill_child(background, track);
-
+    with_document(|document| {
         document.set_scroll_on_change(scroll, move |document, position: ScrollPosition| {
             let scrollable = position.max_offset() > 0.0;
             let visible = if position.content > 0.0 {

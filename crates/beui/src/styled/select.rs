@@ -1,10 +1,12 @@
-use beui_macros::component;
+use beui_macros::{component, view};
 
 use crate::base::TextAlign;
 use crate::color::Color32;
 use crate::document::Document;
 use crate::node::{Handler, NodeId};
-use crate::reactive::{create_effect, with_document, Prop};
+use crate::reactive::{
+    create_effect, with_document, FillBuilder, OutlineBuilder, PaddingBuilder, Prop, SizedBuilder,
+};
 use crate::styled::theme::{
     ACCENT, ACCENT_SOFT, BORDER, BORDER_WIDTH, FONT_BODY, RADIUS, SURFACE, SURFACE_RAISED, TEXT,
     TEXT_MUTED,
@@ -36,15 +38,15 @@ pub fn select(
         document.set_text_align(label, TextAlign::Start, TextAlign::Center);
         document.set_text_clip(label, true);
 
-        let padding = document.create_padding(PADDING_HORIZONTAL, 0.0);
-        document.set_padding_child(padding, label);
-        let fill = document.create_fill(SURFACE_RAISED, RADIUS);
-        document.set_fill_child(fill, padding);
+        let fill = view! {
+            <fill color={SURFACE_RAISED} radius={RADIUS}>
+                <padding horizontal={PADDING_HORIZONTAL} vertical={0.0}>{label}</padding>
+            </fill>
+        };
         let border = document.create_outline(BORDER, BORDER_WIDTH, RADIUS, 0.0);
         document.set_outline_visible(border, true);
         document.set_outline_child(border, fill);
-        let sized = document.create_sized(Some(TRIGGER_WIDTH), Some(HEIGHT));
-        document.set_sized_child(sized, border);
+        let sized = view! { <sized width={TRIGGER_WIDTH} height={HEIGHT}>{border}</sized> };
         let ring = document.create_outline(ACCENT, FOCUS_RING_WIDTH, RADIUS, FOCUS_RING_OFFSET);
         document.set_outline_child(ring, sized);
         unstyled::set_button_child(trigger, ring);
@@ -72,13 +74,11 @@ pub fn select(
         unstyled::set_text_input_padding(document, search, PADDING_HORIZONTAL, 0.0);
         unstyled::set_text_input_placeholder(document, search, "Search");
 
-        let search_fill = document.create_fill(SURFACE, RADIUS);
-        document.set_fill_child(search_fill, field);
+        let search_fill = view! { <fill color={SURFACE} radius={RADIUS}>{field}</fill> };
         let search_border = document.create_outline(BORDER, BORDER_WIDTH, RADIUS, 0.0);
         document.set_outline_visible(search_border, true);
         document.set_outline_child(search_border, search_fill);
-        let search_sized = document.create_sized(None, Some(HEIGHT));
-        document.set_sized_child(search_sized, search_border);
+        let search_sized = view! { <sized height={HEIGHT}>{search_border}</sized> };
         unstyled::set_text_input_child(document, search, search_sized);
 
         unstyled::set_text_input_on_hover_change(document, search, move |document, hovered| {
@@ -97,8 +97,11 @@ pub fn select(
             document.set_text_color(label_node, TEXT);
             document.set_text_align(label_node, TextAlign::Start, TextAlign::Center);
 
-            let row_padding = document.create_padding(PADDING_HORIZONTAL, OPTION_PADDING_VERTICAL);
-            document.set_padding_child(row_padding, label_node);
+            let row_padding = view! {
+                <padding horizontal={PADDING_HORIZONTAL} vertical={OPTION_PADDING_VERTICAL}>
+                    {label_node}
+                </padding>
+            };
             let row_fill = document.create_fill(Color32::TRANSPARENT, RADIUS);
             document.set_fill_child(row_fill, row_padding);
             unstyled::set_button_child(button, row_fill);
@@ -127,15 +130,17 @@ pub fn select(
         let popup = document
             .overlay_content(unstyled::select_overlay(document, inner))
             .expect("select popup always has content");
-        let popup_padding = document.create_padding(POPUP_PADDING, POPUP_PADDING);
-        document.set_padding_child(popup_padding, popup);
-        let popup_fill = document.create_fill(SURFACE_RAISED, RADIUS);
-        document.set_fill_child(popup_fill, popup_padding);
-        let popup_border = document.create_outline(BORDER, BORDER_WIDTH, RADIUS, 0.0);
-        document.set_outline_visible(popup_border, true);
-        document.set_outline_child(popup_border, popup_fill);
-        let popup_sized = document.create_sized(Some(POPUP_WIDTH), None);
-        document.set_sized_child(popup_sized, popup_border);
+        let popup_fill = view! {
+            <fill color={SURFACE_RAISED} radius={RADIUS}>
+                <padding horizontal={POPUP_PADDING} vertical={POPUP_PADDING}>{popup}</padding>
+            </fill>
+        };
+        let popup_border = view! {
+            <outline color={BORDER} width={BORDER_WIDTH} radius={RADIUS} offset={0.0} visible={true}>
+                {popup_fill}
+            </outline>
+        };
+        let popup_sized = view! { <sized width={POPUP_WIDTH}>{popup_border}</sized> };
         document.set_overlay_content(unstyled::select_overlay(document, inner), popup_sized);
 
         unstyled::set_select_on_change(document, inner, move |document, selected| {

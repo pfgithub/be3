@@ -12,7 +12,10 @@ use crate::styled::theme::{
     ACCENT, BORDER_WIDTH, CHIP_RADIUS, ON_ACCENT, RADIUS, SCROLLBAR_WIDTH, SEPARATOR_HEIGHT,
     SURFACE, SURFACE_RAISED, TEXT, TEXT_MUTED,
 };
-use crate::styled::{CaptionBuilder, HeadingBuilder, ListRowBuilder, ScrollbarBuilder};
+use crate::styled::{
+    BorderedBuilder, CaptionBuilder, HeadingBuilder, ListRowBuilder, ScrollbarBuilder,
+    SeparatorBuilder,
+};
 use crate::unstyled;
 
 use super::tree::Entry;
@@ -82,17 +85,17 @@ pub(crate) fn build(entries: &[Entry], summary: &Summary, state: &Rc<State>, off
 
     let column = unstyled::column(&mut document, 0.0);
     document.append_child(column, header, ItemSize::Intrinsic);
-    let above = styled::separator(&mut document);
+    let above = with_reactive_scope(&mut document, || view! { <separator /> });
     document.append_child(column, above, ItemSize::Fixed(SEPARATOR_HEIGHT));
     document.append_child(column, body, ItemSize::Percent(100.0));
-    let below = styled::separator(&mut document);
+    let below = with_reactive_scope(&mut document, || view! { <separator /> });
     document.append_child(column, below, ItemSize::Fixed(SEPARATOR_HEIGHT));
     document.append_child(column, footer, ItemSize::Intrinsic);
 
     let surface = document.create_fill(SURFACE, 0);
     document.set_fill_child(surface, column);
 
-    let edge = styled::separator(&mut document);
+    let edge = with_reactive_scope(&mut document, || view! { <separator /> });
     let panel = unstyled::row(&mut document, 0.0);
     document.append_child(panel, edge, ItemSize::Fixed(SEPARATOR_HEIGHT));
     document.append_child(panel, surface, ItemSize::Percent(100.0));
@@ -170,7 +173,9 @@ fn pick_toggle(
     let fill = document.create_fill(toggle_fill(picking), CHIP_RADIUS);
     document.set_fill_child(fill, padding);
 
-    let bordered = styled::bordered(document, fill, CHIP_RADIUS);
+    let bordered = with_reactive_scope(document, || {
+        view! { <bordered corner_radius={CHIP_RADIUS}>{fill}</bordered> }
+    });
     let pressable = unstyled::pressable(document);
     unstyled::set_pressable_child(document, pressable, bordered);
 

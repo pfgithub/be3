@@ -1,11 +1,11 @@
-use beui_macros::component;
+use beui_macros::{component, view};
 
 use crate::color::Color32;
 
 use crate::base::TextAlign;
 use crate::document::Document;
 use crate::node::{ClickHandler, NodeId};
-use crate::reactive::{create_effect, with_document, Prop};
+use crate::reactive::{create_effect, with_document, OutlineBuilder, PaddingBuilder, Prop};
 use crate::styled::theme::{
     ACCENT, ACCENT_ACTIVE, ACCENT_HOVER, BORDER, BORDER_WIDTH, FONT_BODY, ON_ACCENT, RADIUS,
     SURFACE, SURFACE_RAISED, TEXT,
@@ -58,32 +58,31 @@ pub fn button(
     let label_node = with_document(|document| {
         let label_node = document.create_text(String::new(), FONT_BODY, variant.label());
         document.set_text_align(label_node, TextAlign::Center, TextAlign::Center);
+        label_node
+    });
 
-        let padding = document.create_padding(PADDING_HORIZONTAL, PADDING_VERTICAL);
-        document.set_padding_child(padding, label_node);
-
+    let padding = view! {
+        <padding horizontal={PADDING_HORIZONTAL} vertical={PADDING_VERTICAL}>
+            {label_node}
+        </padding>
+    };
+    let fill = with_document(|document| {
         let fill = document.create_fill(variant.fill(false, false), RADIUS);
         document.set_fill_child(fill, padding);
+        fill
+    });
+    let ring = view! {
+        <outline color={ACCENT} width={FOCUS_RING_WIDTH} radius={RADIUS + 4} offset={FOCUS_RING_OFFSET} visible={focused}>
+            <outline color={BORDER} width={BORDER_WIDTH} radius={RADIUS} offset={0.0} visible={variant == ButtonVariant::Secondary}>
+                {fill}
+            </outline>
+        </outline>
+    };
+    unstyled::set_button_child(button, ring);
 
-        let border = document.create_outline(BORDER, BORDER_WIDTH, RADIUS, 0.0);
-        document.set_outline_visible(border, variant == ButtonVariant::Secondary);
-        document.set_outline_child(border, fill);
-
-        let ring = document.create_outline(ACCENT, FOCUS_RING_WIDTH, RADIUS + 4, FOCUS_RING_OFFSET);
-        document.set_outline_child(ring, border);
-
-        unstyled::set_button_child(button, ring);
-
-        create_effect(move || {
-            let color = variant.fill(hovered.get(), active.get());
-            with_document(|document| document.set_fill_color(fill, color));
-        });
-        create_effect(move || {
-            let visible = focused.get();
-            with_document(|document| document.set_outline_visible(ring, visible));
-        });
-
-        label_node
+    create_effect(move || {
+        let color = variant.fill(hovered.get(), active.get());
+        with_document(|document| document.set_fill_color(fill, color));
     });
 
     label.apply(move |value| with_document(|document| document.set_text(label_node, value)));

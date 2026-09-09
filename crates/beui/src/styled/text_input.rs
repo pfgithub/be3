@@ -1,10 +1,10 @@
-use beui_macros::component;
+use beui_macros::{component, view};
 
 use crate::color::Color32;
 
 use crate::document::Document;
 use crate::node::{Handler, NodeId};
-use crate::reactive::{with_document, Prop};
+use crate::reactive::{with_document, FillBuilder, Prop, SizedBuilder};
 use crate::styled::theme::{
     ACCENT, ACCENT_SOFT, BORDER, BORDER_WIDTH, FONT_BODY, RADIUS, SURFACE_RAISED, TEXT, TEXT_MUTED,
 };
@@ -38,15 +38,13 @@ pub fn text_input(
         unstyled::set_text_input_caret_color(document, input, ACCENT);
         unstyled::set_text_input_padding(document, input, PADDING_HORIZONTAL, 0.0);
 
-        let fill = document.create_fill(SURFACE_RAISED, RADIUS);
-        document.set_fill_child(fill, field);
+        let fill = view! { <fill color={SURFACE_RAISED} radius={RADIUS}>{field}</fill> };
 
         let border = document.create_outline(BORDER, BORDER_WIDTH, RADIUS, 0.0);
         document.set_outline_visible(border, true);
         document.set_outline_child(border, fill);
 
-        let sized = document.create_sized(None, Some(HEIGHT));
-        document.set_sized_child(sized, border);
+        let sized = view! { <sized height={HEIGHT}>{border}</sized> };
 
         let ring = document.create_outline(ACCENT, FOCUS_RING_WIDTH, RADIUS, FOCUS_RING_OFFSET);
         document.set_outline_child(ring, sized);

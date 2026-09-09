@@ -1,15 +1,25 @@
-use crate::document::Document;
+use beui_macros::{component, view};
+
 use crate::node::NodeId;
+use crate::reactive::{with_document, Children, OutlineBuilder};
 use crate::styled::theme::{BORDER, BORDER_WIDTH};
 
-pub fn bordered(document: &mut Document, child: NodeId, corner_radius: u8) -> NodeId {
-    let outline = document.create_outline(BORDER, BORDER_WIDTH, corner_radius, 0.0);
-    document.set_outline_visible(outline, true);
-    document.set_outline_child(outline, child);
-    outline
+#[component]
+pub fn bordered(corner_radius: u8, children: Children) -> NodeId {
+    let child = children
+        .into_first()
+        .expect("bordered requires a child, e.g. <bordered>{content}</bordered>");
+    view! {
+        <outline color={BORDER} width={BORDER_WIDTH} radius={corner_radius} offset={0.0} visible={true}>
+            {child}
+        </outline>
+    }
 }
 
-pub fn separator(document: &mut Document) -> NodeId {
-    let fill = document.create_fill(BORDER, 0);
-    document.create_shadow("separator", fill, Vec::new())
+#[component]
+pub fn separator() -> NodeId {
+    with_document(|document| {
+        let fill = document.create_fill(BORDER, 0);
+        document.create_shadow("separator", fill, Vec::new())
+    })
 }

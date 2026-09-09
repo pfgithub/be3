@@ -1,8 +1,10 @@
-use beui_macros::component;
+use beui_macros::{component, view};
 
 use crate::document::Document;
 use crate::node::{Handler, NodeId};
-use crate::reactive::{current_component, set_component_detail, with_document, Prop};
+use crate::reactive::{
+    current_component, set_component_detail, with_document, PaddingBuilder, Prop,
+};
 use crate::styled::theme::{
     ACCENT, ACCENT_SOFT, BORDER, FONT_BODY, RADIUS, SURFACE, SURFACE_RAISED, TEXT,
 };
@@ -17,22 +19,26 @@ pub fn toggle_button(
     let shadow = current_component();
     let mut on_change = on_change;
 
-    let (toggle, text, fill, border, ring) = with_document(|document| {
-        let toggle = unstyled::toggle(document, false);
-        let text = document.create_text(String::new(), FONT_BODY, TEXT);
-        let padding = document.create_padding(14.0, 8.0);
-        document.set_padding_child(padding, text);
+    let toggle = with_document(|document| unstyled::toggle(document, false));
+    let text = with_document(|document| document.create_text(String::new(), FONT_BODY, TEXT));
+    let padding = view! { <padding horizontal={14.0} vertical={8.0}>{text}</padding> };
+    let fill = with_document(|document| {
         let fill = document.create_fill(SURFACE, RADIUS);
         document.set_fill_child(fill, padding);
+        fill
+    });
+    let border = with_document(|document| {
         let border = document.create_outline(BORDER, 1.0, RADIUS, 0.0);
         document.set_outline_visible(border, true);
         document.set_outline_child(border, fill);
+        border
+    });
+    let ring = with_document(|document| {
         let ring = document.create_outline(ACCENT, 2.0, RADIUS, 3.0);
         document.set_outline_child(ring, border);
-        unstyled::set_toggle_child(document, toggle, ring);
-
-        (toggle, text, fill, border, ring)
+        ring
     });
+    with_document(|document| unstyled::set_toggle_child(document, toggle, ring));
 
     label.apply(move |value| {
         with_document(|document| {

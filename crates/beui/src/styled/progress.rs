@@ -1,8 +1,8 @@
-use beui_macros::component;
+use beui_macros::{component, view};
 
 use crate::base::ItemSize;
 use crate::node::NodeId;
-use crate::reactive::{current_component, with_document, Prop};
+use crate::reactive::{current_component, with_document, FillBuilder, Prop, SizedBuilder};
 use crate::styled::theme::{ACCENT, TRACK};
 use crate::unstyled;
 
@@ -13,20 +13,19 @@ const RADIUS: u8 = 3;
 pub fn progress(value: Prop<f32>) -> NodeId {
     let shadow = current_component();
 
-    let (line, filled, rest, sized) = with_document(|document| {
-        let filled = document.create_fill(ACCENT, RADIUS);
-        let rest = unstyled::spacer(document);
+    let filled = with_document(|document| document.create_fill(ACCENT, RADIUS));
+    let rest = with_document(unstyled::spacer);
+    let line = with_document(|document| {
         let line = unstyled::row(document, 0.0);
         document.append_child(line, filled, ItemSize::Percent(0.0));
         document.append_child(line, rest, ItemSize::Percent(100.0));
-
-        let track = document.create_fill(TRACK, RADIUS);
-        document.set_fill_child(track, line);
-
-        let sized = document.create_sized(None, Some(HEIGHT));
-        document.set_sized_child(sized, track);
-        (line, filled, rest, sized)
+        line
     });
+    let sized = view! {
+        <sized height={HEIGHT}>
+            <fill color={TRACK} radius={RADIUS}>{line}</fill>
+        </sized>
+    };
 
     value.apply(move |value| {
         let value = value.clamp(0.0, 1.0);

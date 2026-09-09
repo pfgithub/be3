@@ -8,11 +8,11 @@ use beui::styled::theme::{
     SURFACE_RAISED, TEXT_MUTED,
 };
 use beui::styled::{
-    self, AccordionBuilder, BodyBuilder, ButtonBuilder, ButtonVariant, CaptionBuilder, CardBuilder,
+    AccordionBuilder, BodyBuilder, ButtonBuilder, ButtonVariant, CaptionBuilder, CardBuilder,
     CheckboxBuilder, ContextMenuBuilder, DisplayBuilder, HeadingBuilder, ListboxBuilder,
     ParagraphBuilder, ProgressBuilder, RadioGroupBuilder, ScrollbarBuilder, SelectBuilder,
-    ShortcutBuilder, SliderBuilder, SwitchBuilder, TabsBuilder, TextInputBuilder, TitleBuilder,
-    ToggleButtonBuilder,
+    SeparatorBuilder, ShortcutBuilder, SliderBuilder, SwitchBuilder, TabsBuilder, TextInputBuilder,
+    TitleBuilder, ToggleButtonBuilder,
 };
 use beui::{unstyled, Color32, Context, Document, NodeId, Rect, TextAlign};
 use beui_macros::component;
@@ -48,7 +48,7 @@ impl DemoApp {
                 <fill color={BACKGROUND} radius={0}>
                     <column spacing={0.0}>
                         @fixed(HEADER_HEIGHT) <build_header set_count={set_count} />
-                        @fixed(SEPARATOR_HEIGHT) {with_document(styled::separator)}
+                        @fixed(SEPARATOR_HEIGHT) <separator/>
                         @percent(100.0) <build_body value={value} />
                     </column>
                 </fill>
@@ -240,7 +240,7 @@ fn build_sidebar() -> NodeId {
                     <paragraph content={"beui keeps a retained tree of nodes. Base nodes carry behaviour only, unstyled \
                          components compose them, and the styled components paint them.".to_string()} />
                 </accordion>
-                @fixed(SEPARATOR_HEIGHT) {with_document(styled::separator)}
+                @fixed(SEPARATOR_HEIGHT) <separator/>
                 <accordion title={"Keyboard".to_string()} open={true}>
                     <column spacing={12.0}>
                         <shortcut keys={"Tab".to_string()} description={"move focus to the next control".to_string()} />
@@ -281,7 +281,7 @@ fn build_main(value: NodeId) -> NodeId {
                         <heading content={format!("Rows ({ROW_COUNT})")} />
                         @percent(100.0) <caption content={status_text} align={TextAlign::End} />
                     </centered_row>
-                    @fixed(SEPARATOR_HEIGHT) {with_document(styled::separator)}
+                    @fixed(SEPARATOR_HEIGHT) <separator/>
                     @percent(100.0) <row spacing={10.0}>
                         @percent(100.0) {scroll}
                         @fixed(SCROLLBAR_WIDTH) <scrollbar scroll={scroll} />

@@ -1,11 +1,11 @@
-use beui_macros::component;
+use beui_macros::{component, view};
 
 use crate::color::Color32;
 
 use crate::base::ItemSize;
 use crate::document::Document;
 use crate::node::{Handler, NodeId};
-use crate::reactive::{current_component, set_component_detail, with_document, Prop};
+use crate::reactive::{current_component, set_component_detail, with_document, Prop, SizedBuilder};
 use crate::styled::theme::{ACCENT, ACCENT_HOVER, BORDER, KNOB, RADIUS, SURFACE_RAISED};
 use crate::unstyled;
 
@@ -23,35 +23,38 @@ pub fn switch(on: Prop<bool>, on_change: Option<Handler<bool>>) -> NodeId {
     let shadow = current_component();
     let mut on_change = on_change;
 
-    let (toggle, line, before, after, track, ring) = with_document(|document| {
-        let toggle = unstyled::toggle(document, false);
+    let toggle = with_document(|document| unstyled::toggle(document, false));
 
-        let knob_fill = document.create_fill(KNOB, KNOB_RADIUS);
-        let knob = document.create_sized(Some(KNOB_SIZE), Some(KNOB_SIZE));
-        document.set_sized_child(knob, knob_fill);
+    let knob = with_document(|document| document.create_fill(KNOB, KNOB_RADIUS));
+    let knob = view! { <sized width={KNOB_SIZE} height={KNOB_SIZE}>{knob}</sized> };
 
-        let before = unstyled::spacer(document);
-        let after = unstyled::spacer(document);
+    let before = with_document(unstyled::spacer);
+    let after = with_document(unstyled::spacer);
+    let line = with_document(|document| {
         let line = unstyled::centered_row(document, 0.0);
         document.append_child(line, before, before_size(false));
         document.append_child(line, knob, ItemSize::Intrinsic);
         document.append_child(line, after, after_size(false));
+        line
+    });
 
+    let padding = with_document(|document| {
         let padding = document.create_padding(PADDING, PADDING);
         document.set_padding_child(padding, line);
-
+        padding
+    });
+    let track = with_document(|document| {
         let track = document.create_fill(track_fill(false, false), TRACK_RADIUS);
         document.set_fill_child(track, padding);
-
-        let sized = document.create_sized(Some(WIDTH), Some(HEIGHT));
-        document.set_sized_child(sized, track);
-
+        track
+    });
+    let sized = view! { <sized width={WIDTH} height={HEIGHT}>{track}</sized> };
+    let ring = with_document(|document| {
         let ring = document.create_outline(ACCENT, FOCUS_RING_WIDTH, RADIUS, FOCUS_RING_OFFSET);
         document.set_outline_child(ring, sized);
-        unstyled::set_toggle_child(document, toggle, ring);
-
-        (toggle, line, before, after, track, ring)
+        ring
     });
+    with_document(|document| unstyled::set_toggle_child(document, toggle, ring));
 
     with_document(|document| {
         unstyled::set_toggle_on_change(document, toggle, move |document, on| {

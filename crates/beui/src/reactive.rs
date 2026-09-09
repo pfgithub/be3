@@ -276,14 +276,37 @@ pub fn fill(color: Color32, radius: u8, children: Children) -> NodeId {
 }
 
 #[component]
-pub fn outline(color: Color32, width: f32, radius: u8, offset: f32, children: Children) -> NodeId {
+pub fn outline(
+    color: Color32,
+    width: f32,
+    radius: u8,
+    offset: f32,
+    visible: Prop<bool>,
+    children: Children,
+) -> NodeId {
     let child = children
         .into_first()
         .expect("outline requires a child, e.g. <outline>{content}</outline>");
-    with_document(|document| {
+    let outline = with_document(|document| {
         let outline = document.create_outline(color, width, radius, offset);
         document.set_outline_child(outline, child);
         outline
+    });
+    visible.apply(move |visible| {
+        with_document(|document| document.set_outline_visible(outline, visible))
+    });
+    outline
+}
+
+#[component]
+pub fn sized(width: Option<f32>, height: Option<f32>, children: Children) -> NodeId {
+    let child = children
+        .into_first()
+        .expect("sized requires a child, e.g. <sized>{content}</sized>");
+    with_document(|document| {
+        let sized = document.create_sized(width, height);
+        document.set_sized_child(sized, child);
+        sized
     })
 }
 
