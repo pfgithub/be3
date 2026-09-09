@@ -14,15 +14,17 @@ fn a_disabled_button_prop_tracks_a_signal_and_blocks_clicks_while_true() {
         let (disabled, set_disabled) = create_signal(true);
 
         let toggle = button()
-            .children([intrinsic(text().string("toggle").build())])
-            .on_click(move || set_disabled.update(|disabled| *disabled = !*disabled))
+            .children([intrinsic(text().string("toggle".to_string()).build())])
+            .on_click(Box::new(move |_document| {
+                set_disabled.update(|disabled| *disabled = !*disabled)
+            }))
             .build();
         sink_toggle.set(Some(toggle));
 
         let go = button()
-            .children([intrinsic(text().string("go").build())])
+            .children([intrinsic(text().string("go".to_string()).build())])
             .disabled(disabled)
-            .on_click(move || sink.set(sink.get() + 1))
+            .on_click(Box::new(move |_document| sink.set(sink.get() + 1)))
             .build();
         sink_go.set(Some(go));
 

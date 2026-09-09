@@ -2,7 +2,7 @@ use beui::reactive::{
     build, button, column, component, create_memo, create_signal, for_each, intrinsic, row, show,
     text, view,
 };
-use beui::{App, Color32, Context, Document, NodeId, Rect};
+use beui::{App, ClickHandler, Color32, Context, Document, NodeId, Rect};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     beui::run("beui counter", CounterApp::new())
@@ -28,38 +28,40 @@ fn app() -> NodeId {
         create_memo(move || count.get() != 0)
     };
 
-    let decrement_click = {
+    let decrement_click: ClickHandler = Box::new({
         let set_count = set_count.clone();
         let set_history = set_history.clone();
         let count = count.clone();
         let next_id = next_id.clone();
         let set_next_id = set_next_id.clone();
-        move || {
+        move |_document| {
             set_count.update(|value| *value -= 1);
             let id = next_id.get();
             set_next_id.set(id + 1);
             set_history.update(|entries| entries.push((id, count.get())));
         }
-    };
+    });
 
-    let increment_click = {
+    let increment_click: ClickHandler = Box::new({
         let set_count = set_count.clone();
         let set_history = set_history.clone();
         let count = count.clone();
         let next_id = next_id.clone();
         let set_next_id = set_next_id.clone();
-        move || {
+        move |_document| {
             set_count.update(|value| *value += 1);
             let id = next_id.get();
             set_next_id.set(id + 1);
             set_history.update(|entries| entries.push((id, count.get())));
         }
-    };
+    });
 
-    let reset_click = move || {
+    let reset_click: ClickHandler = Box::new(move |_document| {
         set_count.set(0);
         set_history.set(Vec::new());
-    };
+    });
+
+    let count_text = create_memo(move || count.get().to_string());
 
     view! {
         column {
@@ -71,25 +73,25 @@ fn app() -> NodeId {
                 button {
                     disabled: is_zero,
                     on_click: decrement_click,
-                } [ text { string: "-" } ],
-                text { string: count },
+                } [ text { string: "-".to_string() } ],
+                text { string: count_text },
                 button {
                     on_click: increment_click,
-                } [ text { string: "+" } ],
+                } [ text { string: "+".to_string() } ],
                 show {
                     condition: is_nonzero,
-                    then: move || view! {
+                    then: Box::new(move || view! {
                         button {
                             on_click: reset_click,
-                        } [ text { string: "reset" } ]
-                    },
+                        } [ text { string: "reset".to_string() } ]
+                    }),
                 }
             ],
             for_each {
                 spacing: 4.0,
                 items: history,
-                key: |(id, _)| *id,
-                view: |(_, value)| intrinsic(history_entry().value(*value).build()),
+                key: Box::new(|(id, _)| *id),
+                view: Box::new(|(_, value)| intrinsic(history_entry().value(*value).build())),
             }
         ]
     }

@@ -14,14 +14,16 @@ fn for_each_reuses_nodes_for_keys_that_persist_across_an_update() {
         let list = for_each()
             .spacing(0.0)
             .items(items)
-            .key(|value| *value)
-            .view(|value| intrinsic(text().string(value.to_string()).build()))
+            .key(Box::new(|value| *value))
+            .view(Box::new(|value| {
+                intrinsic(text().string(value.to_string()).build())
+            }))
             .build();
         sink_list.set(Some(list));
 
         let shuffle = button()
-            .children([intrinsic(text().string("shuffle").build())])
-            .on_click(move || set_items.set(vec![3, 2, 4]))
+            .children([intrinsic(text().string("shuffle".to_string()).build())])
+            .on_click(Box::new(move |_document| set_items.set(vec![3, 2, 4])))
             .build();
         sink_shuffle.set(Some(shuffle));
 

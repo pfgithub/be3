@@ -10,7 +10,7 @@ use crate::document::Document;
 use crate::node::{ClickHandler, NodeId};
 use crate::unstyled;
 
-pub use beui_macros::{builder, component, view};
+pub use beui_macros::{component, view};
 pub use reactive::{batch, create_memo, create_signal, on_cleanup, untrack, Memo, Scope};
 
 thread_local! {
@@ -119,53 +119,11 @@ impl<T: Clone + PartialEq + 'static> IntoProp<T> for Memo<T> {
     }
 }
 
-pub trait IntoTextValue {
-    fn bind_into(self, node: NodeId);
-}
-
-impl IntoTextValue for &str {
-    fn bind_into(self, node: NodeId) {
-        with_document(|document| document.set_text(node, self));
-    }
-}
-
-impl IntoTextValue for String {
-    fn bind_into(self, node: NodeId) {
-        with_document(|document| document.set_text(node, self));
-    }
-}
-
-impl<T: ToString + Clone + 'static> IntoTextValue for ReadSignal<T> {
-    fn bind_into(self, node: NodeId) {
-        Prop::Dynamic(Box::new(move || self.get()))
-            .map(|value| value.to_string())
-            .apply(move |value| with_document(|document| document.set_text(node, value)));
-    }
-}
-
-impl<T: ToString + Clone + PartialEq + 'static> IntoTextValue for Memo<T> {
-    fn bind_into(self, node: NodeId) {
-        Prop::Dynamic(Box::new(move || self.get()))
-            .map(|value| value.to_string())
-            .apply(move |value| with_document(|document| document.set_text(node, value)));
-    }
-}
-
-fn boxed_text_binder(value: impl IntoTextValue + 'static) -> Box<dyn FnOnce(NodeId)> {
-    Box::new(move |node| value.bind_into(node))
-}
-
 #[component]
-pub fn text(
-    #[prop(with = |value: impl IntoTextValue + 'static| boxed_text_binder(value))] string: Option<
-        Box<dyn FnOnce(NodeId)>,
-    >,
-) -> NodeId {
+pub fn text(string: Prop<String>) -> NodeId {
     let node =
         with_document(|document| document.create_text(String::new(), 14.0, crate::Color32::WHITE));
-    if let Some(bind) = string {
-        bind(node);
-    }
+    string.apply(move |value| with_document(|document| document.set_text(node, value)));
     node
 }
 
@@ -181,58 +139,44 @@ pub fn percent(node: NodeId, weight: f32) -> (NodeId, ItemSize) {
     (node, ItemSize::Percent(weight))
 }
 
-pub struct Children(Box<dyn FnOnce(NodeId)>);
+pub struct Children(Vec<(NodeId, ItemSize)>);
 
 impl Children {
     fn mount(self, parent: NodeId) {
-        (self.0)(parent)
+        with_document(|document| {
+            for (child, size) in self.0 {
+                document.append_child(parent, child, size);
+            }
+        });
+    }
+
+    fn into_first(self) -> Option<NodeId> {
+        self.0.into_iter().next().map(|(child, _)| child)
     }
 }
 
 impl<I: IntoIterator<Item = (NodeId, ItemSize)>> From<I> for Children {
     fn from(children: I) -> Self {
-        let children: Vec<_> = children.into_iter().collect();
-        Children(Box::new(move |parent| {
-            with_document(|document| {
-                for (child, size) in children {
-                    document.append_child(parent, child, size);
-                }
-            });
-        }))
+        Children(children.into_iter().collect())
     }
 }
 
-#[builder]
-pub fn row(
-    spacing: f32,
-    #[prop(with = |children: impl Into<Children>| children.into())] children: Children,
-) -> NodeId {
+#[component]
+pub fn row(spacing: f32, children: Children) -> NodeId {
     let row = with_document(|document| unstyled::row(document, spacing));
     children.mount(row);
     row
 }
 
-#[builder]
-pub fn column(
-    spacing: f32,
-    #[prop(with = |children: impl Into<Children>| children.into())] children: Children,
-) -> NodeId {
+#[component]
+pub fn column(spacing: f32, children: Children) -> NodeId {
     let column = with_document(|document| unstyled::column(document, spacing));
     children.mount(column);
     column
 }
 
-fn boxed_show_then(then: impl FnOnce() -> NodeId + 'static) -> Box<dyn FnOnce() -> NodeId> {
-    Box::new(then)
-}
-
 #[component]
-pub fn show(
-    condition: Prop<bool>,
-    #[prop(with = |then: impl FnOnce() -> NodeId + 'static| boxed_show_then(then))] then: Option<
-        Box<dyn FnOnce() -> NodeId>,
-    >,
-) -> NodeId {
+pub fn show(condition: Prop<bool>, then: Option<Box<dyn FnOnce() -> NodeId>>) -> NodeId {
     let mut then = then;
     let visibility = with_document(|document| document.create_visibility(false));
     let built: Rc<Cell<Option<NodeId>>> = Rc::new(Cell::new(None));
@@ -247,30 +191,13 @@ pub fn show(
     visibility
 }
 
-fn boxed_for_each_key<T, K>(key: impl Fn(&T) -> K + 'static) -> Box<dyn Fn(&T) -> K>
-where
-    T: 'static,
-    K: 'static,
-{
-    Box::new(key)
-}
-
 type ForEachView<T> = Box<dyn Fn(&T) -> (NodeId, ItemSize)>;
-
-fn boxed_for_each_view<T: 'static>(
-    view: impl Fn(&T) -> (NodeId, ItemSize) + 'static,
-) -> ForEachView<T> {
-    Box::new(view)
-}
 
 #[component]
 pub fn for_each<T, K>(
     spacing: f32,
     items: Prop<Vec<T>>,
-    #[prop(with = |key: impl Fn(&T) -> K + 'static| boxed_for_each_key(key))] key: Option<
-        Box<dyn Fn(&T) -> K>,
-    >,
-    #[prop(with = |view: impl Fn(&T) -> (NodeId, ItemSize) + 'static| boxed_for_each_view(view))]
+    key: Option<Box<dyn Fn(&T) -> K>>,
     view: Option<ForEachView<T>>,
 ) -> NodeId
 where
@@ -307,30 +234,11 @@ where
     parent
 }
 
-fn boxed_click_handler(mut handler: impl FnMut() + 'static) -> ClickHandler {
-    Box::new(move |_document| handler())
-}
-
-fn first_child(children: impl IntoIterator<Item = (NodeId, ItemSize)>) -> NodeId {
-    children
-        .into_iter()
-        .next()
-        .expect("button requires a child")
-        .0
-}
-
 #[component]
-pub fn button(
-    #[prop(with = |children: impl IntoIterator<Item = (NodeId, ItemSize)>| first_child(children))]
-    children: Option<NodeId>,
-    disabled: Prop<bool>,
-    #[prop(with = |handler: impl FnMut() + 'static| boxed_click_handler(handler))] on_click: Option<
-        ClickHandler,
-    >,
-) -> NodeId {
+pub fn button(children: Children, disabled: Prop<bool>, on_click: Option<ClickHandler>) -> NodeId {
     let button = with_document(unstyled::button);
-    if let Some(children) = children {
-        with_document(|document| unstyled::set_button_child(document, button, children));
+    if let Some(child) = children.into_first() {
+        with_document(|document| unstyled::set_button_child(document, button, child));
     }
     if let Some(on_click) = on_click {
         with_document(|document| unstyled::set_button_on_click(document, button, on_click));

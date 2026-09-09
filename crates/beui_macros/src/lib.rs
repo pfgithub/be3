@@ -6,8 +6,8 @@ use syn::parenthesized;
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
 use syn::{
-    parse_macro_input, Attribute, Expr, ExprClosure, FnArg, GenericArgument, Ident, ItemFn, Pat,
-    PatType, PathArguments, Token, Type,
+    parse_macro_input, Expr, FnArg, GenericArgument, Ident, ItemFn, Pat, PatType, PathArguments,
+    Token, Type,
 };
 
 struct Prop {
@@ -15,8 +15,7 @@ struct Prop {
     ty: Type,
     inner_ty: Option<Type>,
     reactive_inner_ty: Option<Type>,
-    with: Option<ExprClosure>,
-    default: Option<Expr>,
+    is_children: bool,
 }
 
 fn pascal_case(name: &str) -> String {
@@ -48,42 +47,18 @@ fn generic_inner(ty: &Type, name: &str) -> Option<Type> {
     })
 }
 
-fn take_prop_attr(attrs: &mut Vec<Attribute>) -> (Option<ExprClosure>, Option<Expr>) {
-    let mut with = None;
-    let mut default = None;
-    attrs.retain(|attr| {
-        if !attr.path().is_ident("prop") {
-            return true;
-        }
-        attr.parse_nested_meta(|meta| {
-            if meta.path.is_ident("with") {
-                let expr: Expr = meta.value()?.parse()?;
-                let Expr::Closure(closure) = expr else {
-                    return Err(meta.error("#[prop(with = ...)] must be a closure"));
-                };
-                with = Some(closure);
-            } else if meta.path.is_ident("default") {
-                default = Some(meta.value()?.parse()?);
-            }
-            Ok(())
-        })
-        .expect("invalid #[prop(...)] attribute");
-        false
-    });
-    (with, default)
+fn is_named_type(ty: &Type, name: &str) -> bool {
+    let Type::Path(path) = ty else {
+        return false;
+    };
+    path.path
+        .segments
+        .last()
+        .is_some_and(|segment| segment.ident == name)
 }
 
 #[proc_macro_attribute]
 pub fn component(_attr: TokenStream, item: TokenStream) -> TokenStream {
-    expand(item, true)
-}
-
-#[proc_macro_attribute]
-pub fn builder(_attr: TokenStream, item: TokenStream) -> TokenStream {
-    expand(item, false)
-}
-
-fn expand(item: TokenStream, shadowed: bool) -> TokenStream {
     let ItemFn {
         attrs,
         vis,
@@ -99,23 +74,22 @@ fn expand(item: TokenStream, shadowed: bool) -> TokenStream {
         .inputs
         .iter_mut()
         .map(|arg| {
-            let FnArg::Typed(PatType { attrs, pat, ty, .. }) = arg else {
+            let FnArg::Typed(PatType { pat, ty, .. }) = arg else {
                 panic!("#[component] functions cannot take `self`");
             };
             let ident = match pat.as_ref() {
                 Pat::Ident(pat_ident) => pat_ident.ident.clone(),
                 _ => panic!("#[component] props must be simple identifiers"),
             };
-            let (with, default) = take_prop_attr(attrs);
             let inner_ty = generic_inner(ty, "Option");
             let reactive_inner_ty = generic_inner(ty, "Prop");
+            let is_children = is_named_type(ty, "Children");
             Prop {
                 ident,
                 ty: (**ty).clone(),
                 inner_ty,
                 reactive_inner_ty,
-                with,
-                default,
+                is_children,
             }
         })
         .collect();
@@ -128,23 +102,10 @@ fn expand(item: TokenStream, shadowed: bool) -> TokenStream {
 
     let setters = props.iter().map(|prop| {
         let ident = &prop.ident;
-        if let Some(with) = &prop.with {
-            let input = with
-                .inputs
-                .first()
-                .expect("#[prop(with = ...)] closure must take one argument");
-            let Pat::Type(PatType { pat, ty, .. }) = input else {
-                panic!("#[prop(with = ...)] closure argument must be typed");
-            };
-            let body = &with.body;
-            let assign = if prop.inner_ty.is_some() {
-                quote! { self.#ident = Some(Some(#body)); }
-            } else {
-                quote! { self.#ident = Some(#body); }
-            };
+        if prop.is_children {
             quote! {
-                pub fn #ident(mut self, #pat: #ty) -> Self {
-                    #assign
+                pub fn #ident(mut self, children: impl Into<::beui::reactive::Children>) -> Self {
+                    self.#ident = Some(children.into());
                     self
                 }
             }
@@ -176,9 +137,7 @@ fn expand(item: TokenStream, shadowed: bool) -> TokenStream {
     let field_lets = props.iter().map(|prop| {
         let ident = &prop.ident;
         let ident_str = ident.to_string();
-        let value = if let Some(default) = &prop.default {
-            quote! { self.#ident.unwrap_or_else(|| #default) }
-        } else if prop.inner_ty.is_some() {
+        let value = if prop.inner_ty.is_some() {
             quote! { self.#ident.unwrap_or(None) }
         } else if prop.reactive_inner_ty.is_some() {
             quote! {
@@ -201,11 +160,7 @@ fn expand(item: TokenStream, shadowed: bool) -> TokenStream {
 
     let generics = &sig.generics;
     let where_clause = &sig.generics.where_clause;
-    let finish = if shadowed {
-        quote! { ::beui::reactive::component(#name, move || #block) }
-    } else {
-        quote! { #block }
-    };
+    let finish = quote! { ::beui::reactive::component(#name, move || #block) };
 
     let prop_idents: Vec<_> = props.iter().map(|prop| prop.ident.clone()).collect();
 

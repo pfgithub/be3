@@ -14,17 +14,19 @@ fn show_lazily_builds_and_toggles_its_child_when_the_condition_changes() {
         let (visible, set_visible) = create_signal(false);
 
         let toggle = button()
-            .children([intrinsic(text().string("toggle").build())])
-            .on_click(move || set_visible.update(|visible| *visible = !*visible))
+            .children([intrinsic(text().string("toggle".to_string()).build())])
+            .on_click(Box::new(move |_document| {
+                set_visible.update(|visible| *visible = !*visible)
+            }))
             .build();
         sink_toggle.set(Some(toggle));
 
         let panel = show()
             .condition(visible)
-            .then(move || {
+            .then(Box::new(move || {
                 sink.set(sink.get() + 1);
-                text().string("panel").build()
-            })
+                text().string("panel".to_string()).build()
+            }))
             .build();
         sink_panel.set(Some(panel));
 
