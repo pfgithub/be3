@@ -21,19 +21,28 @@ thread_local! {
     static PENDING_DETAIL: RefCell<HashMap<NodeId, String>> = RefCell::new(HashMap::new());
 }
 
-pub(crate) struct DocumentGuard<'a> {
-    document: &'a mut Document,
+pub(crate) enum DocumentGuard<'a> {
+    Installed(&'a mut Document),
+    Reentrant,
 }
 
 impl Drop for DocumentGuard<'_> {
     fn drop(&mut self) {
-        let restored = CURRENT_DOCUMENT.with(|cell| cell.borrow_mut().take());
-        *self.document =
-            restored.expect("beui::reactive document guard dropped without an installed document");
+        if let DocumentGuard::Installed(document) = self {
+            let restored = CURRENT_DOCUMENT.with(|cell| cell.borrow_mut().take());
+            **document = restored
+                .expect("beui::reactive document guard dropped without an installed document");
+        }
     }
 }
 
 pub(crate) fn install(document: &mut Document) -> DocumentGuard<'_> {
+    let already_installed = CURRENT_DOCUMENT
+        .with(|cell| cell.try_borrow().map(|slot| slot.is_some()))
+        .unwrap_or(true);
+    if already_installed {
+        return DocumentGuard::Reentrant;
+    }
     let taken = std::mem::take(document);
     CURRENT_DOCUMENT.with(|cell| {
         let previous = cell.borrow_mut().replace(taken);
@@ -42,7 +51,7 @@ pub(crate) fn install(document: &mut Document) -> DocumentGuard<'_> {
             "beui::reactive: a document is already installed on this thread"
         );
     });
-    DocumentGuard { document }
+    DocumentGuard::Installed(document)
 }
 
 pub(crate) fn enter<R>(document: &mut Document, f: impl FnOnce() -> R) -> R {
