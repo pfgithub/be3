@@ -13,7 +13,11 @@ const RADIUS: u8 = 3;
 pub fn progress(value: Prop<f32>) -> NodeId {
     let shadow = current_component();
 
-    let filled = with_document(|document| document.create_fill(ACCENT, RADIUS));
+    let filled = FillBuilder::default()
+        .color(ACCENT)
+        .radius(RADIUS)
+        .children([])
+        .build();
     let rest = with_document(unstyled::spacer);
     let line = with_document(|document| {
         let line = unstyled::row(document, 0.0);

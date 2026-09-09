@@ -7,7 +7,7 @@ use crate::document::Document;
 use crate::node::{Handler, NodeId};
 use crate::reactive::{
     create_effect, current_component, set_component_detail, with_document, CenteredRowBuilder,
-    Children, OutlineBuilder, PaddingBuilder, Prop, SizedBuilder,
+    Children, FillBuilder, OutlineBuilder, PaddingBuilder, Prop, SizedBuilder,
 };
 use crate::styled::text::{code, heading_line};
 use crate::styled::theme::{ACCENT, RADIUS, SURFACE_RAISED, TEXT_MUTED};
@@ -54,11 +54,7 @@ pub fn accordion(
     let padding = view! {
         <padding horizontal={PADDING_HORIZONTAL} vertical={PADDING_VERTICAL}>{line}</padding>
     };
-    let header = with_document(|document| {
-        let header = document.create_fill(Color32::TRANSPARENT, RADIUS);
-        document.set_fill_child(header, padding);
-        header
-    });
+    let header = view! { <fill color={Color32::TRANSPARENT} radius={RADIUS}>{padding}</fill> };
     let ring = view! {
         <outline color={ACCENT} width={2.0} radius={RADIUS} offset={2.0} visible={focused}>
             {header}

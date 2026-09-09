@@ -75,8 +75,7 @@ fn style_menu_rows(document: &mut Document, menu: NodeId, items: &[MenuItem]) {
         let padding = view! {
             <padding horizontal={PADDING_HORIZONTAL} vertical={PADDING_VERTICAL}>{label}</padding>
         };
-        let fill = document.create_fill(Color32::TRANSPARENT, RADIUS);
-        document.set_fill_child(fill, padding);
+        let fill = view! { <fill color={Color32::TRANSPARENT} radius={RADIUS}>{padding}</fill> };
         unstyled::set_button_child(button, fill);
 
         let hovered = unstyled::button_hovered(document, button);

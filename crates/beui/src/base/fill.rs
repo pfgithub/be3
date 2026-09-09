@@ -7,6 +7,9 @@ use crate::painter::Painter;
 
 use crate::document::Document;
 use crate::node::{Element, InteractInput, NodeId};
+use crate::reactive::{with_document, Children};
+
+use beui_macros::component;
 
 pub(crate) struct FillNode {
     pub(crate) child: Option<NodeId>,
@@ -89,11 +92,11 @@ impl Element for FillNode {
 }
 
 impl Document {
-    pub fn create_fill(&mut self, color: Color32, corner_radius: u8) -> NodeId {
+    pub(crate) fn create_fill(&mut self, color: Color32, corner_radius: u8) -> NodeId {
         self.arena.insert(FillNode::new(color, corner_radius))
     }
 
-    pub fn set_fill_child(&mut self, fill: NodeId, child: NodeId) {
+    pub(crate) fn set_fill_child(&mut self, fill: NodeId, child: NodeId) {
         if self.arena.get_as::<FillNode>(fill).child != Some(child) {
             self.arena.get_mut_as::<FillNode>(fill).child = Some(child);
         }
@@ -104,4 +107,16 @@ impl Document {
             self.arena.get_mut_as::<FillNode>(fill).color = color;
         }
     }
+}
+
+#[component(base)]
+pub fn fill(color: Color32, radius: u8, children: Children) -> NodeId {
+    let child = children.into_first();
+    with_document(|document| {
+        let fill = document.create_fill(color, radius);
+        if let Some(child) = child {
+            document.set_fill_child(fill, child);
+        }
+        fill
+    })
 }

@@ -6,6 +6,9 @@ use crate::painter::Painter;
 
 use crate::document::Document;
 use crate::node::{Element, InteractInput, NodeId};
+use crate::reactive::{with_document, Children};
+
+use beui_macros::component;
 
 pub(crate) struct PaddingNode {
     pub(crate) child: Option<NodeId>,
@@ -91,11 +94,11 @@ impl Element for PaddingNode {
 }
 
 impl Document {
-    pub fn create_padding(&mut self, horizontal: f32, vertical: f32) -> NodeId {
+    pub(crate) fn create_padding(&mut self, horizontal: f32, vertical: f32) -> NodeId {
         self.arena.insert(PaddingNode::new(horizontal, vertical))
     }
 
-    pub fn set_padding_child(&mut self, padding: NodeId, child: NodeId) {
+    pub(crate) fn set_padding_child(&mut self, padding: NodeId, child: NodeId) {
         if self.arena.get_as::<PaddingNode>(padding).child != Some(child) {
             self.arena.get_mut_as::<PaddingNode>(padding).child = Some(child);
         }
@@ -110,4 +113,16 @@ impl Document {
         node.horizontal = horizontal;
         node.vertical = vertical;
     }
+}
+
+#[component(base)]
+pub fn padding(horizontal: f32, vertical: f32, children: Children) -> NodeId {
+    let child = children
+        .into_first()
+        .expect("padding requires a child, e.g. <padding>{content}</padding>");
+    with_document(|document| {
+        let padding = document.create_padding(horizontal, vertical);
+        document.set_padding_child(padding, child);
+        padding
+    })
 }

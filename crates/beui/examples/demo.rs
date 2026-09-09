@@ -1,7 +1,7 @@
 use beui::reactive::{
-    create_effect, create_memo, create_signal, view, with_document, with_reactive_scope,
-    CenteredRowBuilder, ColumnBuilder, FillBuilder, PaddingBuilder, ReadSignal, RowBuilder,
-    ShowBuilder, VisibilityBuilder, WriteSignal,
+    create_effect, create_memo, create_signal, intrinsic, view, with_document, with_reactive_scope,
+    CenteredRowBuilder, ColumnBuilder, FillBuilder, OutlineBuilder, PaddingBuilder, ReadSignal,
+    RowBuilder, ShowBuilder, VisibilityBuilder, WriteSignal,
 };
 use beui::styled::theme::{
     ACCENT, ACCENT_SOFT, BACKGROUND, RADIUS, SCROLLBAR_WIDTH, SEPARATOR_HEIGHT, SURFACE,
@@ -146,7 +146,11 @@ fn scroll_row(index: usize, rows: Rows, compact: bool) -> NodeId {
         </padding>
     };
 
-    let fill = with_document(|document| document.create_fill(Color32::TRANSPARENT, RADIUS));
+    let fill = FillBuilder::default()
+        .color(Color32::TRANSPARENT)
+        .radius(RADIUS)
+        .children([intrinsic(padding)])
+        .build();
     create_effect(move || {
         let color = match (is_selected.get(), hovered.get()) {
             (true, _) => ACCENT_SOFT,
@@ -156,16 +160,18 @@ fn scroll_row(index: usize, rows: Rows, compact: bool) -> NodeId {
         with_document(|document| document.set_fill_color(fill, color));
     });
 
-    let ring = with_document(|document| document.create_outline(ACCENT, 2.0, RADIUS, 0.0));
+    let ring = OutlineBuilder::default()
+        .color(ACCENT)
+        .width(2.0)
+        .radius(RADIUS)
+        .offset(0.0)
+        .children([intrinsic(fill)])
+        .build();
     create_effect(move || {
         let visible = focused.get();
         with_document(|document| document.set_outline_visible(ring, visible));
     });
 
-    with_document(|document| {
-        document.set_fill_child(fill, padding);
-        document.set_outline_child(ring, fill);
-    });
     unstyled::set_button_child(button, ring);
     unstyled::set_button_on_click(button, move |_document| rows.select(index));
 

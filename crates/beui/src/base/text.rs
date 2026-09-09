@@ -11,6 +11,9 @@ use crate::painter::Painter;
 
 use crate::document::Document;
 use crate::node::{Element, InteractInput, NodeId};
+use crate::reactive::{with_document, Prop};
+
+use beui_macros::component;
 
 const CARET_WIDTH: f32 = 1.0;
 const BLINK_INTERVAL: Duration = Duration::from_millis(530);
@@ -372,4 +375,12 @@ impl Document {
     pub fn text_index_at(&self, text: NodeId, pos: Pos2) -> usize {
         self.arena.get_as::<TextNode>(text).index_at(pos)
     }
+}
+
+#[component(base)]
+pub fn text(string: Prop<String>) -> NodeId {
+    let node =
+        with_document(|document| document.create_text(String::new(), 14.0, crate::Color32::WHITE));
+    string.apply(move |value| with_document(|document| document.set_text(node, value)));
+    node
 }

@@ -6,6 +6,9 @@ use crate::painter::Painter;
 
 use crate::document::Document;
 use crate::node::{Element, InteractInput, NodeId};
+use crate::reactive::{with_document, Children};
+
+use beui_macros::component;
 
 pub(crate) struct SizedNode {
     pub(crate) child: Option<NodeId>,
@@ -107,11 +110,11 @@ impl Element for SizedNode {
 }
 
 impl Document {
-    pub fn create_sized(&mut self, width: Option<f32>, height: Option<f32>) -> NodeId {
+    pub(crate) fn create_sized(&mut self, width: Option<f32>, height: Option<f32>) -> NodeId {
         self.arena.insert(SizedNode::new(width, height))
     }
 
-    pub fn set_sized_child(&mut self, sized: NodeId, child: NodeId) {
+    pub(crate) fn set_sized_child(&mut self, sized: NodeId, child: NodeId) {
         if self.arena.get_as::<SizedNode>(sized).child != Some(child) {
             self.arena.get_mut_as::<SizedNode>(sized).child = Some(child);
         }
@@ -128,4 +131,16 @@ impl Document {
             self.arena.get_mut_as::<SizedNode>(sized).height = height;
         }
     }
+}
+
+#[component(base)]
+pub fn sized(width: Option<f32>, height: Option<f32>, children: Children) -> NodeId {
+    let child = children
+        .into_first()
+        .expect("sized requires a child, e.g. <sized>{content}</sized>");
+    with_document(|document| {
+        let sized = document.create_sized(width, height);
+        document.set_sized_child(sized, child);
+        sized
+    })
 }

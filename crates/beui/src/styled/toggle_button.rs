@@ -3,7 +3,8 @@ use beui_macros::{component, view};
 use crate::document::Document;
 use crate::node::{Handler, NodeId};
 use crate::reactive::{
-    current_component, set_component_detail, with_document, PaddingBuilder, Prop,
+    current_component, set_component_detail, with_document, FillBuilder, OutlineBuilder,
+    PaddingBuilder, Prop,
 };
 use crate::styled::theme::{
     ACCENT, ACCENT_SOFT, BORDER, FONT_BODY, RADIUS, SURFACE, SURFACE_RAISED, TEXT,
@@ -22,22 +23,15 @@ pub fn toggle_button(
     let toggle = unstyled::ToggleBuilder::default().checked(false).build();
     let text = with_document(|document| document.create_text(String::new(), FONT_BODY, TEXT));
     let padding = view! { <padding horizontal={14.0} vertical={8.0}>{text}</padding> };
-    let fill = with_document(|document| {
-        let fill = document.create_fill(SURFACE, RADIUS);
-        document.set_fill_child(fill, padding);
-        fill
-    });
-    let border = with_document(|document| {
-        let border = document.create_outline(BORDER, 1.0, RADIUS, 0.0);
-        document.set_outline_visible(border, true);
-        document.set_outline_child(border, fill);
-        border
-    });
-    let ring = with_document(|document| {
-        let ring = document.create_outline(ACCENT, 2.0, RADIUS, 3.0);
-        document.set_outline_child(ring, border);
-        ring
-    });
+    let fill = view! { <fill color={SURFACE} radius={RADIUS}>{padding}</fill> };
+    let border = view! {
+        <outline color={BORDER} width={1.0} radius={RADIUS} offset={0.0} visible={true}>
+            {fill}
+        </outline>
+    };
+    let ring = view! {
+        <outline color={ACCENT} width={2.0} radius={RADIUS} offset={3.0}>{border}</outline>
+    };
     with_document(|document| unstyled::set_toggle_child(document, toggle, ring));
 
     label.apply(move |value| {

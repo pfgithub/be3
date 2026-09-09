@@ -43,12 +43,17 @@ pub fn select(
                 <padding horizontal={PADDING_HORIZONTAL} vertical={0.0}>{label}</padding>
             </fill>
         };
-        let border = document.create_outline(BORDER, BORDER_WIDTH, RADIUS, 0.0);
-        document.set_outline_visible(border, true);
-        document.set_outline_child(border, fill);
+        let border = view! {
+            <outline color={BORDER} width={BORDER_WIDTH} radius={RADIUS} offset={0.0} visible={true}>
+                {fill}
+            </outline>
+        };
         let sized = view! { <sized width={TRIGGER_WIDTH} height={HEIGHT}>{border}</sized> };
-        let ring = document.create_outline(ACCENT, FOCUS_RING_WIDTH, RADIUS, FOCUS_RING_OFFSET);
-        document.set_outline_child(ring, sized);
+        let ring = view! {
+            <outline color={ACCENT} width={FOCUS_RING_WIDTH} radius={RADIUS} offset={FOCUS_RING_OFFSET}>
+                {sized}
+            </outline>
+        };
         unstyled::set_button_child(trigger, ring);
 
         let trigger_hovered = unstyled::button_hovered(document, trigger);
@@ -75,9 +80,11 @@ pub fn select(
         unstyled::set_text_input_placeholder(document, search, "Search");
 
         let search_fill = view! { <fill color={SURFACE} radius={RADIUS}>{field}</fill> };
-        let search_border = document.create_outline(BORDER, BORDER_WIDTH, RADIUS, 0.0);
-        document.set_outline_visible(search_border, true);
-        document.set_outline_child(search_border, search_fill);
+        let search_border = view! {
+            <outline color={BORDER} width={BORDER_WIDTH} radius={RADIUS} offset={0.0} visible={true}>
+                {search_fill}
+            </outline>
+        };
         let search_sized = view! { <sized height={HEIGHT}>{search_border}</sized> };
         unstyled::set_text_input_child(document, search, search_sized);
 
@@ -102,8 +109,8 @@ pub fn select(
                     {label_node}
                 </padding>
             };
-            let row_fill = document.create_fill(Color32::TRANSPARENT, RADIUS);
-            document.set_fill_child(row_fill, row_padding);
+            let row_fill =
+                view! { <fill color={Color32::TRANSPARENT} radius={RADIUS}>{row_padding}</fill> };
             unstyled::set_button_child(button, row_fill);
 
             let hovered = unstyled::button_hovered(document, button);

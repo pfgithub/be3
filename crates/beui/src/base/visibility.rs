@@ -6,6 +6,9 @@ use crate::painter::Painter;
 
 use crate::document::Document;
 use crate::node::{Element, InteractInput, NodeId};
+use crate::reactive::{with_document, Children, Prop};
+
+use beui_macros::component;
 
 pub(crate) struct VisibilityNode {
     pub(crate) child: Option<NodeId>,
@@ -85,11 +88,11 @@ impl Element for VisibilityNode {
 }
 
 impl Document {
-    pub fn create_visibility(&mut self, visible: bool) -> NodeId {
+    pub(crate) fn create_visibility(&mut self, visible: bool) -> NodeId {
         self.arena.insert(VisibilityNode::new(visible))
     }
 
-    pub fn set_visibility_child(&mut self, visibility: NodeId, child: NodeId) {
+    pub(crate) fn set_visibility_child(&mut self, visibility: NodeId, child: NodeId) {
         if self.arena.get_as::<VisibilityNode>(visibility).child != Some(child) {
             self.arena.get_mut_as::<VisibilityNode>(visibility).child = Some(child);
         }
@@ -104,4 +107,18 @@ impl Document {
             self.arena.get_mut_as::<VisibilityNode>(visibility).visible = visible;
         }
     }
+}
+
+#[component(base)]
+pub fn visibility(visible: Prop<bool>, children: Children) -> NodeId {
+    let child = children
+        .into_first()
+        .expect("visibility requires a child, e.g. <visibility>{content}</visibility>");
+    let node = with_document(|document| {
+        let node = document.create_visibility(false);
+        document.set_visibility_child(node, child);
+        node
+    });
+    visible.apply(move |value| with_document(|document| document.set_visible(node, value)));
+    node
 }

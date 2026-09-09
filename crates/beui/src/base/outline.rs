@@ -7,6 +7,9 @@ use crate::painter::Painter;
 
 use crate::document::Document;
 use crate::node::{Element, InteractInput, NodeId};
+use crate::reactive::{with_document, Children, Prop};
+
+use beui_macros::component;
 
 pub(crate) struct OutlineNode {
     pub(crate) child: Option<NodeId>,
@@ -94,7 +97,7 @@ impl Element for OutlineNode {
 }
 
 impl Document {
-    pub fn create_outline(
+    pub(crate) fn create_outline(
         &mut self,
         color: Color32,
         width: f32,
@@ -105,7 +108,7 @@ impl Document {
             .insert(OutlineNode::new(color, width, corner_radius, offset))
     }
 
-    pub fn set_outline_child(&mut self, outline: NodeId, child: NodeId) {
+    pub(crate) fn set_outline_child(&mut self, outline: NodeId, child: NodeId) {
         if self.arena.get_as::<OutlineNode>(outline).child != Some(child) {
             self.arena.get_mut_as::<OutlineNode>(outline).child = Some(child);
         }
@@ -122,4 +125,27 @@ impl Document {
             self.arena.get_mut_as::<OutlineNode>(outline).visible = visible;
         }
     }
+}
+
+#[component(base)]
+pub fn outline(
+    color: Color32,
+    width: f32,
+    radius: u8,
+    offset: f32,
+    visible: Prop<bool>,
+    children: Children,
+) -> NodeId {
+    let child = children
+        .into_first()
+        .expect("outline requires a child, e.g. <outline>{content}</outline>");
+    let outline = with_document(|document| {
+        let outline = document.create_outline(color, width, radius, offset);
+        document.set_outline_child(outline, child);
+        outline
+    });
+    visible.apply(move |visible| {
+        with_document(|document| document.set_outline_visible(outline, visible))
+    });
+    outline
 }

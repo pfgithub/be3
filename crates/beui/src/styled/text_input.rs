@@ -4,7 +4,7 @@ use crate::color::Color32;
 
 use crate::document::Document;
 use crate::node::{Handler, NodeId};
-use crate::reactive::{with_document, FillBuilder, Prop, SizedBuilder};
+use crate::reactive::{with_document, FillBuilder, OutlineBuilder, Prop, SizedBuilder};
 use crate::styled::theme::{
     ACCENT, ACCENT_SOFT, BORDER, BORDER_WIDTH, FONT_BODY, RADIUS, SURFACE_RAISED, TEXT, TEXT_MUTED,
 };
@@ -40,14 +40,19 @@ pub fn text_input(
 
         let fill = view! { <fill color={SURFACE_RAISED} radius={RADIUS}>{field}</fill> };
 
-        let border = document.create_outline(BORDER, BORDER_WIDTH, RADIUS, 0.0);
-        document.set_outline_visible(border, true);
-        document.set_outline_child(border, fill);
+        let border = view! {
+            <outline color={BORDER} width={BORDER_WIDTH} radius={RADIUS} offset={0.0} visible={true}>
+                {fill}
+            </outline>
+        };
 
         let sized = view! { <sized height={HEIGHT}>{border}</sized> };
 
-        let ring = document.create_outline(ACCENT, FOCUS_RING_WIDTH, RADIUS, FOCUS_RING_OFFSET);
-        document.set_outline_child(ring, sized);
+        let ring = view! {
+            <outline color={ACCENT} width={FOCUS_RING_WIDTH} radius={RADIUS} offset={FOCUS_RING_OFFSET}>
+                {sized}
+            </outline>
+        };
         unstyled::set_text_input_child(document, input, ring);
 
         (input, border, ring)

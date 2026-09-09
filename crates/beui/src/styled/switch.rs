@@ -5,7 +5,10 @@ use crate::color::Color32;
 use crate::base::ItemSize;
 use crate::document::Document;
 use crate::node::{Handler, NodeId};
-use crate::reactive::{current_component, set_component_detail, with_document, Prop, SizedBuilder};
+use crate::reactive::{
+    current_component, set_component_detail, with_document, FillBuilder, OutlineBuilder,
+    PaddingBuilder, Prop, SizedBuilder,
+};
 use crate::styled::theme::{ACCENT, ACCENT_HOVER, BORDER, KNOB, RADIUS, SURFACE_RAISED};
 use crate::unstyled;
 
@@ -25,7 +28,11 @@ pub fn switch(on: Prop<bool>, on_change: Option<Handler<bool>>) -> NodeId {
 
     let toggle = unstyled::ToggleBuilder::default().checked(false).build();
 
-    let knob = with_document(|document| document.create_fill(KNOB, KNOB_RADIUS));
+    let knob = FillBuilder::default()
+        .color(KNOB)
+        .radius(KNOB_RADIUS)
+        .children([])
+        .build();
     let knob = view! { <sized width={KNOB_SIZE} height={KNOB_SIZE}>{knob}</sized> };
 
     let before = with_document(unstyled::spacer);
@@ -38,22 +45,15 @@ pub fn switch(on: Prop<bool>, on_change: Option<Handler<bool>>) -> NodeId {
         line
     });
 
-    let padding = with_document(|document| {
-        let padding = document.create_padding(PADDING, PADDING);
-        document.set_padding_child(padding, line);
-        padding
-    });
-    let track = with_document(|document| {
-        let track = document.create_fill(track_fill(false, false), TRACK_RADIUS);
-        document.set_fill_child(track, padding);
-        track
-    });
+    let padding = view! { <padding horizontal={PADDING} vertical={PADDING}>{line}</padding> };
+    let track =
+        view! { <fill color={track_fill(false, false)} radius={TRACK_RADIUS}>{padding}</fill> };
     let sized = view! { <sized width={WIDTH} height={HEIGHT}>{track}</sized> };
-    let ring = with_document(|document| {
-        let ring = document.create_outline(ACCENT, FOCUS_RING_WIDTH, RADIUS, FOCUS_RING_OFFSET);
-        document.set_outline_child(ring, sized);
-        ring
-    });
+    let ring = view! {
+        <outline color={ACCENT} width={FOCUS_RING_WIDTH} radius={RADIUS} offset={FOCUS_RING_OFFSET}>
+            {sized}
+        </outline>
+    };
     with_document(|document| unstyled::set_toggle_child(document, toggle, ring));
 
     with_document(|document| {

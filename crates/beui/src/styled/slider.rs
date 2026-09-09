@@ -5,7 +5,10 @@ use crate::color::Color32;
 use crate::base::ItemSize;
 use crate::document::Document;
 use crate::node::{Handler, NodeId};
-use crate::reactive::{current_component, set_component_detail, with_document, Prop, SizedBuilder};
+use crate::reactive::{
+    current_component, set_component_detail, with_document, FillBuilder, OutlineBuilder, Prop,
+    SizedBuilder,
+};
 use crate::styled::theme::{ACCENT, ACCENT_HOVER, KNOB, RADIUS, TRACK};
 use crate::unstyled;
 
@@ -24,13 +27,25 @@ pub fn slider(value: Prop<f32>, on_change: Option<Handler<f32>>) -> NodeId {
 
     let slider = with_document(|document| unstyled::slider(document, 0.0));
 
-    let filled_fill = with_document(|document| document.create_fill(ACCENT, TRACK_RADIUS));
+    let filled_fill = FillBuilder::default()
+        .color(ACCENT)
+        .radius(TRACK_RADIUS)
+        .children([])
+        .build();
     let filled = view! { <sized height={TRACK_HEIGHT}>{filled_fill}</sized> };
 
-    let rest_fill = with_document(|document| document.create_fill(TRACK, TRACK_RADIUS));
+    let rest_fill = FillBuilder::default()
+        .color(TRACK)
+        .radius(TRACK_RADIUS)
+        .children([])
+        .build();
     let rest = view! { <sized height={TRACK_HEIGHT}>{rest_fill}</sized> };
 
-    let knob_fill = with_document(|document| document.create_fill(KNOB, KNOB_RADIUS));
+    let knob_fill = FillBuilder::default()
+        .color(KNOB)
+        .radius(KNOB_RADIUS)
+        .children([])
+        .build();
     let knob = view! { <sized width={KNOB_SIZE} height={KNOB_SIZE}>{knob_fill}</sized> };
 
     let line = with_document(|document| {
@@ -42,11 +57,11 @@ pub fn slider(value: Prop<f32>, on_change: Option<Handler<f32>>) -> NodeId {
     });
 
     let sized = view! { <sized height={HEIGHT}>{line}</sized> };
-    let ring = with_document(|document| {
-        let ring = document.create_outline(ACCENT, FOCUS_RING_WIDTH, RADIUS, FOCUS_RING_OFFSET);
-        document.set_outline_child(ring, sized);
-        ring
-    });
+    let ring = view! {
+        <outline color={ACCENT} width={FOCUS_RING_WIDTH} radius={RADIUS} offset={FOCUS_RING_OFFSET}>
+            {sized}
+        </outline>
+    };
     with_document(|document| unstyled::set_slider_child(document, slider, ring));
 
     with_document(|document| {

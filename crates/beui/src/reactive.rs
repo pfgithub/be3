@@ -5,10 +5,8 @@ use std::hash::Hash;
 use std::rc::Rc;
 
 use crate::base::ItemSize;
-use crate::color::Color32;
 use crate::document::Document;
-use crate::input::{CursorIcon, PointerPress};
-use crate::node::{ClickHandler, Handler, NodeId};
+use crate::node::{ClickHandler, NodeId};
 use crate::unstyled;
 
 pub use beui_macros::{component, view};
@@ -204,14 +202,6 @@ impl<T: Clone + PartialEq + 'static> IntoProp<T> for Memo<T> {
     }
 }
 
-#[component(base)]
-pub fn text(string: Prop<String>) -> NodeId {
-    let node =
-        with_document(|document| document.create_text(String::new(), 14.0, crate::Color32::WHITE));
-    string.apply(move |value| with_document(|document| document.set_text(node, value)));
-    node
-}
-
 pub fn intrinsic(node: NodeId) -> (NodeId, ItemSize) {
     (node, ItemSize::Intrinsic)
 }
@@ -246,6 +236,14 @@ impl<I: IntoIterator<Item = (NodeId, ItemSize)>> From<I> for Children {
     }
 }
 
+pub use crate::base::click_catcher::ClickCatcherBuilder;
+pub use crate::base::fill::FillBuilder;
+pub use crate::base::outline::OutlineBuilder;
+pub use crate::base::padding::PaddingBuilder;
+pub use crate::base::sized::SizedBuilder;
+pub use crate::base::text::TextBuilder;
+pub use crate::base::visibility::VisibilityBuilder;
+
 #[component(base)]
 pub fn row(spacing: f32, children: Children) -> NodeId {
     let row = with_document(|document| unstyled::row(document, spacing));
@@ -265,117 +263,6 @@ pub fn centered_row(spacing: f32, children: Children) -> NodeId {
     let row = with_document(|document| unstyled::centered_row(document, spacing));
     children.mount(row);
     row
-}
-
-#[component(base)]
-pub fn padding(horizontal: f32, vertical: f32, children: Children) -> NodeId {
-    let child = children
-        .into_first()
-        .expect("padding requires a child, e.g. <padding>{content}</padding>");
-    with_document(|document| {
-        let padding = document.create_padding(horizontal, vertical);
-        document.set_padding_child(padding, child);
-        padding
-    })
-}
-
-#[component(base)]
-pub fn fill(color: Color32, radius: u8, children: Children) -> NodeId {
-    let child = children
-        .into_first()
-        .expect("fill requires a child, e.g. <fill>{content}</fill>");
-    with_document(|document| {
-        let fill = document.create_fill(color, radius);
-        document.set_fill_child(fill, child);
-        fill
-    })
-}
-
-#[component(base)]
-pub fn outline(
-    color: Color32,
-    width: f32,
-    radius: u8,
-    offset: f32,
-    visible: Prop<bool>,
-    children: Children,
-) -> NodeId {
-    let child = children
-        .into_first()
-        .expect("outline requires a child, e.g. <outline>{content}</outline>");
-    let outline = with_document(|document| {
-        let outline = document.create_outline(color, width, radius, offset);
-        document.set_outline_child(outline, child);
-        outline
-    });
-    visible.apply(move |visible| {
-        with_document(|document| document.set_outline_visible(outline, visible))
-    });
-    outline
-}
-
-#[component(base)]
-pub fn click_catcher(
-    cursor: CursorIcon,
-    on_click: Option<ClickHandler>,
-    on_hover_change: Option<Handler<bool>>,
-    on_active_change: Option<Handler<bool>>,
-    on_press: Option<Handler<PointerPress>>,
-    on_secondary_press: Option<Handler<PointerPress>>,
-    on_drag: Option<Handler<PointerPress>>,
-    children: Children,
-) -> NodeId {
-    with_document(|document| {
-        let click_catcher = document.create_click_catcher(cursor);
-        if let Some(child) = children.into_first() {
-            document.set_click_catcher_child(click_catcher, child);
-        }
-        if let Some(on_click) = on_click {
-            document.set_click_catcher_on_click(click_catcher, on_click);
-        }
-        if let Some(on_hover_change) = on_hover_change {
-            document.set_click_catcher_on_hover_change(click_catcher, on_hover_change);
-        }
-        if let Some(on_active_change) = on_active_change {
-            document.set_click_catcher_on_active_change(click_catcher, on_active_change);
-        }
-        if let Some(on_press) = on_press {
-            document.set_click_catcher_on_press(click_catcher, on_press);
-        }
-        if let Some(on_secondary_press) = on_secondary_press {
-            document.set_click_catcher_on_secondary_press(click_catcher, on_secondary_press);
-        }
-        if let Some(on_drag) = on_drag {
-            document.set_click_catcher_on_drag(click_catcher, on_drag);
-        }
-        click_catcher
-    })
-}
-
-#[component(base)]
-pub fn sized(width: Option<f32>, height: Option<f32>, children: Children) -> NodeId {
-    let child = children
-        .into_first()
-        .expect("sized requires a child, e.g. <sized>{content}</sized>");
-    with_document(|document| {
-        let sized = document.create_sized(width, height);
-        document.set_sized_child(sized, child);
-        sized
-    })
-}
-
-#[component(base)]
-pub fn visibility(visible: Prop<bool>, children: Children) -> NodeId {
-    let child = children
-        .into_first()
-        .expect("visibility requires a child, e.g. <visibility>{content}</visibility>");
-    let node = with_document(|document| {
-        let node = document.create_visibility(false);
-        document.set_visibility_child(node, child);
-        node
-    });
-    visible.apply(move |value| with_document(|document| document.set_visible(node, value)));
-    node
 }
 
 #[component]

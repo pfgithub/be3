@@ -3,7 +3,9 @@ use beui_macros::{component, view};
 use crate::color::Color32;
 
 use crate::node::{ClickHandler, NodeId};
-use crate::reactive::{create_effect, with_document, Children, OutlineBuilder, PaddingBuilder};
+use crate::reactive::{
+    create_effect, with_document, Children, FillBuilder, OutlineBuilder, PaddingBuilder,
+};
 use crate::styled::theme::{ACCENT, BORDER, RADIUS, SURFACE_RAISED};
 use crate::unstyled;
 
@@ -24,11 +26,7 @@ pub fn list_row(children: Children, on_click: Option<ClickHandler>) -> NodeId {
     let padding = view! {
         <padding horizontal={PADDING_HORIZONTAL} vertical={PADDING_VERTICAL}>{child}</padding>
     };
-    let fill = with_document(|document| {
-        let fill = document.create_fill(Color32::TRANSPARENT, RADIUS);
-        document.set_fill_child(fill, padding);
-        fill
-    });
+    let fill = view! { <fill color={Color32::TRANSPARENT} radius={RADIUS}>{padding}</fill> };
     let ring = view! {
         <outline color={ACCENT} width={2.0} radius={RADIUS} offset={0.0} visible={focused}>
             {fill}

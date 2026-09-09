@@ -3,7 +3,10 @@ use crate::base::TextAlign;
 use crate::color::Color32;
 use crate::document::Document;
 use crate::node::{Handler, NodeId};
-use crate::reactive::{create_effect, with_document};
+use crate::reactive::{
+    create_effect, intrinsic, with_document, FillBuilder, OutlineBuilder, PaddingBuilder,
+    SizedBuilder, VisibilityBuilder,
+};
 use crate::styled::theme::{
     ACCENT, ACCENT_SOFT, BORDER, FONT_BODY, RADIUS, SURFACE_RAISED, TEXT, TEXT_MUTED,
 };
@@ -42,11 +45,20 @@ pub(super) fn choice(
 
         let mut mark = None;
         let content = if kind == Kind::Radio {
-            let dot = document.create_fill(ACCENT, 9);
-            let dot_size = document.create_sized(Some(8.0), Some(8.0));
-            document.set_sized_child(dot_size, dot);
-            let visibility = document.create_visibility(active);
-            document.set_visibility_child(visibility, dot_size);
+            let dot = FillBuilder::default()
+                .color(ACCENT)
+                .radius(9)
+                .children([])
+                .build();
+            let dot_size = SizedBuilder::default()
+                .width(8.0)
+                .height(8.0)
+                .children([intrinsic(dot)])
+                .build();
+            let visibility = VisibilityBuilder::default()
+                .visible(active)
+                .children([intrinsic(dot_size)])
+                .build();
             mark = Some(visibility);
             let center = unstyled::centered_row(document, 0.0);
             let before = unstyled::spacer(document);
@@ -54,11 +66,19 @@ pub(super) fn choice(
             document.append_child(center, before, ItemSize::Percent(100.0));
             document.append_child(center, visibility, ItemSize::Intrinsic);
             document.append_child(center, after, ItemSize::Percent(100.0));
-            let circle = document.create_outline(BORDER, 2.0, 9, 0.0);
-            document.set_outline_visible(circle, true);
-            document.set_outline_child(circle, center);
-            let size = document.create_sized(Some(18.0), Some(18.0));
-            document.set_sized_child(size, circle);
+            let circle = OutlineBuilder::default()
+                .color(BORDER)
+                .width(2.0)
+                .radius(9)
+                .offset(0.0)
+                .visible(true)
+                .children([intrinsic(center)])
+                .build();
+            let size = SizedBuilder::default()
+                .width(18.0)
+                .height(18.0)
+                .children([intrinsic(circle)])
+                .build();
             let row = unstyled::centered_row(document, 10.0);
             document.append_child(row, size, ItemSize::Intrinsic);
             document.append_child(row, label, ItemSize::Percent(100.0));
@@ -66,12 +86,23 @@ pub(super) fn choice(
         } else {
             label
         };
-        let padding = document.create_padding(14.0, 6.0);
-        document.set_padding_child(padding, content);
-        let fill = document.create_fill(background(active, false), RADIUS);
-        document.set_fill_child(fill, padding);
-        let ring = document.create_outline(ACCENT, 2.0, RADIUS, 1.0);
-        document.set_outline_child(ring, fill);
+        let padding = PaddingBuilder::default()
+            .horizontal(14.0)
+            .vertical(6.0)
+            .children([intrinsic(content)])
+            .build();
+        let fill = FillBuilder::default()
+            .color(background(active, false))
+            .radius(RADIUS)
+            .children([intrinsic(padding)])
+            .build();
+        let ring = OutlineBuilder::default()
+            .color(ACCENT)
+            .width(2.0)
+            .radius(RADIUS)
+            .offset(1.0)
+            .children([intrinsic(fill)])
+            .build();
         unstyled::set_button_child(button, ring);
 
         let hovered = unstyled::button_hovered(document, button);

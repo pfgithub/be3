@@ -5,7 +5,9 @@ use crate::color::Color32;
 use crate::base::TextAlign;
 use crate::document::Document;
 use crate::node::{ClickHandler, NodeId};
-use crate::reactive::{create_effect, with_document, OutlineBuilder, PaddingBuilder, Prop};
+use crate::reactive::{
+    create_effect, with_document, FillBuilder, OutlineBuilder, PaddingBuilder, Prop,
+};
 use crate::styled::theme::{
     ACCENT, ACCENT_ACTIVE, ACCENT_HOVER, BORDER, BORDER_WIDTH, FONT_BODY, ON_ACCENT, RADIUS,
     SURFACE, SURFACE_RAISED, TEXT,
@@ -66,11 +68,7 @@ pub fn button(
             {label_node}
         </padding>
     };
-    let fill = with_document(|document| {
-        let fill = document.create_fill(variant.fill(false, false), RADIUS);
-        document.set_fill_child(fill, padding);
-        fill
-    });
+    let fill = view! { <fill color={variant.fill(false, false)} radius={RADIUS}>{padding}</fill> };
     let ring = view! {
         <outline color={ACCENT} width={FOCUS_RING_WIDTH} radius={RADIUS + 4} offset={FOCUS_RING_OFFSET} visible={focused}>
             <outline color={BORDER} width={BORDER_WIDTH} radius={RADIUS} offset={0.0} visible={variant == ButtonVariant::Secondary}>

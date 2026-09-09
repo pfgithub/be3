@@ -5,7 +5,8 @@ use crate::color::Color32;
 use crate::document::Document;
 use crate::node::{Handler, NodeId};
 use crate::reactive::{
-    current_component, set_component_detail, with_document, CenteredRowBuilder, Prop, SizedBuilder,
+    current_component, set_component_detail, with_document, CenteredRowBuilder, FillBuilder,
+    OutlineBuilder, Prop, SizedBuilder, VisibilityBuilder,
 };
 use crate::styled::text::body_line;
 use crate::styled::theme::{
@@ -31,13 +32,13 @@ pub fn checkbox(
 
     let toggle = unstyled::ToggleBuilder::default().checked(false).build();
 
-    let mark = with_document(|document| document.create_fill(ON_ACCENT, MARK_RADIUS));
+    let mark = FillBuilder::default()
+        .color(ON_ACCENT)
+        .radius(MARK_RADIUS)
+        .children([])
+        .build();
     let mark_size = view! { <sized width={MARK_SIZE} height={MARK_SIZE}>{mark}</sized> };
-    let mark_visibility = with_document(|document| {
-        let visibility = document.create_visibility(false);
-        document.set_visibility_child(visibility, mark_size);
-        visibility
-    });
+    let mark_visibility = view! { <visibility visible={false}>{mark_size}</visibility> };
     let center = view! {
         <centered_row spacing={0.0}>
             @percent(100.0) {with_document(unstyled::spacer)}
@@ -46,17 +47,12 @@ pub fn checkbox(
         </centered_row>
     };
 
-    let fill = with_document(|document| {
-        let fill = document.create_fill(box_fill(false, false), CHIP_RADIUS);
-        document.set_fill_child(fill, center);
-        fill
-    });
-    let border = with_document(|document| {
-        let border = document.create_outline(BORDER, BORDER_WIDTH, CHIP_RADIUS, 0.0);
-        document.set_outline_visible(border, true);
-        document.set_outline_child(border, fill);
-        border
-    });
+    let fill = view! { <fill color={box_fill(false, false)} radius={CHIP_RADIUS}>{center}</fill> };
+    let border = view! {
+        <outline color={BORDER} width={BORDER_WIDTH} radius={CHIP_RADIUS} offset={0.0} visible={true}>
+            {fill}
+        </outline>
+    };
     let boxed = view! { <sized width={BOX_SIZE} height={BOX_SIZE}>{border}</sized> };
 
     let label_node = with_document(|document| body_line(document, String::new()));
@@ -66,11 +62,11 @@ pub fn checkbox(
             @percent(100.0) {label_node}
         </centered_row>
     };
-    let ring = with_document(|document| {
-        let ring = document.create_outline(ACCENT, FOCUS_RING_WIDTH, RADIUS, FOCUS_RING_OFFSET);
-        document.set_outline_child(ring, line);
-        ring
-    });
+    let ring = view! {
+        <outline color={ACCENT} width={FOCUS_RING_WIDTH} radius={RADIUS} offset={FOCUS_RING_OFFSET}>
+            {line}
+        </outline>
+    };
     with_document(|document| unstyled::set_toggle_child(document, toggle, ring));
 
     label.apply(move |value| {

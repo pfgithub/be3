@@ -16,7 +16,11 @@ pub fn scrollbar(scroll: NodeId) -> NodeId {
     with_document(|document| document.set_scroll_focus_color(scroll, ACCENT));
 
     let before = with_document(unstyled::spacer);
-    let thumb = with_document(|document| document.create_fill(Color32::TRANSPARENT, RADIUS));
+    let thumb = FillBuilder::default()
+        .color(Color32::TRANSPARENT)
+        .radius(RADIUS)
+        .children([])
+        .build();
     let after = with_document(unstyled::spacer);
 
     let track = with_document(|document| {
