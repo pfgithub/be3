@@ -17,7 +17,7 @@ mod text;
 mod text_input;
 pub mod theme;
 
-pub use accordion::{accordion, accordion_open, set_accordion_on_toggle, set_accordion_open};
+pub use accordion::{accordion_open, AccordionBuilder};
 pub use border::{bordered, separator};
 pub use button::{focus_button, set_button_on_click, ButtonBuilder, ButtonVariant};
 pub use card::CardBuilder;

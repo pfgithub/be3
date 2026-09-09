@@ -8,9 +8,10 @@ use beui::styled::theme::{
     SURFACE_RAISED, TEXT_MUTED,
 };
 use beui::styled::{
-    self, BodyBuilder, ButtonBuilder, ButtonVariant, CaptionBuilder, CardBuilder, CheckboxBuilder,
-    DisplayBuilder, HeadingBuilder, ParagraphBuilder, ProgressBuilder, ScrollbarBuilder,
-    ShortcutBuilder, SliderBuilder, SwitchBuilder, TitleBuilder, ToggleButtonBuilder,
+    self, AccordionBuilder, BodyBuilder, ButtonBuilder, ButtonVariant, CaptionBuilder, CardBuilder,
+    CheckboxBuilder, DisplayBuilder, HeadingBuilder, ParagraphBuilder, ProgressBuilder,
+    ScrollbarBuilder, ShortcutBuilder, SliderBuilder, SwitchBuilder, TitleBuilder,
+    ToggleButtonBuilder,
 };
 use beui::{unstyled, Color32, Context, Document, ItemSize, NodeId, Rect, TextAlign};
 
@@ -289,7 +290,9 @@ fn build_sidebar(document: &mut Document) -> NodeId {
                  components compose them, and the styled components paint them.".to_string()} />
         }
     });
-    let about_section = styled::accordion(document, "About", about, true);
+    let about_section = with_reactive_scope(document, || {
+        view! { <accordion title={"About".to_string()} open={true}>{about}</accordion> }
+    });
 
     let line = styled::separator(document);
 
@@ -318,7 +321,9 @@ fn build_sidebar(document: &mut Document) -> NodeId {
     document.append_child(keys, typing, ItemSize::Intrinsic);
     document.append_child(keys, inspect, ItemSize::Intrinsic);
     document.append_child(keys, pick, ItemSize::Intrinsic);
-    let keyboard_section = styled::accordion(document, "Keyboard", keys, true);
+    let keyboard_section = with_reactive_scope(document, || {
+        view! { <accordion title={"Keyboard".to_string()} open={true}>{keys}</accordion> }
+    });
 
     let content = unstyled::column(document, 12.0);
     document.append_child(content, about_section, ItemSize::Intrinsic);

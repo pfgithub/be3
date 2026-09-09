@@ -1,11 +1,15 @@
 use super::*;
+use crate::reactive::{view, with_reactive_scope};
+use crate::styled::AccordionBuilder;
 
 #[test]
 fn accordion_headers_are_keyboard_operable_and_skip_collapsed_content() {
     let mut document = Document::new();
     let child = labelled_button(&mut document, "Child");
     let child_focus = focus_flag(&mut document, child);
-    let accordion = styled::accordion(&mut document, "Options", child, false);
+    let accordion = with_reactive_scope(&mut document, || {
+        view! { <accordion title={"Options".to_string()} open={false}>{child}</accordion> }
+    });
     let after = labelled_button(&mut document, "After");
     let after_focus = focus_flag(&mut document, after);
     toolbar(&mut document, &[accordion, after]);

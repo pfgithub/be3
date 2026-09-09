@@ -1,7 +1,7 @@
 use super::*;
 use crate::reactive::{view, with_document, with_reactive_scope};
 use crate::styled::{
-    ButtonBuilder, CheckboxBuilder, ListRowBuilder, SliderBuilder, SwitchBuilder,
+    AccordionBuilder, ButtonBuilder, CheckboxBuilder, ListRowBuilder, SliderBuilder, SwitchBuilder,
     ToggleButtonBuilder,
 };
 
@@ -30,8 +30,11 @@ fn every_styled_interactive_control_paints_a_keyboard_focus_ring() {
             })
         },
         |doc| {
-            let text = doc.create_text("Content", 14.0, Color32::WHITE);
-            styled::accordion(doc, "Header", text, false)
+            with_reactive_scope(doc, || {
+                let text =
+                    with_document(|document| document.create_text("Content", 14.0, Color32::WHITE));
+                view! { <accordion title={"Header".to_string()} open={false}>{text}</accordion> }
+            })
         },
         |doc| {
             with_reactive_scope(doc, || {

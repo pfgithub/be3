@@ -1,10 +1,14 @@
 use super::*;
+use crate::reactive::{view, with_reactive_scope};
+use crate::styled::AccordionBuilder;
 
 #[test]
 fn clicking_an_accordion_header_hides_its_content() {
     let mut document = Document::new();
     let body = document.create_text("beui keeps a retained tree of nodes.", 14.0, Color32::WHITE);
-    let accordion = styled::accordion(&mut document, "About", body, true);
+    let accordion = with_reactive_scope(&mut document, || {
+        view! { <accordion title={"About".to_string()} open={true}>{body}</accordion> }
+    });
     toolbar(&mut document, &[accordion]);
     let mut harness = Harness::new(document);
     harness.frame(Vec::new());
