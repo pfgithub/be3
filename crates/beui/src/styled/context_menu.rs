@@ -5,8 +5,7 @@ use crate::color::Color32;
 use crate::document::Document;
 use crate::node::{Handler, NodeId};
 use crate::reactive::{
-    create_effect, with_document, FillBuilder, OutlineBuilder, PaddingBuilder, Prop, SizedBuilder,
-    TextBuilder,
+    with_document, FillBuilder, OutlineBuilder, PaddingBuilder, Prop, SizedBuilder, TextBuilder,
 };
 use crate::styled::theme::{
     ACCENT_SOFT, BORDER, BORDER_WIDTH, FONT_BODY, RADIUS, SURFACE_RAISED, TEXT, TEXT_MUTED,
@@ -70,25 +69,21 @@ fn style_menu_rows(document: &mut Document, menu: NodeId, items: &[MenuItem]) {
     for (index, item) in items.iter().enumerate() {
         let button = unstyled::menu_list_row_button(document, menu, index);
         let color = if item.disabled { TEXT_MUTED } else { TEXT };
-        let label = TextBuilder::default()
-            .string(item.label.clone())
-            .font_size(FONT_BODY)
-            .color(color)
-            .align(TextAlign::Start)
-            .build();
-
-        let padding = view! {
-            <padding horizontal={PADDING_HORIZONTAL} vertical={PADDING_VERTICAL}>{label}</padding>
+        let label = view! {
+            <text string={item.label.clone()} font_size={FONT_BODY} color={color} align={TextAlign::Start} />
         };
-        let fill = view! { <fill color={Color32::TRANSPARENT} radius={RADIUS}>{padding}</fill> };
-        unstyled::set_button_child(button, fill);
 
         let hovered = unstyled::button_hovered(document, button);
         let focused = unstyled::button_focused(document, button);
-        create_effect(move || {
-            let color = row_background(focused.get(), hovered.get());
-            with_document(|document| document.set_fill_color(fill, color));
-        });
+        let fill_color = Prop::Dynamic(Box::new(move || {
+            row_background(focused.get(), hovered.get())
+        }));
+        let fill = view! {
+            <fill color={fill_color} radius={RADIUS}>
+                <padding horizontal={PADDING_HORIZONTAL} vertical={PADDING_VERTICAL}>{label}</padding>
+            </fill>
+        };
+        unstyled::set_button_child(button, fill);
 
         if !item.children.is_empty() {
             if let Some(overlay) = unstyled::menu_list_row_submenu_overlay(document, menu, index) {

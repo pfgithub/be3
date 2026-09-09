@@ -6,11 +6,12 @@ use crate::base::ItemSize;
 use crate::document::Document;
 use crate::node::{Handler, NodeId};
 use crate::reactive::{
-    current_component, set_component_detail, with_document, CenteredRowBuilder, FillBuilder,
-    OutlineBuilder, PaddingBuilder, Prop, SizedBuilder,
+    create_effect, current_component, set_component_detail, with_document, CenteredRowBuilder,
+    FillBuilder, OutlineBuilder, PaddingBuilder, Prop, SizedBuilder, SpacerBuilder,
 };
 use crate::styled::theme::{ACCENT, ACCENT_HOVER, BORDER, KNOB, RADIUS, SURFACE_RAISED};
 use crate::unstyled;
+use crate::unstyled::ToggleBuilder;
 
 const WIDTH: f32 = 42.0;
 const HEIGHT: f32 = 24.0;
@@ -26,58 +27,59 @@ pub fn switch(on: Prop<bool>, on_change: Option<Handler<bool>>) -> NodeId {
     let shadow = current_component();
     let mut on_change = on_change;
 
-    let toggle = unstyled::ToggleBuilder::default().checked(false).build();
+    let toggle = view! { <toggle checked={false} /> };
+    let (checked, hovered, focused) = with_document(|document| {
+        (
+            unstyled::toggle_checked(document, toggle),
+            unstyled::toggle_hovered(document, toggle),
+            unstyled::toggle_focused(document, toggle),
+        )
+    });
 
-    let before = with_document(unstyled::spacer);
-    let after = with_document(unstyled::spacer);
-    let line = CenteredRowBuilder::default()
-        .spacing(0.0)
-        .children([
-            (before, before_size(false)),
-            (
-                view! {
-                    <sized width={KNOB_SIZE} height={KNOB_SIZE}>
-                        <fill color={KNOB} radius={KNOB_RADIUS}></fill>
-                    </sized>
-                },
-                ItemSize::Intrinsic,
-            ),
-            (after, after_size(false)),
-        ])
-        .build();
+    let before = view! { <spacer /> };
+    let after = view! { <spacer /> };
+    let line = view! {
+        <centered_row spacing={0.0}>
+            @percent(0.0) {before}
+            <sized width={KNOB_SIZE} height={KNOB_SIZE}>
+                <fill color={KNOB} radius={KNOB_RADIUS}></fill>
+            </sized>
+            @percent(100.0) {after}
+        </centered_row>
+    };
 
+    let track_color = {
+        let checked = checked.clone();
+        let hovered = hovered.clone();
+        Prop::Dynamic(Box::new(move || track_fill(checked.get(), hovered.get())))
+    };
     let track = view! {
-        <fill color={track_fill(false, false)} radius={TRACK_RADIUS}>
+        <fill color={track_color} radius={TRACK_RADIUS}>
             <padding horizontal={PADDING} vertical={PADDING}>{line}</padding>
         </fill>
     };
     let ring = view! {
-        <outline color={ACCENT} width={FOCUS_RING_WIDTH} radius={RADIUS} offset={FOCUS_RING_OFFSET}>
+        <outline color={ACCENT} width={FOCUS_RING_WIDTH} radius={RADIUS} offset={FOCUS_RING_OFFSET} visible={focused}>
             <sized width={WIDTH} height={HEIGHT}>{track}</sized>
         </outline>
     };
     with_document(|document| unstyled::set_toggle_child(document, toggle, ring));
 
-    with_document(|document| {
-        unstyled::set_toggle_on_change(document, toggle, move |document, on| {
-            let hovered = unstyled::toggle_hovered(document, toggle);
+    create_effect(move || {
+        let on = checked.get();
+        with_document(|document| {
             document.set_child_size(line, before, before_size(on));
             document.set_child_size(line, after, after_size(on));
-            document.set_fill_color(track, track_fill(on, hovered));
             set_component_detail(document, shadow, detail(on));
+        });
+    });
+
+    with_document(|document| {
+        unstyled::set_toggle_on_change(document, toggle, move |document, on| {
             if let Some(handler) = &mut on_change {
                 handler(document, on);
             }
         });
-        unstyled::set_toggle_on_hover_change(document, toggle, move |document, hovered| {
-            let on = unstyled::toggle_checked(document, toggle);
-            document.set_fill_color(track, track_fill(on, hovered));
-        });
-        unstyled::set_toggle_on_focus_change(document, toggle, move |document, focused| {
-            document.set_outline_visible(ring, focused);
-        });
-
-        set_component_detail(document, shadow, detail(false));
     });
 
     on.apply(move |on| {
@@ -88,7 +90,7 @@ pub fn switch(on: Prop<bool>, on_change: Option<Handler<bool>>) -> NodeId {
 }
 
 pub fn switch_on(document: &Document, switch: NodeId) -> bool {
-    unstyled::toggle_checked(document, document.shadow_root(switch))
+    unstyled::toggle_checked(document, document.shadow_root(switch)).get()
 }
 
 fn detail(on: bool) -> &'static str {

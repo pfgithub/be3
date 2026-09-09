@@ -4,9 +4,8 @@ use crate::color::Color32;
 
 use crate::base::{ItemSize, ScrollPosition};
 use crate::node::NodeId;
-use crate::reactive::{with_document, ColumnBuilder, FillBuilder};
+use crate::reactive::{with_document, ColumnBuilder, FillBuilder, SpacerBuilder};
 use crate::styled::theme::{ACCENT, SCROLL_THUMB, SURFACE_RAISED};
-use crate::unstyled;
 
 const RADIUS: u8 = 3;
 const MINIMUM_THUMB: f32 = 0.08;
@@ -15,9 +14,9 @@ const MINIMUM_THUMB: f32 = 0.08;
 pub fn scrollbar(scroll: NodeId) -> NodeId {
     with_document(|document| document.set_scroll_focus_color(scroll, ACCENT));
 
-    let before = with_document(unstyled::spacer);
+    let before = view! { <spacer /> };
     let thumb = view! { <fill color={Color32::TRANSPARENT} radius={RADIUS}></fill> };
-    let after = with_document(unstyled::spacer);
+    let after = view! { <spacer /> };
 
     let track = view! {
         <column spacing={0.0}>

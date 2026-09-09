@@ -1,5 +1,6 @@
 use beui_macros::{component, view};
 
+use crate::color::Color32;
 use crate::document::Document;
 use crate::node::{Handler, NodeId};
 use crate::reactive::{
@@ -10,6 +11,7 @@ use crate::styled::theme::{
     ACCENT, ACCENT_SOFT, BORDER, FONT_BODY, RADIUS, SURFACE, SURFACE_RAISED, TEXT,
 };
 use crate::unstyled;
+use crate::unstyled::ToggleBuilder;
 
 #[component]
 pub fn toggle_button(
@@ -20,20 +22,47 @@ pub fn toggle_button(
     let shadow = current_component();
     let mut on_change = on_change;
 
-    let toggle = unstyled::ToggleBuilder::default().checked(false).build();
+    let toggle = view! { <toggle checked={false} /> };
+    let (toggle_checked, toggle_hovered, toggle_focused) = with_document(|document| {
+        (
+            unstyled::toggle_checked(document, toggle),
+            unstyled::toggle_hovered(document, toggle),
+            unstyled::toggle_focused(document, toggle),
+        )
+    });
+
     let text = view! { <text font_size={FONT_BODY} color={TEXT} /> };
+    let fill_color = {
+        let checked = toggle_checked.clone();
+        let hovered = toggle_hovered;
+        Prop::Dynamic(Box::new(move || fill_for(checked.get(), hovered.get())))
+    };
+    let border_color = {
+        let checked = toggle_checked.clone();
+        Prop::Dynamic(Box::new(
+            move || {
+                if checked.get() {
+                    ACCENT
+                } else {
+                    BORDER
+                }
+            },
+        ))
+    };
     let fill = view! {
-        <fill color={SURFACE} radius={RADIUS}>
+        <fill color={fill_color} radius={RADIUS}>
             <padding horizontal={14.0} vertical={8.0}>{text}</padding>
         </fill>
     };
     let border = view! {
-        <outline color={BORDER} width={1.0} radius={RADIUS} offset={0.0} visible={true}>
+        <outline color={border_color} width={1.0} radius={RADIUS} offset={0.0} visible={true}>
             {fill}
         </outline>
     };
     let ring = view! {
-        <outline color={ACCENT} width={2.0} radius={RADIUS} offset={3.0}>{border}</outline>
+        <outline color={ACCENT} width={2.0} radius={RADIUS} offset={3.0} visible={toggle_focused}>
+            {border}
+        </outline>
     };
     with_document(|document| unstyled::set_toggle_child(document, toggle, ring));
 
@@ -46,27 +75,9 @@ pub fn toggle_button(
 
     with_document(|document| {
         unstyled::set_toggle_on_change(document, toggle, move |document, pressed| {
-            document.set_fill_color(fill, if pressed { ACCENT_SOFT } else { SURFACE });
-            document.set_outline_color(border, if pressed { ACCENT } else { BORDER });
             if let Some(handler) = &mut on_change {
                 handler(document, pressed);
             }
-        });
-        unstyled::set_toggle_on_hover_change(document, toggle, move |document, hovered| {
-            let pressed = unstyled::toggle_checked(document, toggle);
-            document.set_fill_color(
-                fill,
-                if pressed {
-                    ACCENT_SOFT
-                } else if hovered {
-                    SURFACE_RAISED
-                } else {
-                    SURFACE
-                },
-            );
-        });
-        unstyled::set_toggle_on_focus_change(document, toggle, move |document, focused| {
-            document.set_outline_visible(ring, focused);
         });
     });
 
@@ -77,8 +88,18 @@ pub fn toggle_button(
     toggle
 }
 
+fn fill_for(pressed: bool, hovered: bool) -> Color32 {
+    if pressed {
+        ACCENT_SOFT
+    } else if hovered {
+        SURFACE_RAISED
+    } else {
+        SURFACE
+    }
+}
+
 pub fn toggle_button_pressed(document: &Document, button: NodeId) -> bool {
-    unstyled::toggle_checked(document, document.shadow_root(button))
+    unstyled::toggle_checked(document, document.shadow_root(button)).get()
 }
 
 pub fn focus_toggle_button(document: &mut Document, button: NodeId) {

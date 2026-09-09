@@ -1,7 +1,7 @@
 use beui::reactive::{
     bind, create_memo, create_signal, view, with_document, with_reactive_scope, CenteredRowBuilder,
-    ColumnBuilder, FillBuilder, OutlineBuilder, PaddingBuilder, ReadSignal, RowBuilder,
-    ShowBuilder, VisibilityBuilder, WriteSignal,
+    ColumnBuilder, FillBuilder, OutlineBuilder, PaddingBuilder, Prop, ReadSignal, RowBuilder,
+    ShowBuilder, SpacerBuilder, VisibilityBuilder, WriteSignal,
 };
 use beui::styled::theme::{
     ACCENT, ACCENT_SOFT, BACKGROUND, RADIUS, SCROLLBAR_WIDTH, SEPARATOR_HEIGHT, SURFACE,
@@ -110,8 +110,12 @@ fn scroll_row(index: usize, rows: Rows, compact: bool) -> NodeId {
     };
 
     let button = unstyled::ButtonBuilder::default().build();
-    let hovered = with_document(|document| unstyled::button_hovered(document, button));
-    let focused = with_document(|document| unstyled::button_focused(document, button));
+    let (hovered, focused) = with_document(|document| {
+        (
+            unstyled::button_hovered(document, button),
+            unstyled::button_focused(document, button),
+        )
+    });
 
     let label = view! { <body content={format!("Row {index}")} /> };
     let value =
@@ -132,31 +136,26 @@ fn scroll_row(index: usize, rows: Rows, compact: bool) -> NodeId {
     } else {
         ROW_PADDING_VERTICAL
     };
-    let fill = view! {
-        <fill color={Color32::TRANSPARENT} radius={RADIUS}>
-            <padding horizontal={ROW_PADDING_HORIZONTAL} vertical={vertical}>
-                <centered_row spacing={12.0}>
-                    @percent(100.0) {label}
-                    <visibility visible={rows.timings.clone()}>{value}</visibility>
-                </centered_row>
-            </padding>
-        </fill>
-    };
-    bind(move |document| {
-        let color = match (is_selected.get(), hovered.get()) {
+    let fill_color = {
+        let is_selected = is_selected.clone();
+        Prop::Dynamic(Box::new(move || match (is_selected.get(), hovered.get()) {
             (true, _) => ACCENT_SOFT,
             (false, true) => SURFACE_RAISED,
             (false, false) => Color32::TRANSPARENT,
-        };
-        document.set_fill_color(fill, color);
-    });
-
-    let ring = view! {
-        <outline color={ACCENT} width={2.0} radius={RADIUS} offset={0.0}>{fill}</outline>
+        }))
     };
-    bind(move |document| {
-        document.set_outline_visible(ring, focused.get());
-    });
+    let ring = view! {
+        <outline color={ACCENT} width={2.0} radius={RADIUS} offset={0.0} visible={focused}>
+            <fill color={fill_color} radius={RADIUS}>
+                <padding horizontal={ROW_PADDING_HORIZONTAL} vertical={vertical}>
+                    <centered_row spacing={12.0}>
+                        @percent(100.0) {label}
+                        <visibility visible={rows.timings.clone()}>{value}</visibility>
+                    </centered_row>
+                </padding>
+            </fill>
+        </outline>
+    };
 
     unstyled::set_button_child(button, ring);
     unstyled::set_button_on_click(button, move |_document| rows.select(index));
@@ -191,7 +190,7 @@ fn build_header(set_count: WriteSignal<i64>) -> NodeId {
                         <title content={"beui".to_string()} />
                         <caption content={"retained mode ui".to_string()} />
                     </centered_row>
-                    @percent(100.0) {with_document(unstyled::spacer)}
+                    @percent(100.0) <spacer />
                     <button label={"Reset".to_string()} variant={ButtonVariant::Secondary} on_click={Box::new(move |_document| {
                         reset_count.set(0);
                     })} />

@@ -1,6 +1,6 @@
 use crate::color::Color32;
 
-use beui_macros::component;
+use beui_macros::{component, view};
 
 use crate::base::TextAlign;
 use crate::node::NodeId;
@@ -11,33 +11,21 @@ use crate::styled::theme::{
 
 #[component]
 pub fn code(content: String) -> NodeId {
-    TextBuilder::default()
-        .string(content)
-        .font_size(FONT_SMALL)
-        .color(TEXT)
-        .align(TextAlign::Start)
-        .monospace(true)
-        .build()
+    view! {
+        <text string={content} font_size={FONT_SMALL} color={TEXT} align={TextAlign::Start} monospace={true} />
+    }
 }
 
 #[component]
 pub fn icon(glyph: String) -> NodeId {
-    IconSizedBuilder::default()
-        .glyph(glyph)
-        .font_size(ICON_SIZE)
-        .color(TEXT)
-        .build()
+    view! { <icon_sized glyph={glyph} font_size={ICON_SIZE} color={TEXT} /> }
 }
 
 #[component]
 pub fn icon_sized(glyph: String, font_size: f32, color: Color32) -> NodeId {
-    TextBuilder::default()
-        .string(glyph)
-        .font_size(font_size)
-        .color(color)
-        .align(TextAlign::Center)
-        .icon(true)
-        .build()
+    view! {
+        <text string={glyph} font_size={font_size} color={color} align={TextAlign::Center} icon={true} />
+    }
 }
 
 fn reactive_line(
@@ -47,11 +35,9 @@ fn reactive_line(
     align: Option<TextAlign>,
 ) -> NodeId {
     let shadow = current_component();
-    let node = TextBuilder::default()
-        .font_size(font_size)
-        .color(color)
-        .align(align.unwrap_or(TextAlign::Start))
-        .build();
+    let node = view! {
+        <text font_size={font_size} color={color} align={align.unwrap_or(TextAlign::Start)} />
+    };
     content.apply(move |value| {
         with_document(|document| {
             set_component_detail(document, shadow, format!("{value:?}"));
@@ -89,11 +75,7 @@ pub fn caption(content: Prop<String>, align: Option<TextAlign>) -> NodeId {
 #[component]
 pub fn paragraph(content: Prop<String>) -> NodeId {
     let shadow = current_component();
-    let node = TextBuilder::default()
-        .font_size(FONT_BODY)
-        .color(TEXT_MUTED)
-        .wrap(true)
-        .build();
+    let node = view! { <text font_size={FONT_BODY} color={TEXT_MUTED} wrap={true} /> };
     content.apply(move |value| {
         with_document(|document| {
             set_component_detail(document, shadow, format!("{value:?}"));

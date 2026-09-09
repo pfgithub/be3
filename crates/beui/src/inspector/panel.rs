@@ -215,7 +215,7 @@ fn footer(document: &mut Document, selection: NodeId, bounds: NodeId) -> NodeId 
 }
 
 fn row(document: &mut Document, entry: &Entry, state: &Rc<State>) -> Row {
-    let indent = unstyled::spacer(document);
+    let indent = document.create_fill(Color32::TRANSPARENT, 0);
     let marker = marker(document, entry, state);
 
     let kind = with_reactive_scope(

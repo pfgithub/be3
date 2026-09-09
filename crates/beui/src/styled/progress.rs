@@ -3,10 +3,9 @@ use beui_macros::{component, view};
 use crate::base::ItemSize;
 use crate::node::NodeId;
 use crate::reactive::{
-    current_component, with_document, FillBuilder, Prop, RowBuilder, SizedBuilder,
+    current_component, with_document, FillBuilder, Prop, RowBuilder, SizedBuilder, SpacerBuilder,
 };
 use crate::styled::theme::{ACCENT, TRACK};
-use crate::unstyled;
 
 const HEIGHT: f32 = 6.0;
 const RADIUS: u8 = 3;
@@ -16,7 +15,7 @@ pub fn progress(value: Prop<f32>) -> NodeId {
     let shadow = current_component();
 
     let filled = view! { <fill color={ACCENT} radius={RADIUS}></fill> };
-    let rest = with_document(unstyled::spacer);
+    let rest = view! { <spacer /> };
     let line = view! {
         <row spacing={0.0}>
             @percent(0.0) {filled}

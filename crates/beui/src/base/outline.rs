@@ -129,7 +129,7 @@ impl Document {
 
 #[component(base)]
 pub fn outline(
-    color: Color32,
+    color: Prop<Color32>,
     width: f32,
     radius: u8,
     offset: f32,
@@ -140,10 +140,11 @@ pub fn outline(
         .into_first()
         .expect("outline requires a child, e.g. <outline>{content}</outline>");
     let outline = with_document(|document| {
-        let outline = document.create_outline(color, width, radius, offset);
+        let outline = document.create_outline(Color32::TRANSPARENT, width, radius, offset);
         document.set_outline_child(outline, child);
         outline
     });
+    color.apply(move |color| with_document(|document| document.set_outline_color(outline, color)));
     visible.apply(move |visible| {
         with_document(|document| document.set_outline_visible(outline, visible))
     });

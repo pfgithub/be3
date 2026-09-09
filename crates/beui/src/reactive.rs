@@ -5,6 +5,7 @@ use std::hash::Hash;
 use std::rc::Rc;
 
 use crate::base::ItemSize;
+use crate::color::Color32;
 use crate::document::Document;
 use crate::node::{ClickHandler, NodeId};
 use crate::unstyled;
@@ -264,6 +265,11 @@ pub fn centered_row(spacing: f32, children: Children) -> NodeId {
     let row = with_document(|document| unstyled::centered_row(document, spacing));
     children.mount(row);
     row
+}
+
+#[component(base)]
+pub fn spacer() -> NodeId {
+    with_document(|document| document.create_fill(Color32::TRANSPARENT, 0))
 }
 
 #[component]

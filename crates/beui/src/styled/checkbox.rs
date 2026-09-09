@@ -6,14 +6,15 @@ use crate::color::Color32;
 use crate::document::Document;
 use crate::node::{Handler, NodeId};
 use crate::reactive::{
-    current_component, set_component_detail, with_document, CenteredRowBuilder, FillBuilder,
-    OutlineBuilder, Prop, SizedBuilder, TextBuilder, VisibilityBuilder,
+    create_effect, current_component, set_component_detail, with_document, CenteredRowBuilder,
+    FillBuilder, OutlineBuilder, Prop, SizedBuilder, SpacerBuilder, TextBuilder, VisibilityBuilder,
 };
 use crate::styled::theme::{
     ACCENT, ACCENT_HOVER, BORDER, BORDER_WIDTH, CHIP_RADIUS, FONT_BODY, ON_ACCENT, RADIUS,
     SURFACE_RAISED, TEXT,
 };
 use crate::unstyled;
+use crate::unstyled::ToggleBuilder;
 
 const BOX_SIZE: f32 = 18.0;
 const MARK_SIZE: f32 = 10.0;
@@ -31,33 +32,49 @@ pub fn checkbox(
     let shadow = current_component();
     let mut on_change = on_change;
 
-    let toggle = unstyled::ToggleBuilder::default().checked(false).build();
+    let toggle = view! { <toggle checked={false} /> };
+    let (toggle_checked, toggle_hovered, toggle_focused) = with_document(|document| {
+        (
+            unstyled::toggle_checked(document, toggle),
+            unstyled::toggle_hovered(document, toggle),
+            unstyled::toggle_focused(document, toggle),
+        )
+    });
 
     let mark_visibility = view! {
-        <visibility visible={false}>
+        <visibility visible={toggle_checked.clone()}>
             <sized width={MARK_SIZE} height={MARK_SIZE}>
                 <fill color={ON_ACCENT} radius={MARK_RADIUS}></fill>
             </sized>
         </visibility>
     };
 
+    let fill_color = {
+        let checked = toggle_checked.clone();
+        let hovered = toggle_hovered.clone();
+        Prop::Dynamic(Box::new(move || box_fill(checked.get(), hovered.get())))
+    };
     let fill = view! {
-        <fill color={box_fill(false, false)} radius={CHIP_RADIUS}>
+        <fill color={fill_color} radius={CHIP_RADIUS}>
             <centered_row spacing={0.0}>
-                @percent(100.0) {with_document(unstyled::spacer)}
+                @percent(100.0) <spacer />
                 {mark_visibility}
-                @percent(100.0) {with_document(unstyled::spacer)}
+                @percent(100.0) <spacer />
             </centered_row>
         </fill>
     };
+    let border_visible = {
+        let checked = toggle_checked.clone();
+        Prop::Dynamic(Box::new(move || !checked.get()))
+    };
     let border = view! {
-        <outline color={BORDER} width={BORDER_WIDTH} radius={CHIP_RADIUS} offset={0.0} visible={true}>
+        <outline color={BORDER} width={BORDER_WIDTH} radius={CHIP_RADIUS} offset={0.0} visible={border_visible}>
             {fill}
         </outline>
     };
 
     let ring = view! {
-        <outline color={ACCENT} width={FOCUS_RING_WIDTH} radius={RADIUS} offset={FOCUS_RING_OFFSET}>
+        <outline color={ACCENT} width={FOCUS_RING_WIDTH} radius={RADIUS} offset={FOCUS_RING_OFFSET} visible={toggle_focused}>
             <centered_row spacing={SPACING}>
                 <sized width={BOX_SIZE} height={BOX_SIZE}>{border}</sized>
                 @percent(100.0) <text string={label} font_size={FONT_BODY} color={TEXT} align={TextAlign::Start} />
@@ -66,26 +83,17 @@ pub fn checkbox(
     };
     with_document(|document| unstyled::set_toggle_child(document, toggle, ring));
 
+    create_effect(move || {
+        let checked = toggle_checked.get();
+        with_document(|document| set_component_detail(document, shadow, detail(checked)));
+    });
+
     with_document(|document| {
         unstyled::set_toggle_on_change(document, toggle, move |document, checked| {
-            let hovered = unstyled::toggle_hovered(document, toggle);
-            document.set_visible(mark_visibility, checked);
-            document.set_fill_color(fill, box_fill(checked, hovered));
-            document.set_outline_visible(border, !checked);
-            set_component_detail(document, shadow, detail(checked));
             if let Some(handler) = &mut on_change {
                 handler(document, checked);
             }
         });
-        unstyled::set_toggle_on_hover_change(document, toggle, move |document, hovered| {
-            let checked = unstyled::toggle_checked(document, toggle);
-            document.set_fill_color(fill, box_fill(checked, hovered));
-        });
-        unstyled::set_toggle_on_focus_change(document, toggle, move |document, focused| {
-            document.set_outline_visible(ring, focused);
-        });
-
-        set_component_detail(document, shadow, detail(false));
     });
 
     checked.apply(move |checked| {
@@ -96,7 +104,7 @@ pub fn checkbox(
 }
 
 pub fn checkbox_checked(document: &Document, checkbox: NodeId) -> bool {
-    unstyled::toggle_checked(document, document.shadow_root(checkbox))
+    unstyled::toggle_checked(document, document.shadow_root(checkbox)).get()
 }
 
 fn detail(checked: bool) -> &'static str {

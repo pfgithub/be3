@@ -7,7 +7,7 @@ use crate::painter::Painter;
 
 use crate::document::Document;
 use crate::node::{Element, InteractInput, NodeId};
-use crate::reactive::{with_document, Children};
+use crate::reactive::{with_document, Children, Prop};
 
 use beui_macros::component;
 
@@ -110,13 +110,15 @@ impl Document {
 }
 
 #[component(base)]
-pub fn fill(color: Color32, radius: u8, children: Children) -> NodeId {
+pub fn fill(color: Prop<Color32>, radius: u8, children: Children) -> NodeId {
     let child = children.into_first();
-    with_document(|document| {
-        let fill = document.create_fill(color, radius);
+    let fill = with_document(|document| {
+        let fill = document.create_fill(Color32::TRANSPARENT, radius);
         if let Some(child) = child {
             document.set_fill_child(fill, child);
         }
         fill
-    })
+    });
+    color.apply(move |color| with_document(|document| document.set_fill_color(fill, color)));
+    fill
 }

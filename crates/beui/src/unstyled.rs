@@ -27,7 +27,7 @@ pub use disclosure::{
     disclosure, disclosure_focused, disclosure_hovered, disclosure_open, focus_disclosure,
     set_disclosure_content, set_disclosure_header, set_disclosure_on_toggle, set_disclosure_open,
 };
-pub use layout::{centered_row, column, row, spacer};
+pub use layout::{centered_row, column, row};
 pub use menu::{
     hover_menu_list_row, menu_list_len, menu_list_root_focusable, menu_list_row_button,
     menu_list_row_submenu_content, menu_list_row_submenu_overlay, MenuItem,
@@ -57,7 +57,6 @@ pub use text_input::{
     text_input_value,
 };
 pub use toggle::{
-    focus_toggle, set_toggle_checked, set_toggle_child, set_toggle_on_active_change,
-    set_toggle_on_change, set_toggle_on_focus_change, set_toggle_on_hover_change, toggle_active,
+    focus_toggle, set_toggle_checked, set_toggle_child, set_toggle_on_change, toggle_active,
     toggle_checked, toggle_focused, toggle_hovered, ToggleBuilder,
 };

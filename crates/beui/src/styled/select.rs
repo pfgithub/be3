@@ -45,30 +45,26 @@ pub fn select(
             />
         };
 
-        let border = view! {
-            <outline color={BORDER} width={BORDER_WIDTH} radius={RADIUS} offset={0.0} visible={true}>
-                <fill color={SURFACE_RAISED} radius={RADIUS}>
-                    <padding horizontal={PADDING_HORIZONTAL} vertical={0.0}>{label}</padding>
-                </fill>
-            </outline>
+        let trigger_hovered = unstyled::button_hovered(document, trigger);
+        let trigger_focused = unstyled::button_focused(document, trigger);
+        let trigger_border_color = {
+            let trigger_focused = trigger_focused.clone();
+            Prop::Dynamic(Box::new(move || {
+                border_color(trigger_focused.get(), trigger_hovered.get())
+            }))
         };
         let ring = view! {
-            <outline color={ACCENT} width={FOCUS_RING_WIDTH} radius={RADIUS} offset={FOCUS_RING_OFFSET}>
-                <sized width={TRIGGER_WIDTH} height={HEIGHT}>{border}</sized>
+            <outline color={ACCENT} width={FOCUS_RING_WIDTH} radius={RADIUS} offset={FOCUS_RING_OFFSET} visible={trigger_focused}>
+                <sized width={TRIGGER_WIDTH} height={HEIGHT}>
+                    <outline color={trigger_border_color} width={BORDER_WIDTH} radius={RADIUS} offset={0.0} visible={true}>
+                        <fill color={SURFACE_RAISED} radius={RADIUS}>
+                            <padding horizontal={PADDING_HORIZONTAL} vertical={0.0}>{label}</padding>
+                        </fill>
+                    </outline>
+                </sized>
             </outline>
         };
         unstyled::set_button_child(trigger, ring);
-
-        let trigger_hovered = unstyled::button_hovered(document, trigger);
-        let trigger_focused = unstyled::button_focused(document, trigger);
-        let border_focused = trigger_focused.clone();
-        bind(move |document| {
-            document.set_outline_color(
-                border,
-                border_color(border_focused.get(), trigger_hovered.get()),
-            );
-        });
-        bind(move |document| document.set_outline_visible(ring, trigger_focused.get()));
 
         let search = unstyled::select_search(document, inner);
         let field = unstyled::text_input_field(document, search);
@@ -108,8 +104,18 @@ pub fn select(
             document.set_text_color(label_node, TEXT);
             document.set_text_align(label_node, TextAlign::Start, TextAlign::Center);
 
+            let hovered = unstyled::button_hovered(document, button);
+            let highlighted = unstyled::select_highlighted_signal(document, inner);
+            let row_fill_color = {
+                let hovered = hovered.clone();
+                let highlighted = highlighted.clone();
+                Prop::Dynamic(Box::new(move || {
+                    let is_highlighted = highlighted.get() == Some(index);
+                    option_background(is_highlighted, hovered.get())
+                }))
+            };
             let row_fill = view! {
-                <fill color={Color32::TRANSPARENT} radius={RADIUS}>
+                <fill color={row_fill_color} radius={RADIUS}>
                     <padding horizontal={PADDING_HORIZONTAL} vertical={OPTION_PADDING_VERTICAL}>
                         {label_node}
                     </padding>
@@ -117,19 +123,10 @@ pub fn select(
             };
             unstyled::set_button_child(button, row_fill);
 
-            let hovered = unstyled::button_hovered(document, button);
-            let highlight_hovered = hovered.clone();
             bind(move |document| {
-                if highlight_hovered.get() {
+                if hovered.get() {
                     unstyled::set_select_highlighted(document, inner, Some(index));
                 }
-            });
-
-            let highlighted = unstyled::select_highlighted_signal(document, inner);
-            bind(move |document| {
-                let is_highlighted = highlighted.get() == Some(index);
-                let is_hovered = hovered.get();
-                document.set_fill_color(row_fill, option_background(is_highlighted, is_hovered));
             });
         }
 

@@ -6,7 +6,7 @@ use crate::base::TextAlign;
 use crate::document::Document;
 use crate::node::{ClickHandler, NodeId};
 use crate::reactive::{
-    bind, with_document, FillBuilder, OutlineBuilder, PaddingBuilder, Prop, TextBuilder,
+    with_document, FillBuilder, OutlineBuilder, PaddingBuilder, Prop, TextBuilder,
 };
 use crate::styled::theme::{
     ACCENT, ACCENT_ACTIVE, ACCENT_HOVER, BORDER, BORDER_WIDTH, FONT_BODY, ON_ACCENT, RADIUS,
@@ -53,36 +53,28 @@ pub fn button(
     on_click: Option<ClickHandler>,
 ) -> NodeId {
     let button = unstyled::ButtonBuilder::default().build();
-    let hovered = with_document(|document| unstyled::button_hovered(document, button));
-    let active = with_document(|document| unstyled::button_active(document, button));
-    let focused = with_document(|document| unstyled::button_focused(document, button));
-
-    let fill = view! {
-        <fill color={variant.fill(false, false)} radius={RADIUS}>
-            <padding horizontal={PADDING_HORIZONTAL} vertical={PADDING_VERTICAL}>
-                {TextBuilder::default()
-                    .string(label)
-                    .font_size(FONT_BODY)
-                    .color(variant.label())
-                    .align(TextAlign::Center)
-                    .build()}
-            </padding>
-        </fill>
-    };
-    unstyled::set_button_child(
-        button,
-        view! {
-            <outline color={ACCENT} width={FOCUS_RING_WIDTH} radius={RADIUS + 4} offset={FOCUS_RING_OFFSET} visible={focused}>
-                <outline color={BORDER} width={BORDER_WIDTH} radius={RADIUS} offset={0.0} visible={variant == ButtonVariant::Secondary}>
-                    {fill}
-                </outline>
-            </outline>
-        },
-    );
-
-    bind(move |document| {
-        document.set_fill_color(fill, variant.fill(hovered.get(), active.get()));
+    let (hovered, active, focused) = with_document(|document| {
+        (
+            unstyled::button_hovered(document, button),
+            unstyled::button_active(document, button),
+            unstyled::button_focused(document, button),
+        )
     });
+
+    let fill_color = Prop::Dynamic(Box::new(move || variant.fill(hovered.get(), active.get())));
+
+    let ring = view! {
+        <outline color={ACCENT} width={FOCUS_RING_WIDTH} radius={RADIUS + 4} offset={FOCUS_RING_OFFSET} visible={focused}>
+            <outline color={BORDER} width={BORDER_WIDTH} radius={RADIUS} offset={0.0} visible={variant == ButtonVariant::Secondary}>
+                <fill color={fill_color} radius={RADIUS}>
+                    <padding horizontal={PADDING_HORIZONTAL} vertical={PADDING_VERTICAL}>
+                        <text string={label} font_size={FONT_BODY} color={variant.label()} align={TextAlign::Center} />
+                    </padding>
+                </fill>
+            </outline>
+        </outline>
+    };
+    unstyled::set_button_child(button, ring);
 
     if let Some(on_click) = on_click {
         unstyled::set_button_on_click(button, on_click);
