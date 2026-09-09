@@ -2,7 +2,7 @@ use beui_macros::component;
 
 use crate::base::TextAlign;
 use crate::node::NodeId;
-use crate::reactive::{current_component, with_document, Prop};
+use crate::reactive::{current_component, set_component_detail, with_document, Prop};
 use crate::styled::border::bordered;
 use crate::styled::theme::{CHIP_RADIUS, FONT_SMALL, SURFACE_RAISED, TEXT};
 
@@ -27,7 +27,7 @@ pub fn chip(label: Prop<String>) -> NodeId {
     label.apply(move |value| {
         with_document(|document| {
             document.set_text(label_node, value.clone());
-            document.set_component_detail(shadow, value);
+            set_component_detail(document, shadow, value);
         });
     });
 

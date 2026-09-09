@@ -9,7 +9,8 @@ use beui::styled::theme::{
 };
 use beui::styled::{
     self, BodyBuilder, ButtonBuilder, ButtonVariant, CaptionBuilder, CardBuilder, DisplayBuilder,
-    HeadingBuilder, ParagraphBuilder, ShortcutBuilder, TitleBuilder,
+    HeadingBuilder, ParagraphBuilder, ProgressBuilder, ShortcutBuilder, SwitchBuilder,
+    TitleBuilder,
 };
 use beui::{unstyled, Color32, Context, Document, ItemSize, NodeId, Rect, TextAlign};
 
@@ -427,18 +428,18 @@ fn build_list_controls(document: &mut Document, scroll: NodeId, rows: &Rc<Rows>)
         timing_rows.show_timings(document, checked);
     });
 
-    let compact = styled::switch(document, false);
-    let compact_label = with_reactive_scope(document, || {
-        view! { <body content={"Compact rows".to_string()} /> }
+    let compact_rows = rows.clone();
+    let (compact, compact_label) = with_reactive_scope(document, || {
+        (
+            view! { <switch on={false} on_change={Box::new(move |document: &mut Document, on| {
+                install_rows(document, scroll, &compact_rows, on);
+            })} /> },
+            view! { <body content={"Compact rows".to_string()} /> },
+        )
     });
     let compact_line = unstyled::centered_row(document, 12.0);
     document.append_child(compact_line, compact, ItemSize::Intrinsic);
     document.append_child(compact_line, compact_label, ItemSize::Percent(100.0));
-
-    let compact_rows = rows.clone();
-    styled::set_switch_on_change(document, compact, move |document, on| {
-        install_rows(document, scroll, &compact_rows, on);
-    });
 
     let column = unstyled::column(document, 12.0);
     document.append_child(column, timings, ItemSize::Intrinsic);
@@ -447,22 +448,24 @@ fn build_list_controls(document: &mut Document, scroll: NodeId, rows: &Rc<Rows>)
 }
 
 fn build_load_controls(document: &mut Document) -> NodeId {
-    let label = with_reactive_scope(document, || {
-        view! { <caption content={"Simulated load".to_string()} /> }
+    let (progress_value, set_progress_value) = create_signal(0.4f32);
+    let (label, readout, bar) = with_reactive_scope(document, || {
+        let readout_value = progress_value.clone();
+        (
+            view! { <caption content={"Simulated load".to_string()} /> },
+            view! { <caption content={create_memo(move || percent_label(readout_value.get()))} /> },
+            view! { <progress value={progress_value} /> },
+        )
     });
-    let (readout_text, set_readout_text) = create_signal(percent_label(0.4));
-    let readout = with_reactive_scope(document, || view! { <caption content={readout_text} /> });
     let readout_text_node = document.shadow_root(readout);
     document.set_text_align(readout_text_node, TextAlign::End, TextAlign::Center);
     let header = unstyled::centered_row(document, 12.0);
     document.append_child(header, label, ItemSize::Intrinsic);
     document.append_child(header, readout, ItemSize::Percent(100.0));
 
-    let bar = styled::progress(document, 0.4);
     let slider = styled::slider(document, 0.4);
     styled::set_slider_on_change(document, slider, move |document, value| {
-        styled::set_progress_value(document, bar, value);
-        with_reactive_scope(document, || set_readout_text.set(percent_label(value)));
+        with_reactive_scope(document, || set_progress_value.set(value));
     });
 
     let column = unstyled::column(document, 12.0);

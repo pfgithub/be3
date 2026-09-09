@@ -18,6 +18,7 @@ pub use reactive::{
 thread_local! {
     static CURRENT_DOCUMENT: RefCell<Option<Document>> = const { RefCell::new(None) };
     static CURRENT_COMPONENT: Cell<Option<NodeId>> = const { Cell::new(None) };
+    static PENDING_DETAIL: RefCell<HashMap<NodeId, String>> = RefCell::new(HashMap::new());
 }
 
 pub(crate) struct DocumentGuard<'a> {
@@ -82,6 +83,9 @@ pub fn component(name: &'static str, f: impl FnOnce() -> NodeId) -> NodeId {
     let root = f();
     CURRENT_COMPONENT.with(|cell| cell.set(previous));
     with_document(|document| document.finish_shadow(shadow, name, root, Vec::new()));
+    if let Some(detail) = PENDING_DETAIL.with(|cell| cell.borrow_mut().remove(&shadow)) {
+        with_document(|document| document.set_component_detail(shadow, detail));
+    }
     shadow
 }
 
@@ -89,6 +93,17 @@ pub fn current_component() -> NodeId {
     CURRENT_COMPONENT
         .with(Cell::get)
         .expect("current_component() called outside of a #[component] body")
+}
+
+pub fn set_component_detail(document: &mut Document, shadow: NodeId, detail: impl Into<String>) {
+    let detail = detail.into();
+    if document.contains(shadow) {
+        document.set_component_detail(shadow, detail);
+    } else {
+        PENDING_DETAIL.with(|cell| {
+            cell.borrow_mut().insert(shadow, detail);
+        });
+    }
 }
 
 pub enum Prop<T> {

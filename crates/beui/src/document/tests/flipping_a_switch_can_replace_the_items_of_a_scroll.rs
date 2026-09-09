@@ -1,4 +1,6 @@
 use super::*;
+use crate::reactive::{view, with_reactive_scope};
+use crate::styled::SwitchBuilder;
 
 #[test]
 fn flipping_a_switch_can_replace_the_items_of_a_scroll() {
@@ -11,7 +13,20 @@ fn check_compact_rows(inset: f32) {
     let built = Rc::new(RefCell::new(Vec::new()));
     let mut document = Document::new();
     let scroll = document.create_scroll();
-    let switch = styled::switch(&mut document, false);
+
+    let rebuilt = built.clone();
+    let switch = with_reactive_scope(&mut document, || {
+        view! {
+            <switch on={false} on_change={Box::new(move |document: &mut Document, on| {
+                let height = if on {
+                    VIRTUAL_ITEM_HEIGHT / 2.0
+                } else {
+                    VIRTUAL_ITEM_HEIGHT
+                };
+                install_scroll_items(document, scroll, height, &rebuilt);
+            })} />
+        }
+    });
     let column = document.create_list(Direction::Vertical, 0.0);
     document.append_child(column, switch, ItemSize::Intrinsic);
     document.append_child(column, scroll, ItemSize::Percent(100.0));
@@ -19,15 +34,6 @@ fn check_compact_rows(inset: f32) {
 
     let first = built.clone();
     install_scroll_items(&mut document, scroll, VIRTUAL_ITEM_HEIGHT, &first);
-    let rebuilt = built.clone();
-    styled::set_switch_on_change(&mut document, switch, move |document, on| {
-        let height = if on {
-            VIRTUAL_ITEM_HEIGHT / 2.0
-        } else {
-            VIRTUAL_ITEM_HEIGHT
-        };
-        install_scroll_items(document, scroll, height, &rebuilt);
-    });
 
     let mut harness = Harness::new(document);
     harness.frame(Vec::new());
