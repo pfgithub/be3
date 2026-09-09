@@ -192,7 +192,7 @@ impl Element for ClickCatcherNode {
 }
 
 impl Document {
-    pub fn create_click_catcher(&mut self, cursor: CursorIcon) -> NodeId {
+    pub(crate) fn create_click_catcher(&mut self, cursor: CursorIcon) -> NodeId {
         self.arena.insert(ClickCatcherNode::new(cursor))
     }
 
@@ -205,7 +205,7 @@ impl Document {
             .child = Some(child);
     }
 
-    pub fn set_click_catcher_on_click(
+    pub(crate) fn set_click_catcher_on_click(
         &mut self,
         click_catcher: NodeId,
         handler: impl FnMut(&mut Document) + 'static,
@@ -215,7 +215,7 @@ impl Document {
             .on_click = Some(Box::new(handler));
     }
 
-    pub fn set_click_catcher_on_hover_change(
+    pub(crate) fn set_click_catcher_on_hover_change(
         &mut self,
         click_catcher: NodeId,
         handler: impl FnMut(&mut Document, bool) + 'static,
@@ -225,7 +225,7 @@ impl Document {
             .on_hover_change = Some(Box::new(handler));
     }
 
-    pub fn set_click_catcher_on_press(
+    pub(crate) fn set_click_catcher_on_press(
         &mut self,
         click_catcher: NodeId,
         handler: impl FnMut(&mut Document, PointerPress) + 'static,
@@ -235,7 +235,7 @@ impl Document {
             .on_press = Some(Box::new(handler));
     }
 
-    pub fn set_click_catcher_on_secondary_press(
+    pub(crate) fn set_click_catcher_on_secondary_press(
         &mut self,
         click_catcher: NodeId,
         handler: impl FnMut(&mut Document, PointerPress) + 'static,
@@ -245,7 +245,7 @@ impl Document {
             .on_secondary_press = Some(Box::new(handler));
     }
 
-    pub fn set_click_catcher_on_drag(
+    pub(crate) fn set_click_catcher_on_drag(
         &mut self,
         click_catcher: NodeId,
         handler: impl FnMut(&mut Document, PointerPress) + 'static,
@@ -255,7 +255,7 @@ impl Document {
             .on_drag = Some(Box::new(handler));
     }
 
-    pub fn set_click_catcher_on_active_change(
+    pub(crate) fn set_click_catcher_on_active_change(
         &mut self,
         click_catcher: NodeId,
         handler: impl FnMut(&mut Document, bool) + 'static,

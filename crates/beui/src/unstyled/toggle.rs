@@ -4,7 +4,9 @@ use crate::input::CursorIcon;
 
 use crate::document::Document;
 use crate::node::{Handler, NodeId};
-use crate::reactive::{self, current_component, set_component_state, with_document};
+use crate::reactive::{
+    self, current_component, set_component_state, with_document, ClickCatcherBuilder,
+};
 
 struct State {
     click_catcher: NodeId,
@@ -23,7 +25,26 @@ struct State {
 pub fn toggle(checked: bool) -> NodeId {
     let toggle = current_component();
     with_document(|document| {
-        let click_catcher = document.create_click_catcher(CursorIcon::PointingHand);
+        let click_catcher = ClickCatcherBuilder::default()
+            .cursor(CursorIcon::PointingHand)
+            .on_click(Box::new(move |document: &mut Document| {
+                let checked = toggle_checked(document, toggle);
+                set_toggle_checked(document, toggle, !checked);
+            }))
+            .on_hover_change(Box::new(move |document: &mut Document, hovered: bool| {
+                document.component_state_mut::<State>(toggle).hovered = hovered;
+                document.call_component_handler(toggle, hovered, |state: &mut State| {
+                    &mut state.on_hover_change
+                });
+            }))
+            .on_active_change(Box::new(move |document: &mut Document, active: bool| {
+                document.component_state_mut::<State>(toggle).active = active;
+                document.call_component_handler(toggle, active, |state: &mut State| {
+                    &mut state.on_active_change
+                });
+            }))
+            .children([])
+            .build();
         let focusable = document.create_focusable();
         document.set_focusable_child(focusable, click_catcher);
 
@@ -45,22 +66,6 @@ pub fn toggle(checked: bool) -> NodeId {
             },
         );
 
-        document.set_click_catcher_on_click(click_catcher, move |document| {
-            let checked = toggle_checked(document, toggle);
-            set_toggle_checked(document, toggle, !checked);
-        });
-        document.set_click_catcher_on_hover_change(click_catcher, move |document, hovered| {
-            document.component_state_mut::<State>(toggle).hovered = hovered;
-            document.call_component_handler(toggle, hovered, |state: &mut State| {
-                &mut state.on_hover_change
-            });
-        });
-        document.set_click_catcher_on_active_change(click_catcher, move |document, active| {
-            document.component_state_mut::<State>(toggle).active = active;
-            document.call_component_handler(toggle, active, |state: &mut State| {
-                &mut state.on_active_change
-            });
-        });
         document.set_focusable_on_focus_change(focusable, move |document, focused| {
             document.component_state_mut::<State>(toggle).focused = focused;
             document.call_component_handler(toggle, focused, |state: &mut State| {

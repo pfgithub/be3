@@ -6,7 +6,9 @@ use crate::input::CursorIcon;
 use crate::base::{ItemSize, TextAlign};
 use crate::document::Document;
 use crate::node::NodeId;
-use crate::reactive::{create_signal, view, with_reactive_scope, WriteSignal};
+use crate::reactive::{
+    create_signal, intrinsic, view, with_reactive_scope, ClickCatcherBuilder, WriteSignal,
+};
 use crate::styled;
 use crate::styled::theme::{
     ACCENT, BORDER_WIDTH, CHIP_RADIUS, ON_ACCENT, RADIUS, SCROLLBAR_WIDTH, SEPARATOR_HEIGHT,
@@ -231,16 +233,21 @@ fn row(document: &mut Document, entry: &Entry, state: &Rc<State>) -> Row {
     document.set_outline_visible(outline, entry.selected);
     document.set_outline_child(outline, list_row);
 
-    let row = document.create_click_catcher(CursorIcon::PointingHand);
-    document.set_click_catcher_child(row, outline);
-
     let node = entry.key.node();
     let hover = state.clone();
-    document.set_click_catcher_on_hover_change(row, move |_document, hovered| {
-        hover.hover(node, hovered);
-    });
     let selection = state.clone();
-    document.set_click_catcher_on_click(row, move |_document| selection.select(node));
+    let row = with_reactive_scope(document, || {
+        ClickCatcherBuilder::default()
+            .cursor(CursorIcon::PointingHand)
+            .on_click(Box::new(move |_document: &mut Document| {
+                selection.select(node)
+            }))
+            .on_hover_change(Box::new(move |_document: &mut Document, hovered: bool| {
+                hover.hover(node, hovered);
+            }))
+            .children([intrinsic(outline)])
+            .build()
+    });
 
     Row {
         row,

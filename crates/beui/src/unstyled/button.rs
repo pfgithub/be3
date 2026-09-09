@@ -5,7 +5,8 @@ use crate::input::CursorIcon;
 use crate::document::Document;
 use crate::node::{ClickHandler, NodeId};
 use crate::reactive::{
-    create_signal, current_component, set_component_state, with_document, ReadSignal, WriteSignal,
+    create_signal, current_component, set_component_state, with_document, ClickCatcherBuilder,
+    ReadSignal, WriteSignal,
 };
 
 struct State {
@@ -25,13 +26,35 @@ struct State {
 pub fn button() -> NodeId {
     let button = current_component();
     with_document(|document| {
-        let click_catcher = document.create_click_catcher(CursorIcon::PointingHand);
-        let focusable = document.create_focusable();
-        document.set_focusable_child(focusable, click_catcher);
-
         let (hovered_read, hovered_write) = create_signal(false);
         let (active_read, active_write) = create_signal(false);
         let (focused_read, focused_write) = create_signal(false);
+
+        let click_catcher = ClickCatcherBuilder::default()
+            .cursor(CursorIcon::PointingHand)
+            .on_click(Box::new(move |document: &mut Document| {
+                if document.component_state::<State>(button).disabled {
+                    return;
+                }
+                document.call_component_click::<State>(button, |state| &mut state.on_click);
+            }))
+            .on_hover_change(Box::new(move |document: &mut Document, hovered: bool| {
+                document
+                    .component_state::<State>(button)
+                    .hovered_write
+                    .set(hovered);
+            }))
+            .on_active_change(Box::new(move |document: &mut Document, active: bool| {
+                document
+                    .component_state::<State>(button)
+                    .active_write
+                    .set(active);
+            }))
+            .children([])
+            .build();
+        let focusable = document.create_focusable();
+        document.set_focusable_child(focusable, click_catcher);
+
         set_component_state(
             document,
             button,
@@ -49,24 +72,6 @@ pub fn button() -> NodeId {
             },
         );
 
-        document.set_click_catcher_on_click(click_catcher, move |document| {
-            if document.component_state::<State>(button).disabled {
-                return;
-            }
-            document.call_component_click::<State>(button, |state| &mut state.on_click);
-        });
-        document.set_click_catcher_on_hover_change(click_catcher, move |document, hovered| {
-            document
-                .component_state::<State>(button)
-                .hovered_write
-                .set(hovered);
-        });
-        document.set_click_catcher_on_active_change(click_catcher, move |document, active| {
-            document
-                .component_state::<State>(button)
-                .active_write
-                .set(active);
-        });
         document.set_focusable_on_focus_change(focusable, move |document, focused| {
             document
                 .component_state::<State>(button)
