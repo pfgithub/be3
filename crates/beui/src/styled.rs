@@ -39,10 +39,7 @@ pub use text::{
     code, icon, icon_sized, BodyBuilder, CaptionBuilder, DisplayBuilder, HeadingBuilder,
     ParagraphBuilder, TitleBuilder,
 };
-pub use text_input::{
-    focus_text_input, set_text_input_on_change, set_text_input_on_submit,
-    set_text_input_placeholder, set_text_input_value, text_input, text_input_value,
-};
+pub use text_input::{focus_text_input, text_input_value, TextInputBuilder};
 
 mod choice;
 mod listbox;

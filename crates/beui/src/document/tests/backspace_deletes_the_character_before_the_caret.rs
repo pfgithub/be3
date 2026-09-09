@@ -1,9 +1,13 @@
 use super::*;
+use crate::reactive::{view, with_reactive_scope};
+use crate::styled::TextInputBuilder;
 
 #[test]
 fn backspace_deletes_the_character_before_the_caret() {
     let mut document = Document::new();
-    let input = styled::text_input(&mut document, "beui");
+    let input = with_reactive_scope(&mut document, || {
+        view! { <text_input value={"beui".to_string()} /> }
+    });
     toolbar(&mut document, &[input]);
     let mut harness = Harness::new(document);
 

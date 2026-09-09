@@ -1,9 +1,13 @@
 use super::*;
+use crate::reactive::{view, with_reactive_scope};
+use crate::styled::TextInputBuilder;
 
 #[test]
 fn ctrl_z_undoes_what_was_typed_into_a_text_input() {
     let mut document = Document::new();
-    let input = styled::text_input(&mut document, "note");
+    let input = with_reactive_scope(&mut document, || {
+        view! { <text_input value={"note".to_string()} /> }
+    });
     toolbar(&mut document, &[input]);
     let mut harness = Harness::new(document);
 

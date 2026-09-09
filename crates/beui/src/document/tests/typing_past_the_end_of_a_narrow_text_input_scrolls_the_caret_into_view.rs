@@ -1,10 +1,14 @@
 use super::*;
+use crate::reactive::{view, with_reactive_scope};
+use crate::styled::TextInputBuilder;
 
 #[test]
 fn typing_past_the_end_of_a_narrow_text_input_scrolls_the_caret_into_view() {
     let value = "a value that is much wider than the field";
     let mut document = Document::new();
-    let input = styled::text_input(&mut document, "");
+    let input = with_reactive_scope(&mut document, || {
+        view! { <text_input value={String::new()} /> }
+    });
     let sized = document.create_sized(Some(80.0), None);
     document.set_sized_child(sized, input);
     toolbar(&mut document, &[sized]);

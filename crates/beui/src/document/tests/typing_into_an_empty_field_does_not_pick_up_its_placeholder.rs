@@ -1,10 +1,13 @@
 use super::*;
+use crate::reactive::{view, with_reactive_scope};
+use crate::styled::TextInputBuilder;
 
 #[test]
 fn typing_into_an_empty_field_does_not_pick_up_its_placeholder() {
     let mut document = Document::new();
-    let input = styled::text_input(&mut document, "");
-    styled::set_text_input_placeholder(&mut document, input, "Search");
+    let input = with_reactive_scope(&mut document, || {
+        view! { <text_input value={String::new()} placeholder={"Search".to_string()} /> }
+    });
     toolbar(&mut document, &[input]);
     let mut harness = Harness::new(document);
 

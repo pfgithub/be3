@@ -1,9 +1,13 @@
 use super::*;
+use crate::reactive::{view, with_reactive_scope};
+use crate::styled::TextInputBuilder;
 
 #[test]
 fn typing_into_a_focused_text_input_inserts_the_text() {
     let mut document = Document::new();
-    let input = styled::text_input(&mut document, "");
+    let input = with_reactive_scope(&mut document, || {
+        view! { <text_input value={String::new()} /> }
+    });
     toolbar(&mut document, &[input]);
     let mut harness = Harness::new(document);
 

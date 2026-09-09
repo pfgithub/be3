@@ -1,9 +1,13 @@
 use super::*;
+use crate::reactive::{view, with_reactive_scope};
+use crate::styled::TextInputBuilder;
 
 #[test]
 fn ctrl_a_selects_everything_so_typing_replaces_the_value() {
     let mut document = Document::new();
-    let input = styled::text_input(&mut document, "hello");
+    let input = with_reactive_scope(&mut document, || {
+        view! { <text_input value={"hello".to_string()} /> }
+    });
     toolbar(&mut document, &[input]);
     let mut harness = Harness::new(document);
 

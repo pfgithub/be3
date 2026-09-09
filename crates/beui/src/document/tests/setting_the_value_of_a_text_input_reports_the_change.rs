@@ -1,19 +1,27 @@
 use super::*;
+use crate::reactive::{create_signal, view, with_reactive_scope};
+use crate::styled::TextInputBuilder;
 
 #[test]
 fn setting_the_value_of_a_text_input_reports_the_change() {
     let mut document = Document::new();
-    let input = styled::text_input(&mut document, "");
     let reported = Rc::new(RefCell::new(String::new()));
     let sink = reported.clone();
-    styled::set_text_input_on_change(&mut document, input, move |_document, value| {
-        *sink.borrow_mut() = value;
+    let (value, set_value) = create_signal(String::new());
+    let input = with_reactive_scope(&mut document, || {
+        view! {
+            <text_input value={value} on_change={Box::new(move |_document: &mut Document, value| {
+                *sink.borrow_mut() = value;
+            })} />
+        }
     });
     toolbar(&mut document, &[input]);
     let mut harness = Harness::new(document);
     harness.frame(Vec::new());
 
-    styled::set_text_input_value(harness.document_mut(), input, "typed for you");
+    with_reactive_scope(harness.document_mut(), || {
+        set_value.set("typed for you".to_string())
+    });
 
     assert_eq!(reported.borrow().as_str(), "typed for you");
 }

@@ -1,10 +1,16 @@
 use super::*;
+use crate::reactive::{view, with_reactive_scope};
+use crate::styled::TextInputBuilder;
 
 #[test]
 fn tab_moves_focus_from_one_text_input_to_the_next() {
     let mut document = Document::new();
-    let first = styled::text_input(&mut document, "");
-    let second = styled::text_input(&mut document, "");
+    let (first, second) = with_reactive_scope(&mut document, || {
+        (
+            view! { <text_input value={String::new()} /> },
+            view! { <text_input value={String::new()} /> },
+        )
+    });
     toolbar(&mut document, &[first, second]);
     let mut harness = Harness::new(document);
 

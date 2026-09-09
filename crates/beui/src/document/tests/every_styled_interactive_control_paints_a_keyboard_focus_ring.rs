@@ -2,7 +2,8 @@ use super::*;
 use crate::reactive::{view, with_document, with_reactive_scope};
 use crate::styled::{
     AccordionBuilder, ButtonBuilder, CheckboxBuilder, ListRowBuilder, ListboxBuilder,
-    RadioGroupBuilder, SliderBuilder, SwitchBuilder, TabsBuilder, ToggleButtonBuilder,
+    RadioGroupBuilder, SliderBuilder, SwitchBuilder, TabsBuilder, TextInputBuilder,
+    ToggleButtonBuilder,
 };
 
 #[test]
@@ -20,7 +21,7 @@ fn every_styled_interactive_control_paints_a_keyboard_focus_ring() {
         },
         |doc| with_reactive_scope(doc, || view! { <switch on={false} /> }),
         |doc| with_reactive_scope(doc, || view! { <slider value={0.5} /> }),
-        |doc| styled::text_input(doc, "Text"),
+        |doc| with_reactive_scope(doc, || view! { <text_input value={"Text".to_string()} /> }),
         |doc| {
             with_reactive_scope(doc, || {
                 view! { <tabs labels={vec!["One".to_string(), "Two".to_string()]} selected={0} /> }

@@ -1,9 +1,13 @@
 use super::*;
+use crate::reactive::{view, with_reactive_scope};
+use crate::styled::TextInputBuilder;
 
 #[test]
 fn shift_arrow_selects_the_character_that_typing_then_replaces() {
     let mut document = Document::new();
-    let input = styled::text_input(&mut document, "cat");
+    let input = with_reactive_scope(&mut document, || {
+        view! { <text_input value={"cat".to_string()} /> }
+    });
     toolbar(&mut document, &[input]);
     let mut harness = Harness::new(document);
 

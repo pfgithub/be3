@@ -11,7 +11,7 @@ use beui::styled::{
     self, AccordionBuilder, BodyBuilder, ButtonBuilder, ButtonVariant, CaptionBuilder, CardBuilder,
     CheckboxBuilder, DisplayBuilder, HeadingBuilder, ListboxBuilder, ParagraphBuilder,
     ProgressBuilder, RadioGroupBuilder, ScrollbarBuilder, ShortcutBuilder, SliderBuilder,
-    SwitchBuilder, TabsBuilder, TitleBuilder, ToggleButtonBuilder,
+    SwitchBuilder, TabsBuilder, TextInputBuilder, TitleBuilder, ToggleButtonBuilder,
 };
 use beui::{unstyled, Color32, Context, Document, ItemSize, NodeId, Rect, TextAlign};
 
@@ -496,10 +496,12 @@ fn build_name_controls(document: &mut Document) -> NodeId {
     document.append_child(header, label, ItemSize::Intrinsic);
     document.append_child(header, greeting, ItemSize::Percent(100.0));
 
-    let input = styled::text_input(document, "");
-    styled::set_text_input_placeholder(document, input, "Type a name");
-    styled::set_text_input_on_change(document, input, move |document, value| {
-        with_reactive_scope(document, || set_greeting_text.set(greeting_label(&value)));
+    let input = with_reactive_scope(document, || {
+        view! {
+            <text_input value={String::new()} placeholder={"Type a name".to_string()} on_change={Box::new(move |document: &mut Document, value| {
+                with_reactive_scope(document, || set_greeting_text.set(greeting_label(&value)));
+            })} />
+        }
     });
 
     let hint = with_reactive_scope(document, || {
