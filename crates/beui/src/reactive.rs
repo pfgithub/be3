@@ -17,8 +17,17 @@ pub use reactive::{
 
 thread_local! {
     static CURRENT_DOCUMENT: RefCell<Option<Document>> = const { RefCell::new(None) };
+    static ACTIVE_DOCUMENT: Cell<*mut Document> = const { Cell::new(std::ptr::null_mut()) };
     static CURRENT_COMPONENT: Cell<Option<NodeId>> = const { Cell::new(None) };
     static PENDING_DETAIL: RefCell<HashMap<NodeId, String>> = RefCell::new(HashMap::new());
+}
+
+struct ActiveDocumentGuard;
+
+impl Drop for ActiveDocumentGuard {
+    fn drop(&mut self) {
+        ACTIVE_DOCUMENT.with(|active| active.set(std::ptr::null_mut()));
+    }
 }
 
 pub(crate) enum DocumentGuard<'a> {
@@ -65,13 +74,26 @@ pub fn with_reactive_scope<R>(document: &mut Document, f: impl FnOnce() -> R) ->
 }
 
 pub fn with_document<R>(f: impl FnOnce(&mut Document) -> R) -> R {
-    CURRENT_DOCUMENT.with(|cell| {
-        let mut slot = cell.borrow_mut();
-        let document = slot.as_mut().expect(
-            "beui::reactive binding used without an active document; \
-             call it from inside build(), or from inside event dispatch",
-        );
-        f(document)
+    CURRENT_DOCUMENT.with(|cell| match cell.try_borrow_mut() {
+        Ok(mut slot) => {
+            let document = slot.as_mut().expect(
+                "beui::reactive binding used without an active document; \
+                 call it from inside build(), or from inside event dispatch",
+            );
+            let ptr: *mut Document = document;
+            ACTIVE_DOCUMENT.with(|active| active.set(ptr));
+            let _guard = ActiveDocumentGuard;
+            f(document)
+        }
+        Err(_) => {
+            let ptr = ACTIVE_DOCUMENT.with(Cell::get);
+            assert!(
+                !ptr.is_null(),
+                "beui::reactive binding used without an active document; \
+                 call it from inside build(), or from inside event dispatch"
+            );
+            f(unsafe { &mut *ptr })
+        }
     })
 }
 
