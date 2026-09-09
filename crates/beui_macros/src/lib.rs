@@ -1,13 +1,11 @@
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
 use syn::braced;
-use syn::bracketed;
 use syn::parenthesized;
 use syn::parse::{Parse, ParseStream};
-use syn::punctuated::Punctuated;
 use syn::{
-    parse_macro_input, Expr, FnArg, GenericArgument, Ident, ItemFn, Pat, PatType, PathArguments,
-    Token, Type,
+    parse_macro_input, Expr, ExprLit, FnArg, GenericArgument, Ident, ItemFn, Lit, Pat, PatType,
+    PathArguments, Token, Type,
 };
 
 struct Prop {
@@ -194,17 +192,27 @@ pub fn component(_attr: TokenStream, item: TokenStream) -> TokenStream {
     .into()
 }
 
-struct ViewProp {
+struct ViewAttr {
     key: Ident,
     value: Expr,
 }
 
-impl Parse for ViewProp {
+impl Parse for ViewAttr {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let key: Ident = input.parse()?;
-        input.parse::<Token![:]>()?;
-        let value: Expr = input.parse()?;
-        Ok(ViewProp { key, value })
+        input.parse::<Token![=]>()?;
+        let value = if input.peek(syn::token::Brace) {
+            let content;
+            braced!(content in input);
+            content.parse::<Expr>()?
+        } else {
+            let lit: Lit = input.parse()?;
+            Expr::Lit(ExprLit {
+                attrs: Vec::new(),
+                lit,
+            })
+        };
+        Ok(ViewAttr { key, value })
     }
 }
 
@@ -256,10 +264,12 @@ impl Parse for ViewChild {
             None
         };
 
-        let kind = if input.peek(Ident) && input.peek2(syn::token::Brace) {
+        let kind = if input.peek(Token![<]) {
             ViewChildKind::Node(input.parse()?)
         } else {
-            ViewChildKind::Expr(input.parse()?)
+            let content;
+            braced!(content in input);
+            ViewChildKind::Expr(content.parse()?)
         };
 
         Ok(ViewChild { sizing, kind })
@@ -268,35 +278,51 @@ impl Parse for ViewChild {
 
 struct ViewNode {
     tag: Ident,
-    props: Vec<ViewProp>,
+    props: Vec<ViewAttr>,
     children: Option<Vec<ViewChild>>,
 }
 
 impl Parse for ViewNode {
     fn parse(input: ParseStream) -> syn::Result<Self> {
+        input.parse::<Token![<]>()?;
         let tag: Ident = input.parse()?;
 
-        let props_input;
-        braced!(props_input in input);
-        let props = Punctuated::<ViewProp, Token![,]>::parse_terminated(&props_input)?
-            .into_iter()
-            .collect();
+        let mut props = Vec::new();
+        while !input.peek(Token![>]) && !input.peek(Token![/]) {
+            props.push(input.parse::<ViewAttr>()?);
+        }
 
-        let children = if input.peek(syn::token::Bracket) {
-            let children_input;
-            bracketed!(children_input in input);
-            let children = Punctuated::<ViewChild, Token![,]>::parse_terminated(&children_input)?
-                .into_iter()
-                .collect();
-            Some(children)
-        } else {
-            None
-        };
+        if input.peek(Token![/]) {
+            input.parse::<Token![/]>()?;
+            input.parse::<Token![>]>()?;
+            return Ok(ViewNode {
+                tag,
+                props,
+                children: None,
+            });
+        }
+        input.parse::<Token![>]>()?;
+
+        let mut children = Vec::new();
+        while !(input.peek(Token![<]) && input.peek2(Token![/])) {
+            children.push(input.parse::<ViewChild>()?);
+        }
+
+        input.parse::<Token![<]>()?;
+        input.parse::<Token![/]>()?;
+        let close_tag: Ident = input.parse()?;
+        if close_tag != tag {
+            return Err(syn::Error::new(
+                close_tag.span(),
+                format!("mismatched closing tag `</{close_tag}>`, expected `</{tag}>`"),
+            ));
+        }
+        input.parse::<Token![>]>()?;
 
         Ok(ViewNode {
             tag,
             props,
-            children,
+            children: Some(children),
         })
     }
 }

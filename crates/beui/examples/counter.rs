@@ -10,7 +10,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 #[component]
 fn history_entry(value: i64) -> NodeId {
-    view! { text { string: value.to_string() } }
+    view! { <text string={value.to_string()} /> }
 }
 
 #[component]
@@ -64,36 +64,28 @@ fn app() -> NodeId {
     let count_text = create_memo(move || count.get().to_string());
 
     view! {
-        column {
-            spacing: 8.0,
-        } [
-            row {
-                spacing: 8.0,
-            } [
-                button {
-                    disabled: is_zero,
-                    on_click: decrement_click,
-                } [ text { string: "-".to_string() } ],
-                text { string: count_text },
-                button {
-                    on_click: increment_click,
-                } [ text { string: "+".to_string() } ],
-                show {
-                    condition: is_nonzero,
-                    then: Box::new(move || view! {
-                        button {
-                            on_click: reset_click,
-                        } [ text { string: "reset".to_string() } ]
-                    }),
-                }
-            ],
-            for_each {
-                spacing: 4.0,
-                items: history,
-                key: Box::new(|(id, _)| *id),
-                view: Box::new(|(_, value)| intrinsic(history_entry().value(*value).build())),
-            }
-        ]
+        <column spacing={8.0}>
+            <row spacing={8.0}>
+                <button disabled={is_zero} on_click={decrement_click}>
+                    <text string={"-".to_string()} />
+                </button>
+                <text string={count_text} />
+                <button on_click={increment_click}>
+                    <text string={"+".to_string()} />
+                </button>
+                <show condition={is_nonzero} then={Box::new(move || view! {
+                    <button on_click={reset_click}>
+                        <text string={"reset".to_string()} />
+                    </button>
+                })} />
+            </row>
+            <for_each
+                spacing={4.0}
+                items={history}
+                key={Box::new(|(id, _)| *id)}
+                view={Box::new(|(_, value)| intrinsic(history_entry().value(*value).build()))}
+            />
+        </column>
     }
 }
 
