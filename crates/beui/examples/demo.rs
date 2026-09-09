@@ -3,15 +3,14 @@ use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 
 use beui::reactive::{create_memo, create_signal, view, with_reactive_scope, WriteSignal};
-use beui::styled::reactive::{
-    BodyBuilder, ButtonBuilder, CaptionBuilder, CardBuilder, DisplayBuilder, HeadingBuilder,
-    ParagraphBuilder, TitleBuilder,
-};
 use beui::styled::theme::{
     ACCENT, ACCENT_SOFT, BACKGROUND, RADIUS, SCROLLBAR_WIDTH, SEPARATOR_HEIGHT, SURFACE,
     SURFACE_RAISED, TEXT_MUTED,
 };
-use beui::styled::{self, ButtonVariant};
+use beui::styled::{
+    self, BodyBuilder, ButtonBuilder, ButtonVariant, CaptionBuilder, CardBuilder, DisplayBuilder,
+    HeadingBuilder, ParagraphBuilder, TitleBuilder,
+};
 use beui::{unstyled, Color32, Context, Document, ItemSize, NodeId, Rect, TextAlign};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

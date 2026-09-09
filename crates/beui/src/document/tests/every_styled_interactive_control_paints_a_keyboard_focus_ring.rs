@@ -1,6 +1,6 @@
 use super::*;
 use crate::reactive::{view, with_reactive_scope};
-use crate::styled::reactive::ButtonBuilder;
+use crate::styled::ButtonBuilder;
 
 #[test]
 fn every_styled_interactive_control_paints_a_keyboard_focus_ring() {

@@ -8,11 +8,11 @@ use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{create_signal, view, with_reactive_scope, WriteSignal};
 use crate::styled;
-use crate::styled::reactive::{CaptionBuilder, HeadingBuilder};
 use crate::styled::theme::{
     ACCENT, BORDER_WIDTH, CHIP_RADIUS, ON_ACCENT, RADIUS, SCROLLBAR_WIDTH, SEPARATOR_HEIGHT,
     SURFACE, SURFACE_RAISED, TEXT, TEXT_MUTED,
 };
+use crate::styled::{CaptionBuilder, HeadingBuilder};
 use crate::unstyled;
 
 use super::tree::Entry;

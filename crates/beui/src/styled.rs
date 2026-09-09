@@ -1,12 +1,12 @@
 mod accordion;
 mod border;
 mod button;
+mod card;
 mod checkbox;
 mod chip;
 mod context_menu;
 mod list_row;
 mod progress;
-pub mod reactive;
 mod scrollbar;
 mod select;
 mod shortcut;
@@ -19,7 +19,8 @@ pub mod theme;
 
 pub use accordion::{accordion, accordion_open, set_accordion_on_toggle, set_accordion_open};
 pub use border::{bordered, separator};
-pub use button::{focus_button, set_button_on_click, ButtonVariant};
+pub use button::{focus_button, set_button_on_click, ButtonBuilder, ButtonVariant};
+pub use card::CardBuilder;
 pub use checkbox::{checkbox, checkbox_checked, set_checkbox_checked, set_checkbox_on_change};
 pub use chip::chip;
 pub use context_menu::{context_menu, set_context_menu_items, set_context_menu_on_select};
@@ -34,7 +35,10 @@ pub use shortcut::shortcut;
 pub use slider::{set_slider_on_change, set_slider_value, slider, slider_value};
 pub use switch::{set_switch_on, set_switch_on_change, switch, switch_on};
 pub use tabs::{focus_tabs, set_tabs_on_change, set_tabs_selected, tabs, tabs_selected};
-pub use text::{code, icon, icon_sized};
+pub use text::{
+    code, icon, icon_sized, BodyBuilder, CaptionBuilder, DisplayBuilder, HeadingBuilder,
+    ParagraphBuilder, TitleBuilder,
+};
 pub use text_input::{
     focus_text_input, set_text_input_on_change, set_text_input_on_submit,
     set_text_input_placeholder, set_text_input_value, text_input, text_input_value,

@@ -3,9 +3,8 @@ use std::rc::Rc;
 use block_editor_plugin::beui::reactive::{
     create_memo, create_signal, view, with_reactive_scope, WriteSignal,
 };
-use block_editor_plugin::beui::styled::reactive::{ButtonBuilder, DisplayBuilder};
 use block_editor_plugin::beui::styled::theme::BACKGROUND;
-use block_editor_plugin::beui::styled::{self, ButtonVariant};
+use block_editor_plugin::beui::styled::{self, ButtonBuilder, ButtonVariant, DisplayBuilder};
 use block_editor_plugin::beui::{unstyled, Color32, Context, Document, ItemSize, Rect};
 
 const PADDING: f32 = 20.0;

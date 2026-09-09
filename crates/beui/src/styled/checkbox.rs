@@ -3,7 +3,7 @@ use crate::color::Color32;
 use crate::base::ItemSize;
 use crate::document::Document;
 use crate::node::{Handler, NodeId};
-use crate::styled::text::body;
+use crate::styled::text::body_line;
 use crate::styled::theme::{
     ACCENT, ACCENT_HOVER, BORDER, BORDER_WIDTH, CHIP_RADIUS, ON_ACCENT, RADIUS, SURFACE_RAISED,
 };
@@ -46,7 +46,7 @@ pub fn checkbox(document: &mut Document, label: &str, checked: bool) -> NodeId {
     let boxed = document.create_sized(Some(BOX_SIZE), Some(BOX_SIZE));
     document.set_sized_child(boxed, border);
 
-    let label = body(document, label);
+    let label = body_line(document, label);
     let line = unstyled::centered_row(document, SPACING);
     document.append_child(line, boxed, ItemSize::Intrinsic);
     document.append_child(line, label, ItemSize::Percent(100.0));

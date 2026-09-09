@@ -3,7 +3,7 @@ use crate::color::Color32;
 use crate::base::{ItemSize, TextAlign};
 use crate::document::Document;
 use crate::node::{Handler, NodeId};
-use crate::styled::text::{code, heading};
+use crate::styled::text::{code, heading_line};
 use crate::styled::theme::{RADIUS, SURFACE_RAISED, TEXT_MUTED};
 use crate::unstyled;
 
@@ -26,7 +26,7 @@ pub fn accordion(document: &mut Document, title: &str, child: NodeId, open: bool
     let marker_box = document.create_sized(Some(MARKER_WIDTH), None);
     document.set_sized_child(marker_box, marker);
 
-    let title = heading(document, title);
+    let title = heading_line(document, title);
 
     let line = unstyled::centered_row(document, SPACING);
     document.append_child(line, marker_box, ItemSize::Intrinsic);
