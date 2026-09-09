@@ -6,8 +6,8 @@ use crate::base::ItemSize;
 use crate::document::Document;
 use crate::node::{Handler, NodeId};
 use crate::reactive::{
-    current_component, set_component_detail, with_document, FillBuilder, OutlineBuilder, Prop,
-    SizedBuilder,
+    current_component, set_component_detail, with_document, CenteredRowBuilder, FillBuilder,
+    OutlineBuilder, Prop, SizedBuilder,
 };
 use crate::styled::theme::{ACCENT, ACCENT_HOVER, KNOB, RADIUS, TRACK};
 use crate::unstyled;
@@ -48,13 +48,14 @@ pub fn slider(value: Prop<f32>, on_change: Option<Handler<f32>>) -> NodeId {
         .build();
     let knob = view! { <sized width={KNOB_SIZE} height={KNOB_SIZE}>{knob_fill}</sized> };
 
-    let line = with_document(|document| {
-        let line = unstyled::centered_row(document, 0.0);
-        document.append_child(line, filled, filled_size(0.0));
-        document.append_child(line, knob, ItemSize::Intrinsic);
-        document.append_child(line, rest, rest_size(0.0));
-        line
-    });
+    let line = CenteredRowBuilder::default()
+        .spacing(0.0)
+        .children([
+            (filled, filled_size(0.0)),
+            (knob, ItemSize::Intrinsic),
+            (rest, rest_size(0.0)),
+        ])
+        .build();
 
     let sized = view! { <sized height={HEIGHT}>{line}</sized> };
     let ring = view! {

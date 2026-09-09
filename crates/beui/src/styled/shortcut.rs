@@ -2,10 +2,9 @@ use beui_macros::{component, view};
 
 use crate::base::{ItemSize, TextAlign};
 use crate::node::NodeId;
-use crate::reactive::{with_document, Prop, TextBuilder};
+use crate::reactive::{CenteredRowBuilder, Prop, TextBuilder};
 use crate::styled::theme::{FONT_SMALL, TEXT_MUTED};
 use crate::styled::ChipBuilder;
-use crate::unstyled;
 
 const SPACING: f32 = 10.0;
 
@@ -21,10 +20,11 @@ pub fn shortcut(keys: Prop<String>, description: Prop<String>) -> NodeId {
         .wrap(true)
         .build();
 
-    with_document(|document| {
-        let line = unstyled::centered_row(document, SPACING);
-        document.append_child(line, keys_node, ItemSize::Intrinsic);
-        document.append_child(line, description_node, ItemSize::Percent(100.0));
-        line
-    })
+    CenteredRowBuilder::default()
+        .spacing(SPACING)
+        .children([
+            (keys_node, ItemSize::Intrinsic),
+            (description_node, ItemSize::Percent(100.0)),
+        ])
+        .build()
 }

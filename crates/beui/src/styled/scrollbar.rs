@@ -4,7 +4,7 @@ use crate::color::Color32;
 
 use crate::base::{ItemSize, ScrollPosition};
 use crate::node::NodeId;
-use crate::reactive::{with_document, FillBuilder};
+use crate::reactive::{with_document, ColumnBuilder, FillBuilder};
 use crate::styled::theme::{ACCENT, SCROLL_THUMB, SURFACE_RAISED};
 use crate::unstyled;
 
@@ -23,13 +23,14 @@ pub fn scrollbar(scroll: NodeId) -> NodeId {
         .build();
     let after = with_document(unstyled::spacer);
 
-    let track = with_document(|document| {
-        let track = unstyled::column(document, 0.0);
-        document.append_child(track, before, ItemSize::Percent(0.0));
-        document.append_child(track, thumb, ItemSize::Percent(100.0));
-        document.append_child(track, after, ItemSize::Percent(0.0));
-        track
-    });
+    let track = ColumnBuilder::default()
+        .spacing(0.0)
+        .children([
+            (before, ItemSize::Percent(0.0)),
+            (thumb, ItemSize::Percent(100.0)),
+            (after, ItemSize::Percent(0.0)),
+        ])
+        .build();
     let background = view! { <fill color={SURFACE_RAISED} radius={RADIUS}>{track}</fill> };
 
     with_document(|document| {

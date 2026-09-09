@@ -4,8 +4,8 @@ use crate::color::Color32;
 use crate::document::Document;
 use crate::node::{Handler, NodeId};
 use crate::reactive::{
-    create_effect, intrinsic, with_document, FillBuilder, OutlineBuilder, PaddingBuilder,
-    SizedBuilder, VisibilityBuilder,
+    create_effect, intrinsic, with_document, CenteredRowBuilder, FillBuilder, OutlineBuilder,
+    PaddingBuilder, SizedBuilder, VisibilityBuilder,
 };
 use crate::styled::theme::{
     ACCENT, ACCENT_SOFT, BORDER, FONT_BODY, RADIUS, SURFACE_RAISED, TEXT, TEXT_MUTED,
@@ -60,12 +60,16 @@ pub(super) fn choice(
                 .children([intrinsic(dot_size)])
                 .build();
             mark = Some(visibility);
-            let center = unstyled::centered_row(document, 0.0);
             let before = unstyled::spacer(document);
             let after = unstyled::spacer(document);
-            document.append_child(center, before, ItemSize::Percent(100.0));
-            document.append_child(center, visibility, ItemSize::Intrinsic);
-            document.append_child(center, after, ItemSize::Percent(100.0));
+            let center = CenteredRowBuilder::default()
+                .spacing(0.0)
+                .children([
+                    (before, ItemSize::Percent(100.0)),
+                    (visibility, ItemSize::Intrinsic),
+                    (after, ItemSize::Percent(100.0)),
+                ])
+                .build();
             let circle = OutlineBuilder::default()
                 .color(BORDER)
                 .width(2.0)
@@ -79,10 +83,13 @@ pub(super) fn choice(
                 .height(18.0)
                 .children([intrinsic(circle)])
                 .build();
-            let row = unstyled::centered_row(document, 10.0);
-            document.append_child(row, size, ItemSize::Intrinsic);
-            document.append_child(row, label, ItemSize::Percent(100.0));
-            row
+            CenteredRowBuilder::default()
+                .spacing(10.0)
+                .children([
+                    (size, ItemSize::Intrinsic),
+                    (label, ItemSize::Percent(100.0)),
+                ])
+                .build()
         } else {
             label
         };

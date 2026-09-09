@@ -6,8 +6,8 @@ use crate::base::ItemSize;
 use crate::document::Document;
 use crate::node::{Handler, NodeId};
 use crate::reactive::{
-    current_component, set_component_detail, with_document, FillBuilder, OutlineBuilder,
-    PaddingBuilder, Prop, SizedBuilder,
+    current_component, set_component_detail, with_document, CenteredRowBuilder, FillBuilder,
+    OutlineBuilder, PaddingBuilder, Prop, SizedBuilder,
 };
 use crate::styled::theme::{ACCENT, ACCENT_HOVER, BORDER, KNOB, RADIUS, SURFACE_RAISED};
 use crate::unstyled;
@@ -37,13 +37,14 @@ pub fn switch(on: Prop<bool>, on_change: Option<Handler<bool>>) -> NodeId {
 
     let before = with_document(unstyled::spacer);
     let after = with_document(unstyled::spacer);
-    let line = with_document(|document| {
-        let line = unstyled::centered_row(document, 0.0);
-        document.append_child(line, before, before_size(false));
-        document.append_child(line, knob, ItemSize::Intrinsic);
-        document.append_child(line, after, after_size(false));
-        line
-    });
+    let line = CenteredRowBuilder::default()
+        .spacing(0.0)
+        .children([
+            (before, before_size(false)),
+            (knob, ItemSize::Intrinsic),
+            (after, after_size(false)),
+        ])
+        .build();
 
     let padding = view! { <padding horizontal={PADDING} vertical={PADDING}>{line}</padding> };
     let track =
