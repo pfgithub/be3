@@ -67,9 +67,6 @@ fn style_menu_rows(document: &mut Document, menu: NodeId, items: &[MenuItem]) {
     for (index, item) in items.iter().enumerate() {
         let button = unstyled::menu_list_row_button(document, menu, index);
         let color = if item.disabled { TEXT_MUTED } else { TEXT };
-        let label = view! {
-            <text string={item.label.clone()} font_size={FONT_BODY} color={color} align={TextAlign::Start} />
-        };
 
         let hovered = unstyled::button_hovered(document, button);
         let focused = unstyled::button_focused(document, button);
@@ -78,7 +75,9 @@ fn style_menu_rows(document: &mut Document, menu: NodeId, items: &[MenuItem]) {
         }));
         let fill = view! {
             <fill color={fill_color} radius={RADIUS}>
-                <padding horizontal={PADDING_HORIZONTAL} vertical={PADDING_VERTICAL}>{label}</padding>
+                <padding horizontal={PADDING_HORIZONTAL} vertical={PADDING_VERTICAL}>
+                    <text string={item.label.clone()} font_size={FONT_BODY} color={color} align={TextAlign::Start} />
+                </padding>
             </fill>
         };
         unstyled::set_button_child(button, fill);

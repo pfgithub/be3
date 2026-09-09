@@ -77,24 +77,21 @@ pub fn select(
         unstyled::set_text_input_padding(search, PADDING_HORIZONTAL, 0.0);
         unstyled::set_text_input_placeholder(search, "Search");
 
-        let search_border = view! {
-            <outline color={BORDER} width={BORDER_WIDTH} radius={RADIUS} offset={0.0} visible={true}>
-                <fill color={SURFACE} radius={RADIUS}>{field}</fill>
-            </outline>
-        };
+        let search_hovered = unstyled::text_input_hovered(document, search);
+        let search_focused = unstyled::text_input_focused(document, search);
+        let search_border_color = Prop::Dynamic(Box::new(move || {
+            border_color(search_focused.get(), search_hovered.get())
+        }));
         unstyled::set_text_input_child(
             search,
-            view! { <sized height={HEIGHT}>{search_border}</sized> },
+            view! {
+                <sized height={HEIGHT}>
+                    <outline color={search_border_color} width={BORDER_WIDTH} radius={RADIUS} offset={0.0} visible={true}>
+                        <fill color={SURFACE} radius={RADIUS}>{field}</fill>
+                    </outline>
+                </sized>
+            },
         );
-
-        unstyled::set_text_input_on_hover_change(search, move |document, hovered| {
-            let focused = unstyled::text_input_focused(document, search).get();
-            document.set_outline_color(search_border, border_color(focused, hovered));
-        });
-        unstyled::set_text_input_on_focus_change(search, move |document, focused| {
-            let hovered = unstyled::text_input_hovered(document, search).get();
-            document.set_outline_color(search_border, border_color(focused, hovered));
-        });
 
         for index in 0..unstyled::select_option_count(document, inner) {
             let button = unstyled::select_option_button(document, inner, index);
