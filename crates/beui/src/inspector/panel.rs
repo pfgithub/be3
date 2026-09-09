@@ -12,7 +12,7 @@ use crate::styled::theme::{
     ACCENT, BORDER_WIDTH, CHIP_RADIUS, ON_ACCENT, RADIUS, SCROLLBAR_WIDTH, SEPARATOR_HEIGHT,
     SURFACE, SURFACE_RAISED, TEXT, TEXT_MUTED,
 };
-use crate::styled::{CaptionBuilder, HeadingBuilder, ListRowBuilder};
+use crate::styled::{CaptionBuilder, HeadingBuilder, ListRowBuilder, ScrollbarBuilder};
 use crate::unstyled;
 
 use super::tree::Entry;
@@ -183,7 +183,7 @@ fn pick_toggle(
 }
 
 fn body(document: &mut Document, scroll: NodeId) -> NodeId {
-    let bar = styled::scrollbar(document, scroll);
+    let bar = with_reactive_scope(document, || view! { <scrollbar scroll={scroll} /> });
     let area = unstyled::row(document, BODY_SPACING);
     document.append_child(area, scroll, ItemSize::Percent(100.0));
     document.append_child(area, bar, ItemSize::Fixed(SCROLLBAR_WIDTH));

@@ -26,7 +26,7 @@ pub use chip::ChipBuilder;
 pub use context_menu::{context_menu, set_context_menu_items, set_context_menu_on_select};
 pub use list_row::ListRowBuilder;
 pub use progress::ProgressBuilder;
-pub use scrollbar::scrollbar;
+pub use scrollbar::ScrollbarBuilder;
 pub use select::{
     focus_select, select, select_open, select_selected, set_select_on_change, set_select_open,
     set_select_selected,

@@ -9,8 +9,8 @@ use beui::styled::theme::{
 };
 use beui::styled::{
     self, BodyBuilder, ButtonBuilder, ButtonVariant, CaptionBuilder, CardBuilder, CheckboxBuilder,
-    DisplayBuilder, HeadingBuilder, ParagraphBuilder, ProgressBuilder, ShortcutBuilder,
-    SliderBuilder, SwitchBuilder, TitleBuilder, ToggleButtonBuilder,
+    DisplayBuilder, HeadingBuilder, ParagraphBuilder, ProgressBuilder, ScrollbarBuilder,
+    ShortcutBuilder, SliderBuilder, SwitchBuilder, TitleBuilder, ToggleButtonBuilder,
 };
 use beui::{unstyled, Color32, Context, Document, ItemSize, NodeId, Rect, TextAlign};
 
@@ -357,7 +357,7 @@ fn build_main(document: &mut Document, value: NodeId) -> NodeId {
     let scroll = document.create_scroll();
     let rows = Rc::new(Rows::new(set_status_text));
     install_rows(document, scroll, &rows, false);
-    let bar = styled::scrollbar(document, scroll);
+    let bar = with_reactive_scope(document, || view! { <scrollbar scroll={scroll} /> });
 
     let area = unstyled::row(document, 10.0);
     document.append_child(area, scroll, ItemSize::Percent(100.0));
