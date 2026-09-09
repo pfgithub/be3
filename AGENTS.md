@@ -15,10 +15,11 @@ Do not:
 - Don't use worktrees. If using subagents, run them sequentially rather than in parallel.
 
 Verification:
-- `./scripts/verify`: Always run this one before committing. Run using a 10 minute timeout in the tool call arguments so it doesn't convert itself to a background task.
+- `./scripts/verify`: This is the primary way to check your work, and should run frequently, not just once at the end. Run using a 10 minute timeout in the tool call arguments so it doesn't convert itself to a background task.
   - This will run all project tests and clippy lints
   - It will autofix formatting, clippy fixable rules, and it will autofix to enforce these project-specific rules: It will delete all code comments & doc comments, it will structure test folders & files to the project's one test per file standard, and it will automatically move+rename mod.rs files to be in the parent folder named after the folder instead.
-  - Once you're ready for your code to be seen by the compiler, always start by running the verify script. Only use manual test / clippy / ... calls if you need to, for example if verification failed
+  - Default to running `./scripts/verify` whenever you want to check that your code compiles or passes tests, including during iterative work, not only right before committing.
+  - Only fall back to manual `cargo check` / `cargo test` / `cargo build` / `cargo clippy` calls for special cases: e.g. verify failed and you need a faster/narrower loop to isolate the fix, or you need output verify doesn't surface. Treat these as the exception, not the default iteration loop, and always finish with a `./scripts/verify` run before committing.
 - `PATH="/home/ubuntu/.local/android-build/gradle-8.11.1/bin:$PATH" ./scripts/build --target android --android-sdk /home/ubuntu/Android/Sdk`: run this for changes that affect features specific to Android.
 - `./scripts/build --target web`: run this for changes that affect features specific to web
 - Do not perform any manual GUI verification. Do not run the GUI app or use the browser tool.
