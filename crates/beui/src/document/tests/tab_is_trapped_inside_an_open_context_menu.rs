@@ -1,4 +1,6 @@
 use super::*;
+use crate::reactive::{view, with_reactive_scope};
+use crate::styled::ContextMenuBuilder;
 
 #[test]
 fn tab_is_trapped_inside_an_open_context_menu() {
@@ -11,7 +13,9 @@ fn tab_is_trapped_inside_an_open_context_menu() {
         unstyled::MenuItem::new("Copy"),
         unstyled::MenuItem::new("Paste"),
     ];
-    let menu = styled::context_menu(&mut document, region, items);
+    let menu = with_reactive_scope(&mut document, || {
+        view! { <context_menu region={region} items={items} /> }
+    });
     let after = labelled_button(&mut document, "After");
     toolbar(&mut document, &[before, menu, after]);
     let mut harness = Harness::new(document);

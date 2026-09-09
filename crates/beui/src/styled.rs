@@ -23,7 +23,7 @@ pub use button::{focus_button, set_button_on_click, ButtonBuilder, ButtonVariant
 pub use card::CardBuilder;
 pub use checkbox::{checkbox_checked, CheckboxBuilder};
 pub use chip::ChipBuilder;
-pub use context_menu::{context_menu, set_context_menu_items, set_context_menu_on_select};
+pub use context_menu::ContextMenuBuilder;
 pub use list_row::ListRowBuilder;
 pub use progress::ProgressBuilder;
 pub use scrollbar::ScrollbarBuilder;

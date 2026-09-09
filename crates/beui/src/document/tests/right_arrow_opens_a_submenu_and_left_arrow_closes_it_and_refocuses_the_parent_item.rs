@@ -1,4 +1,6 @@
 use super::*;
+use crate::reactive::{view, with_reactive_scope};
+use crate::styled::ContextMenuBuilder;
 
 #[test]
 fn right_arrow_opens_a_submenu_and_left_arrow_closes_it_and_refocuses_the_parent_item() {
@@ -13,7 +15,9 @@ fn right_arrow_opens_a_submenu_and_left_arrow_closes_it_and_refocuses_the_parent
             unstyled::MenuItem::new("Link"),
         ],
     )];
-    let menu = styled::context_menu(&mut document, region, items);
+    let menu = with_reactive_scope(&mut document, || {
+        view! { <context_menu region={region} items={items} /> }
+    });
     toolbar(&mut document, &[menu]);
     let mut harness = Harness::new(document);
     harness.frame(Vec::new());

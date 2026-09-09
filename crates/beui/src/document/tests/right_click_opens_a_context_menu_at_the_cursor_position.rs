@@ -1,4 +1,6 @@
 use super::*;
+use crate::reactive::{view, with_reactive_scope};
+use crate::styled::ContextMenuBuilder;
 
 #[test]
 fn right_click_opens_a_context_menu_at_the_cursor_position() {
@@ -10,7 +12,9 @@ fn right_click_opens_a_context_menu_at_the_cursor_position() {
         unstyled::MenuItem::new("Copy"),
         unstyled::MenuItem::new("Paste"),
     ];
-    let menu = styled::context_menu(&mut document, region, items);
+    let menu = with_reactive_scope(&mut document, || {
+        view! { <context_menu region={region} items={items} /> }
+    });
     toolbar(&mut document, &[menu]);
     let mut harness = Harness::new(document);
     harness.frame(Vec::new());

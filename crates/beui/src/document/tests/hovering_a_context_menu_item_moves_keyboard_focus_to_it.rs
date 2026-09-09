@@ -1,4 +1,6 @@
 use super::*;
+use crate::reactive::{view, with_reactive_scope};
+use crate::styled::ContextMenuBuilder;
 
 #[test]
 fn hovering_a_context_menu_item_moves_keyboard_focus_to_it() {
@@ -11,7 +13,9 @@ fn hovering_a_context_menu_item_moves_keyboard_focus_to_it() {
         unstyled::MenuItem::new("Paste"),
         unstyled::MenuItem::new("Delete"),
     ];
-    let menu = styled::context_menu(&mut document, region, items);
+    let menu = with_reactive_scope(&mut document, || {
+        view! { <context_menu region={region} items={items} /> }
+    });
     toolbar(&mut document, &[menu]);
     let mut harness = Harness::new(document);
     harness.frame(Vec::new());

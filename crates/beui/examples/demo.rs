@@ -9,9 +9,10 @@ use beui::styled::theme::{
 };
 use beui::styled::{
     self, AccordionBuilder, BodyBuilder, ButtonBuilder, ButtonVariant, CaptionBuilder, CardBuilder,
-    CheckboxBuilder, DisplayBuilder, HeadingBuilder, ListboxBuilder, ParagraphBuilder,
-    ProgressBuilder, RadioGroupBuilder, ScrollbarBuilder, SelectBuilder, ShortcutBuilder,
-    SliderBuilder, SwitchBuilder, TabsBuilder, TextInputBuilder, TitleBuilder, ToggleButtonBuilder,
+    CheckboxBuilder, ContextMenuBuilder, DisplayBuilder, HeadingBuilder, ListboxBuilder,
+    ParagraphBuilder, ProgressBuilder, RadioGroupBuilder, ScrollbarBuilder, SelectBuilder,
+    ShortcutBuilder, SliderBuilder, SwitchBuilder, TabsBuilder, TextInputBuilder, TitleBuilder,
+    ToggleButtonBuilder,
 };
 use beui::{unstyled, Color32, Context, Document, ItemSize, NodeId, Rect, TextAlign};
 
@@ -648,18 +649,21 @@ fn build_menu_controls(document: &mut Document) -> NodeId {
             ],
         ),
     ];
-    let context_menu = styled::context_menu(document, region_card, items);
-    styled::set_context_menu_on_select(document, context_menu, move |document, path| {
-        let label = match path.as_slice() {
-            [0] => "Copy".to_owned(),
-            [1] => "Paste".to_owned(),
-            [2, 0] => "Share > Email".to_owned(),
-            [2, 1] => "Share > Link".to_owned(),
-            other => format!("{other:?}"),
-        };
-        with_reactive_scope(document, || {
-            set_menu_status_text.set(format!("Chose: {label}"))
-        });
+    let context_menu = with_reactive_scope(document, || {
+        view! {
+            <context_menu region={region_card} items={items} on_select={Box::new(move |document: &mut Document, path: Vec<usize>| {
+                let label = match path.as_slice() {
+                    [0] => "Copy".to_owned(),
+                    [1] => "Paste".to_owned(),
+                    [2, 0] => "Share > Email".to_owned(),
+                    [2, 1] => "Share > Link".to_owned(),
+                    other => format!("{other:?}"),
+                };
+                with_reactive_scope(document, || {
+                    set_menu_status_text.set(format!("Chose: {label}"))
+                });
+            })} />
+        }
     });
     let right = unstyled::column(document, 8.0);
     document.append_child(right, context_menu, ItemSize::Intrinsic);

@@ -1,4 +1,6 @@
 use super::*;
+use crate::reactive::{view, with_reactive_scope};
+use crate::styled::ContextMenuBuilder;
 
 #[test]
 fn selecting_a_leaf_item_in_a_nested_context_menu_closes_the_whole_menu_stack() {
@@ -13,11 +15,12 @@ fn selecting_a_leaf_item_in_a_nested_context_menu_closes_the_whole_menu_stack() 
             unstyled::MenuItem::new("Link"),
         ],
     )];
-    let menu = styled::context_menu(&mut document, region, items);
     let selected = Rc::new(RefCell::new(Vec::new()));
     let sink = selected.clone();
-    styled::set_context_menu_on_select(&mut document, menu, move |_document, path| {
-        sink.borrow_mut().push(path);
+    let menu = with_reactive_scope(&mut document, || {
+        view! { <context_menu region={region} items={items} on_select={Box::new(move |_document: &mut Document, path| {
+            sink.borrow_mut().push(path);
+        })} /> }
     });
     toolbar(&mut document, &[menu]);
     let mut harness = Harness::new(document);
