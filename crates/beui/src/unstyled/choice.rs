@@ -5,7 +5,7 @@ use crate::color::Color32;
 use crate::document::Document;
 use crate::input::{Key, KeyPress};
 use crate::node::{Handler, NodeId};
-use crate::reactive::{bind, ReadSignal};
+use crate::reactive::{bind, with_document, ReadSignal};
 use crate::unstyled;
 
 const FONT_SIZE: f32 = 14.0;
@@ -31,7 +31,11 @@ struct State {
     on_change: Option<Handler<Option<usize>>>,
 }
 
-pub fn choice(
+pub fn choice(labels: &[&str], selected: Option<usize>, kind: ChoiceKind) -> NodeId {
+    with_document(|document| choice_in(document, labels, selected, kind))
+}
+
+fn choice_in(
     document: &mut Document,
     labels: &[&str],
     selected: Option<usize>,
@@ -129,19 +133,22 @@ pub fn set_choice_selected(document: &mut Document, choice: NodeId, selected: Op
 }
 
 pub fn set_choice_on_change(
-    document: &mut Document,
     choice: NodeId,
     handler: impl FnMut(&mut Document, Option<usize>) + 'static,
 ) {
-    document.component_state_mut::<State>(choice).on_change = Some(Box::new(handler));
+    with_document(|document| {
+        document.component_state_mut::<State>(choice).on_change = Some(Box::new(handler));
+    });
 }
 
-pub fn focus_choice(document: &mut Document, choice: NodeId) {
-    let state = document.component_state::<State>(choice);
-    if let Some(option) = state.options.get(state.selected.unwrap_or(0)) {
-        let button = option.button;
-        unstyled::focus_button(button);
-    }
+pub fn focus_choice(choice: NodeId) {
+    with_document(|document| {
+        let state = document.component_state::<State>(choice);
+        if let Some(option) = state.options.get(state.selected.unwrap_or(0)) {
+            let button = option.button;
+            unstyled::focus_button(button);
+        }
+    });
 }
 
 pub fn choice_option_count(document: &Document, choice: NodeId) -> usize {

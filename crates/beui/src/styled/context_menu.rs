@@ -25,20 +25,18 @@ pub fn context_menu(
     on_select: Option<Handler<Vec<usize>>>,
 ) -> NodeId {
     let mut on_select = on_select;
-    let inner = with_document(|document| unstyled::context_menu(document, region, Vec::new()));
+    let inner = unstyled::context_menu(region, Vec::new());
 
-    with_document(|document| {
-        unstyled::set_context_menu_on_select(document, inner, move |document, path| {
-            if let Some(handler) = &mut on_select {
-                handler(document, path);
-            }
-        });
+    unstyled::set_context_menu_on_select(inner, move |document, path| {
+        if let Some(handler) = &mut on_select {
+            handler(document, path);
+        }
     });
 
     items.apply(move |items| {
+        let styling_items = items.clone();
+        unstyled::set_context_menu_items(inner, items);
         with_document(|document| {
-            let styling_items = items.clone();
-            unstyled::set_context_menu_items(document, inner, items);
             let overlay = unstyled::context_menu_overlay(document, inner);
             style_menu_panel(document, overlay, &styling_items);
         });

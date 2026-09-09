@@ -31,8 +31,8 @@ pub fn select(
 ) -> NodeId {
     let mut on_change = on_change;
 
-    let inner = with_document(|document| {
-        let inner = unstyled::select(document, &options, None);
+    let inner = unstyled::select(&options, None);
+    with_document(|document| {
         let trigger = unstyled::select_trigger(document, inner);
 
         let label = view! {
@@ -151,8 +151,6 @@ pub fn select(
                 handler(document, selected);
             }
         });
-
-        inner
     });
 
     selected.apply(move |selected| {
@@ -172,14 +170,14 @@ pub fn select_open(document: &Document, select: NodeId) -> bool {
     unstyled::select_open(document, inner)
 }
 
-pub fn set_select_open(document: &mut Document, select: NodeId, opened: bool) {
+pub fn set_select_open(document: &Document, select: NodeId, opened: bool) {
     let inner = document.shadow_root(select);
-    unstyled::set_select_open(document, inner, opened);
+    unstyled::set_select_open(inner, opened);
 }
 
-pub fn focus_select(document: &mut Document, select: NodeId) {
+pub fn focus_select(document: &Document, select: NodeId) {
     let inner = document.shadow_root(select);
-    unstyled::focus_select(document, inner);
+    unstyled::focus_select(inner);
 }
 
 fn trigger_label(options: &[String], selected: Option<usize>) -> String {

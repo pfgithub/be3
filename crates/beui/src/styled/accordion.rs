@@ -32,7 +32,7 @@ pub fn accordion(
     let shadow = current_component();
     let mut on_toggle = on_toggle;
 
-    let disclosure = with_document(|document| unstyled::disclosure(document, SPACING, false));
+    let disclosure = unstyled::disclosure(SPACING, false);
     let hovered = with_document(|document| unstyled::disclosure_hovered(document, disclosure));
     let focused = with_document(|document| unstyled::disclosure_focused(document, disclosure));
 
@@ -64,10 +64,8 @@ pub fn accordion(
             {header}
         </outline>
     };
-    with_document(|document| {
-        unstyled::set_disclosure_header(document, disclosure, ring);
-        unstyled::set_disclosure_content(document, disclosure, child);
-    });
+    unstyled::set_disclosure_header(disclosure, ring);
+    unstyled::set_disclosure_content(disclosure, child);
 
     title.apply(move |value| {
         with_document(|document| {
@@ -76,13 +74,11 @@ pub fn accordion(
         });
     });
 
-    with_document(|document| {
-        unstyled::set_disclosure_on_toggle(document, disclosure, move |document, open| {
-            document.set_text(marker, glyph(open));
-            if let Some(handler) = &mut on_toggle {
-                handler(document, open);
-            }
-        });
+    unstyled::set_disclosure_on_toggle(disclosure, move |document, open| {
+        document.set_text(marker, glyph(open));
+        if let Some(handler) = &mut on_toggle {
+            handler(document, open);
+        }
     });
 
     open.apply(move |open| {

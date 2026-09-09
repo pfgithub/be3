@@ -22,7 +22,7 @@ pub(super) fn choice(
     kind: Kind,
     mut on_change: impl FnMut(&mut Document, Option<usize>) + 'static,
 ) -> NodeId {
-    let inner = unstyled::choice(document, labels, selected, kind);
+    let inner = unstyled::choice(labels, selected, kind);
 
     let mut fills = Vec::new();
     let mut label_nodes = Vec::new();
@@ -93,7 +93,7 @@ pub(super) fn choice(
         marks.push(mark);
     }
 
-    unstyled::set_choice_on_change(document, inner, move |document, selected| {
+    unstyled::set_choice_on_change(inner, move |document, selected| {
         for (index, &fill) in fills.iter().enumerate() {
             let active = selected == Some(index);
             let button = unstyled::choice_option_button(document, inner, index);
@@ -117,7 +117,7 @@ pub(super) fn selected_index(document: &Document, choice: NodeId) -> Option<usiz
 
 pub(super) fn focus(document: &mut Document, choice: NodeId) {
     let inner = document.shadow_root(choice);
-    unstyled::focus_choice(document, inner);
+    unstyled::focus_choice(inner);
 }
 
 fn background(active: bool, hovered: bool) -> Color32 {

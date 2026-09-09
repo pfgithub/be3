@@ -4,7 +4,7 @@ use crate::color::Color32;
 use crate::document::Document;
 use crate::input::{Key, KeyPress};
 use crate::node::{Handler, NodeId};
-use crate::reactive::{create_signal, ReadSignal, WriteSignal};
+use crate::reactive::{create_signal, with_document, ReadSignal, WriteSignal};
 use crate::unstyled;
 
 const FONT_SIZE: f32 = 14.0;
@@ -30,7 +30,11 @@ struct State {
     on_change: Option<Handler<Option<usize>>>,
 }
 
-pub fn select(document: &mut Document, options: &[String], selected: Option<usize>) -> NodeId {
+pub fn select(options: &[String], selected: Option<usize>) -> NodeId {
+    with_document(|document| select_in(document, options, selected))
+}
+
+fn select_in(document: &mut Document, options: &[String], selected: Option<usize>) -> NodeId {
     let selected = selected.filter(|index| *index < options.len());
     let trigger = unstyled::ButtonBuilder::default().build();
 
@@ -147,13 +151,15 @@ pub fn select_open(document: &Document, select: NodeId) -> bool {
     document.is_overlay_open(overlay)
 }
 
-pub fn set_select_open(document: &mut Document, select: NodeId, opened: bool) {
-    if opened {
-        open(document, select);
-    } else {
-        let overlay = document.component_state::<State>(select).overlay;
-        document.close_overlay(overlay);
-    }
+pub fn set_select_open(select: NodeId, opened: bool) {
+    with_document(|document| {
+        if opened {
+            open(document, select);
+        } else {
+            let overlay = document.component_state::<State>(select).overlay;
+            document.close_overlay(overlay);
+        }
+    });
 }
 
 pub fn set_select_options(document: &mut Document, select: NodeId, options: &[String]) {
@@ -184,9 +190,11 @@ pub fn set_select_on_change(
     document.component_state_mut::<State>(select).on_change = Some(Box::new(handler));
 }
 
-pub fn focus_select(document: &mut Document, select: NodeId) {
-    let trigger = document.component_state::<State>(select).trigger;
-    unstyled::focus_button(trigger);
+pub fn focus_select(select: NodeId) {
+    with_document(|document| {
+        let trigger = document.component_state::<State>(select).trigger;
+        unstyled::focus_button(trigger);
+    });
 }
 
 pub fn select_trigger(document: &Document, select: NodeId) -> NodeId {

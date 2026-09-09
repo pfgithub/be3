@@ -3,7 +3,7 @@ use crate::unstyled;
 use crate::base::{Direction, ItemSize};
 use crate::document::Document;
 use crate::node::{Handler, NodeId};
-use crate::reactive::ReadSignal;
+use crate::reactive::{with_document, ReadSignal};
 
 struct State {
     visibility: NodeId,
@@ -12,47 +12,53 @@ struct State {
     on_toggle: Option<Handler<bool>>,
 }
 
-pub fn disclosure(document: &mut Document, spacing: f32, open: bool) -> NodeId {
-    let header = document.create_slot("header");
-    let button = unstyled::ButtonBuilder::default().build();
-    unstyled::set_button_child(button, header);
+pub fn disclosure(spacing: f32, open: bool) -> NodeId {
+    with_document(|document| {
+        let header = document.create_slot("header");
+        let button = unstyled::ButtonBuilder::default().build();
+        unstyled::set_button_child(button, header);
 
-    let content = document.create_slot("content");
-    let visibility = document.create_visibility(open);
-    document.set_visibility_child(visibility, content);
+        let content = document.create_slot("content");
+        let visibility = document.create_visibility(open);
+        document.set_visibility_child(visibility, content);
 
-    let column = document.create_list(Direction::Vertical, spacing);
-    document.append_child(column, button, ItemSize::Intrinsic);
-    document.append_child(column, visibility, ItemSize::Intrinsic);
+        let column = document.create_list(Direction::Vertical, spacing);
+        document.append_child(column, button, ItemSize::Intrinsic);
+        document.append_child(column, visibility, ItemSize::Intrinsic);
 
-    let disclosure = document.create_shadow("disclosure", column, vec![header, content]);
-    document.set_component_detail(disclosure, detail(open));
-    document.set_component_state(
-        disclosure,
-        State {
-            visibility,
-            button,
-            open,
-            on_toggle: None,
-        },
-    );
+        let disclosure = document.create_shadow("disclosure", column, vec![header, content]);
+        document.set_component_detail(disclosure, detail(open));
+        document.set_component_state(
+            disclosure,
+            State {
+                visibility,
+                button,
+                open,
+                on_toggle: None,
+            },
+        );
 
-    unstyled::set_button_on_click(button, move |document| {
-        let open = disclosure_open(document, disclosure);
-        set_disclosure_open(document, disclosure, !open);
+        unstyled::set_button_on_click(button, move |document| {
+            let open = disclosure_open(document, disclosure);
+            set_disclosure_open(document, disclosure, !open);
+        });
+
+        disclosure
+    })
+}
+
+pub fn set_disclosure_header(disclosure: NodeId, child: NodeId) {
+    with_document(|document| {
+        let slot = document.shadow_slots(disclosure)[0];
+        document.set_slot_child(slot, child);
     });
-
-    disclosure
 }
 
-pub fn set_disclosure_header(document: &mut Document, disclosure: NodeId, child: NodeId) {
-    let slot = document.shadow_slots(disclosure)[0];
-    document.set_slot_child(slot, child);
-}
-
-pub fn set_disclosure_content(document: &mut Document, disclosure: NodeId, child: NodeId) {
-    let slot = document.shadow_slots(disclosure)[1];
-    document.set_slot_child(slot, child);
+pub fn set_disclosure_content(disclosure: NodeId, child: NodeId) {
+    with_document(|document| {
+        let slot = document.shadow_slots(disclosure)[1];
+        document.set_slot_child(slot, child);
+    });
 }
 
 pub fn disclosure_open(document: &Document, disclosure: NodeId) -> bool {
@@ -90,14 +96,17 @@ fn detail(open: bool) -> &'static str {
 }
 
 pub fn set_disclosure_on_toggle(
-    document: &mut Document,
     disclosure: NodeId,
     handler: impl FnMut(&mut Document, bool) + 'static,
 ) {
-    document.component_state_mut::<State>(disclosure).on_toggle = Some(Box::new(handler));
+    with_document(|document| {
+        document.component_state_mut::<State>(disclosure).on_toggle = Some(Box::new(handler));
+    });
 }
 
-pub fn focus_disclosure(document: &mut Document, disclosure: NodeId) {
-    let button = document.component_state::<State>(disclosure).button;
-    unstyled::focus_button(button);
+pub fn focus_disclosure(disclosure: NodeId) {
+    with_document(|document| {
+        let button = document.component_state::<State>(disclosure).button;
+        unstyled::focus_button(button);
+    });
 }
