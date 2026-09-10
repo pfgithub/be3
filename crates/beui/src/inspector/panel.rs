@@ -3,12 +3,13 @@ use std::rc::Rc;
 use crate::color::Color32;
 use crate::input::CursorIcon;
 
-use crate::base::{ItemSize, TextAlign};
+use crate::base::TextAlign;
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
-    create_signal, view, with_document, with_reactive_scope, ClickCatcherBuilder, FillBuilder,
-    PaddingBuilder, Prop, ReadSignal, WriteSignal,
+    create_signal, intrinsic, view, with_reactive_scope, CenteredRowBuilder, ClickCatcherBuilder,
+    ColumnBuilder, FillBuilder, OutlineBuilder, PaddingBuilder, Prop, ReadSignal, RowBuilder,
+    ScrollBuilder, SpacerBuilder, WriteSignal,
 };
 use crate::styled::theme::{
     ACCENT, BORDER_WIDTH, CHIP_RADIUS, ON_ACCENT, RADIUS, SCROLLBAR_WIDTH, SEPARATOR_HEIGHT,
@@ -92,52 +93,51 @@ pub(crate) fn build(entries: &[Entry], summary: &Summary, state: &Rc<State>, off
 }
 
 fn build_tree(entries: &[Entry], summary: &Summary, state: &Rc<State>, offset: f32) -> Built {
-    let (count, set_count) = count_label(summary.total);
+    let (count_text, set_count) = create_signal(total_label(summary.total));
     let (picking, set_picking) = create_signal(summary.picking);
-    let toggle = pick_toggle(state, &picking);
-    let header = header(count, toggle);
-
-    let scroll = with_document(Document::create_scroll);
-    let rows: Vec<Row> = entries
-        .iter()
-        .map(|entry| {
-            let row = row(entry, state);
-            with_document(|document| document.append_scroll_item(scroll, row.row));
-            row
-        })
-        .collect();
-    with_document(|document| document.set_scroll_offset(scroll, offset));
-    let body = body(scroll);
-
     let (selection_text, set_selection) = create_signal(summary.selection.clone());
     let (bounds_text, set_bounds) = create_signal(summary.bounds.clone());
-    let selection = view! { <code content={selection_text} /> };
-    let bounds = view! { <code content={bounds_text} color={TEXT_MUTED} /> };
-    let footer = footer(selection, bounds);
 
-    let column = unstyled::column(0.0);
-    let above = view! { <separator /> };
-    let below = view! { <separator /> };
-    with_document(|document| {
-        document.append_child(column, header, ItemSize::Intrinsic);
-        document.append_child(column, above, ItemSize::Fixed(SEPARATOR_HEIGHT));
-        document.append_child(column, body, ItemSize::Percent(100.0));
-        document.append_child(column, below, ItemSize::Fixed(SEPARATOR_HEIGHT));
-        document.append_child(column, footer, ItemSize::Intrinsic);
-    });
+    let rows: Vec<Row> = entries.iter().map(|entry| row(entry, state)).collect();
+    let items: Vec<NodeId> = rows.iter().map(|row| row.row).collect();
+    let scroll = view! {
+        <scroll
+            offset={offset}
+            focus_color={ACCENT}
+            children={items.into_iter().map(intrinsic).collect::<Vec<_>>()}
+        />
+    };
 
-    let surface = with_document(|document| {
-        let surface = document.create_fill(SURFACE, 0);
-        document.set_fill_child(surface, column);
-        surface
-    });
-
-    let edge = view! { <separator /> };
-    let panel = unstyled::row(0.0);
-    with_document(|document| {
-        document.append_child(panel, edge, ItemSize::Fixed(SEPARATOR_HEIGHT));
-        document.append_child(panel, surface, ItemSize::Percent(100.0));
-    });
+    let panel = view! {
+        <row spacing={0.0}>
+            @fixed(SEPARATOR_HEIGHT) <separator />
+            @percent(100.0) <fill color={SURFACE} radius={0}>
+                <column spacing={0.0}>
+                    <padding horizontal={HEADER_PADDING} vertical={HEADER_PADDING}>
+                        <centered_row spacing={HEADER_SPACING}>
+                            <heading content={"Inspector".to_string()} />
+                            @percent(100.0) <caption content={count_text} align={TextAlign::End} />
+                            {pick_toggle(state, &picking)}
+                        </centered_row>
+                    </padding>
+                    @fixed(SEPARATOR_HEIGHT) <separator />
+                    @percent(100.0) <padding horizontal={BODY_PADDING} vertical={BODY_PADDING}>
+                        <row spacing={BODY_SPACING}>
+                            @percent(100.0) {scroll}
+                            @fixed(SCROLLBAR_WIDTH) <scrollbar scroll={scroll} />
+                        </row>
+                    </padding>
+                    @fixed(SEPARATOR_HEIGHT) <separator />
+                    <padding horizontal={FOOTER_PADDING} vertical={FOOTER_PADDING}>
+                        <column spacing={FOOTER_SPACING}>
+                            <code content={selection_text} />
+                            <code content={bounds_text} color={TEXT_MUTED} />
+                        </column>
+                    </padding>
+                </column>
+            </fill>
+        </row>
+    };
 
     Built {
         scroll,
@@ -173,25 +173,6 @@ pub(crate) fn toggle_text(picking: bool) -> Color32 {
     }
 }
 
-fn count_label(total: usize) -> (NodeId, WriteSignal<String>) {
-    let (count_text, set_count_text) = create_signal(total_label(total));
-    let count = view! { <caption content={count_text} align={TextAlign::End} /> };
-    (count, set_count_text)
-}
-
-fn header(count: NodeId, toggle: NodeId) -> NodeId {
-    let title = view! { <heading content={"Inspector".to_string()} /> };
-    let line = unstyled::centered_row(HEADER_SPACING);
-    with_document(|document| {
-        document.append_child(line, title, ItemSize::Intrinsic);
-        document.append_child(line, count, ItemSize::Percent(100.0));
-        document.append_child(line, toggle, ItemSize::Intrinsic);
-        let padding = document.create_padding(HEADER_PADDING, HEADER_PADDING);
-        document.set_padding_child(padding, line);
-        padding
-    })
-}
-
 fn pick_toggle(state: &Rc<State>, picking: &ReadSignal<bool>) -> NodeId {
     let label_color = {
         let picking = picking.clone();
@@ -222,58 +203,13 @@ fn pick_toggle(state: &Rc<State>, picking: &ReadSignal<bool>) -> NodeId {
     }
 }
 
-fn body(scroll: NodeId) -> NodeId {
-    let bar = view! { <scrollbar scroll={scroll} /> };
-    let area = unstyled::row(BODY_SPACING);
-    with_document(|document| {
-        document.append_child(area, scroll, ItemSize::Percent(100.0));
-        document.append_child(area, bar, ItemSize::Fixed(SCROLLBAR_WIDTH));
-        let padding = document.create_padding(BODY_PADDING, BODY_PADDING);
-        document.set_padding_child(padding, area);
-        padding
-    })
-}
-
-fn footer(selection: NodeId, bounds: NodeId) -> NodeId {
-    let column = unstyled::column(FOOTER_SPACING);
-    with_document(|document| {
-        document.append_child(column, selection, ItemSize::Intrinsic);
-        document.append_child(column, bounds, ItemSize::Intrinsic);
-        let padding = document.create_padding(FOOTER_PADDING, FOOTER_PADDING);
-        document.set_padding_child(padding, column);
-        padding
-    })
-}
-
 fn row(entry: &Entry, state: &Rc<State>) -> Row {
-    let indent = with_document(|document| document.create_fill(Color32::TRANSPARENT, 0));
     let marker = marker(entry, state);
-
-    let kind = view! { <code content={entry.kind.to_owned()} /> };
     let (detail_text, set_detail) = create_signal(entry.detail.clone());
     let (size_text, set_size) = create_signal(entry.size.clone());
-    let detail = view! { <code content={detail_text} color={TEXT_MUTED} /> };
-    let size = view! {
-        <code content={size_text} color={TEXT_MUTED} align={TextAlign::End} />
-    };
+    let indent = entry.depth as f32 * INDENT;
 
-    let line = unstyled::centered_row(ROW_SPACING);
-    with_document(|document| {
-        document.append_child(line, indent, ItemSize::Fixed(entry.depth as f32 * INDENT));
-        document.append_child(line, marker, ItemSize::Fixed(MARKER_WIDTH));
-        document.append_child(line, kind, ItemSize::Intrinsic);
-        document.append_child(line, detail, ItemSize::Percent(100.0));
-        document.append_child(line, size, ItemSize::Intrinsic);
-    });
-
-    let list_row = view! { <list_row>{line}</list_row> };
-    let outline = with_document(|document| {
-        let outline = document.create_outline(ACCENT, BORDER_WIDTH, RADIUS, 0.0);
-        document.set_outline_visible(outline, entry.selected);
-        document.set_outline_child(outline, list_row);
-        outline
-    });
-
+    let outline_cell = std::cell::Cell::new(None);
     let node = entry.key.node();
     let hover = state.clone();
     let selection = state.clone();
@@ -283,9 +219,32 @@ fn row(entry: &Entry, state: &Rc<State>) -> Row {
             on_click={move || selection.select(node)}
             on_hover_change={move |hovered| hover.hover(node, hovered)}
         >
-            {outline}
+            {{
+                let outline = view! {
+                    <outline
+                        color={ACCENT}
+                        width={BORDER_WIDTH}
+                        radius={RADIUS}
+                        offset={0.0}
+                        visible={entry.selected}
+                    >
+                        <list_row>
+                            <centered_row spacing={ROW_SPACING}>
+                                @fixed(indent) <spacer />
+                                @fixed(MARKER_WIDTH) {marker}
+                                <code content={entry.kind.to_owned()} />
+                                @percent(100.0) <code content={detail_text} color={TEXT_MUTED} />
+                                <code content={size_text} color={TEXT_MUTED} align={TextAlign::End} />
+                            </centered_row>
+                        </list_row>
+                    </outline>
+                };
+                outline_cell.set(Some(outline));
+                outline
+            }}
         </click_catcher>
     };
+    let outline = outline_cell.get().expect("row outline not yet built");
 
     Row {
         row,

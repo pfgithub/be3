@@ -348,6 +348,14 @@ impl Children {
         }
     }
 
+    pub(crate) fn mount_scroll_items(self, scroll: NodeId) {
+        with_document(|document| {
+            for (child, _) in &self.0 {
+                document.append_scroll_item(scroll, *child);
+            }
+        });
+    }
+
     pub(crate) fn into_first(self) -> Option<NodeId> {
         self.0.into_iter().next().map(|(child, _)| child)
     }
@@ -364,7 +372,7 @@ pub use crate::base::fill::FillBuilder;
 pub use crate::base::focusable::FocusableBuilder;
 pub use crate::base::outline::OutlineBuilder;
 pub use crate::base::padding::PaddingBuilder;
-pub use crate::base::scroll::VirtualListBuilder;
+pub use crate::base::scroll::{ScrollBuilder, VirtualListBuilder};
 pub use crate::base::sized::SizedBuilder;
 pub use crate::base::text::TextBuilder;
 pub use crate::base::visibility::VisibilityBuilder;

@@ -8,7 +8,7 @@ use crate::painter::Painter;
 
 use crate::document::Document;
 use crate::node::{Element, InteractInput, NodeId};
-use crate::reactive::{create_effect, create_signal, with_document, Callback, Prop};
+use crate::reactive::{create_effect, create_signal, with_document, Callback, Children, Prop};
 use beui_macros::component;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -510,6 +510,19 @@ pub fn virtual_list(
                 (item.borrow_mut())(index)
             });
         });
+    });
+    scroll
+}
+
+#[component(base)]
+pub fn scroll(offset: Prop<f32>, focus_color: Prop<Color32>, children: Children) -> NodeId {
+    let scroll = with_document(Document::create_scroll);
+    children.mount_scroll_items(scroll);
+    focus_color.apply(move |color| {
+        with_document(|document| document.set_scroll_focus_color(scroll, color));
+    });
+    offset.apply(move |offset| {
+        with_document(|document| document.set_scroll_offset(scroll, offset));
     });
     scroll
 }
