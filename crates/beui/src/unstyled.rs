@@ -17,7 +17,7 @@ pub use button::{
 };
 pub use choice::{
     choice, choice_option_button, choice_option_count, choice_option_label_node, choice_selected,
-    focus_choice, set_choice_on_change, set_choice_selected, ChoiceKind,
+    choice_selected_signal, focus_choice, set_choice_on_change, set_choice_selected, ChoiceKind,
 };
 pub use context_menu::{
     context_menu, context_menu_menu, context_menu_overlay, set_context_menu_items,

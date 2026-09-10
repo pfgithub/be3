@@ -381,7 +381,7 @@ impl Document {
 pub fn text(
     string: Prop<String>,
     font_size: Option<f32>,
-    color: Option<Color32>,
+    color: Prop<Color32>,
     align: Option<TextAlign>,
     wrap: Option<bool>,
     monospace: Option<bool>,
@@ -389,11 +389,7 @@ pub fn text(
     clip: Option<bool>,
 ) -> NodeId {
     let node = with_document(|document| {
-        let node = document.create_text(
-            String::new(),
-            font_size.unwrap_or(14.0),
-            color.unwrap_or(crate::Color32::WHITE),
-        );
+        let node = document.create_text(String::new(), font_size.unwrap_or(14.0), Color32::WHITE);
         if let Some(align) = align {
             document.set_text_align(node, align, TextAlign::Center);
         }
@@ -412,5 +408,6 @@ pub fn text(
         node
     });
     string.apply(move |value| with_document(|document| document.set_text(node, value)));
+    color.apply(move |value| with_document(|document| document.set_text_color(node, value)));
     node
 }

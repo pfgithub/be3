@@ -5,7 +5,7 @@ use crate::color::Color32;
 use crate::document::Document;
 use crate::input::{Key, KeyPress};
 use crate::node::{Handler, NodeId};
-use crate::reactive::{bind, with_document, ReadSignal};
+use crate::reactive::{bind, create_signal, with_document, ReadSignal, WriteSignal};
 use crate::unstyled;
 
 const FONT_SIZE: f32 = 14.0;
@@ -24,7 +24,8 @@ struct Option_ {
 
 struct State {
     options: Vec<Option_>,
-    selected: Option<usize>,
+    selected_read: ReadSignal<Option<usize>>,
+    selected_write: WriteSignal<Option<usize>>,
     kind: ChoiceKind,
     search: String,
     typed_at: Option<Instant>,
@@ -49,11 +50,13 @@ fn choice_in(
     };
     let choice = document.create_shadow(kind_name(kind), line, Vec::new());
     document.set_component_detail(choice, selected.map_or("", |index| labels[index]));
+    let (selected_read, selected_write) = create_signal(selected);
     document.set_component_state(
         choice,
         State {
             options: Vec::new(),
-            selected,
+            selected_read,
+            selected_write,
             kind,
             search: String::new(),
             typed_at: None,
@@ -100,12 +103,24 @@ fn choice_in(
 }
 
 pub fn choice_selected(document: &Document, choice: NodeId) -> Option<usize> {
-    document.component_state::<State>(choice).selected
+    document
+        .component_state::<State>(choice)
+        .selected_read
+        .get()
+}
+
+pub fn choice_selected_signal(document: &Document, choice: NodeId) -> ReadSignal<Option<usize>> {
+    document
+        .component_state::<State>(choice)
+        .selected_read
+        .clone()
 }
 
 pub fn set_choice_selected(document: &mut Document, choice: NodeId, selected: Option<usize>) {
     let state = document.component_state::<State>(choice);
-    if selected.is_some_and(|index| index >= state.options.len()) || state.selected == selected {
+    if selected.is_some_and(|index| index >= state.options.len())
+        || state.selected_read.get() == selected
+    {
         return;
     }
     let focused = state
@@ -113,7 +128,10 @@ pub fn set_choice_selected(document: &mut Document, choice: NodeId, selected: Op
         .iter()
         .any(|option| unstyled::button_focused(document, option.button).get());
     let buttons: Vec<NodeId> = state.options.iter().map(|option| option.button).collect();
-    document.component_state_mut::<State>(choice).selected = selected;
+    document
+        .component_state::<State>(choice)
+        .selected_write
+        .set(selected);
     for (index, button) in buttons.iter().copied().enumerate() {
         unstyled::set_button_tab_stop(button, index == selected.unwrap_or(0));
     }
@@ -144,7 +162,7 @@ pub fn set_choice_on_change(
 pub fn focus_choice(choice: NodeId) {
     with_document(|document| {
         let state = document.component_state::<State>(choice);
-        if let Some(option) = state.options.get(state.selected.unwrap_or(0)) {
+        if let Some(option) = state.options.get(state.selected_read.get().unwrap_or(0)) {
             let button = option.button;
             unstyled::focus_button(button);
         }

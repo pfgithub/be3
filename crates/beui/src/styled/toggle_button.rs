@@ -4,8 +4,8 @@ use crate::color::Color32;
 use crate::document::Document;
 use crate::node::{Handler, NodeId};
 use crate::reactive::{
-    current_component, set_component_detail, with_document, FillBuilder, OutlineBuilder,
-    PaddingBuilder, Prop, TextBuilder,
+    create_effect, create_signal, current_component, set_component_detail, with_document,
+    FillBuilder, OutlineBuilder, PaddingBuilder, Prop, TextBuilder,
 };
 use crate::styled::theme::{
     ACCENT, ACCENT_SOFT, BORDER, FONT_BODY, RADIUS, SURFACE, SURFACE_RAISED, TEXT,
@@ -31,7 +31,16 @@ pub fn toggle_button(
         )
     });
 
-    let text = view! { <text font_size={FONT_BODY} color={TEXT} /> };
+    let (label_text, set_label_text) = create_signal(String::new());
+    label.apply(move |value| set_label_text.set(value));
+    create_effect({
+        let label_text = label_text.clone();
+        move || {
+            let value = label_text.get();
+            with_document(|document| set_component_detail(document, shadow, value));
+        }
+    });
+
     let fill_color = {
         let checked = toggle_checked.clone();
         let hovered = toggle_hovered;
@@ -51,19 +60,14 @@ pub fn toggle_button(
         <outline color={ACCENT} width={2.0} radius={RADIUS} offset={3.0} visible={toggle_focused}>
             <outline color={border_color} width={1.0} radius={RADIUS} offset={0.0} visible={true}>
                 <fill color={fill_color} radius={RADIUS}>
-                    <padding horizontal={14.0} vertical={8.0}>{text}</padding>
+                    <padding horizontal={14.0} vertical={8.0}>
+                        <text string={label_text} font_size={FONT_BODY} color={TEXT} />
+                    </padding>
                 </fill>
             </outline>
         </outline>
     };
     with_document(|document| unstyled::set_toggle_child(document, toggle, ring));
-
-    label.apply(move |value| {
-        with_document(|document| {
-            document.set_text(text, value.clone());
-            set_component_detail(document, shadow, value);
-        });
-    });
 
     with_document(|document| {
         unstyled::set_toggle_on_change(document, toggle, move |document, pressed| {

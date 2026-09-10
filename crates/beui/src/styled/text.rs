@@ -4,7 +4,10 @@ use beui_macros::{component, view};
 
 use crate::base::TextAlign;
 use crate::node::NodeId;
-use crate::reactive::{current_component, set_component_detail, with_document, Prop, TextBuilder};
+use crate::reactive::{
+    create_effect, create_signal, current_component, set_component_detail, with_document, Prop,
+    TextBuilder,
+};
 use crate::styled::theme::{
     FONT_BODY, FONT_DISPLAY, FONT_HEADING, FONT_SMALL, FONT_TITLE, ICON_SIZE, TEXT, TEXT_MUTED,
 };
@@ -35,16 +38,18 @@ fn reactive_line(
     align: Option<TextAlign>,
 ) -> NodeId {
     let shadow = current_component();
-    let node = view! {
-        <text font_size={font_size} color={color} align={align.unwrap_or(TextAlign::Start)} />
-    };
-    content.apply(move |value| {
-        with_document(|document| {
-            set_component_detail(document, shadow, format!("{value:?}"));
-            document.set_text(node, value);
-        })
+    let (text, set_text) = create_signal(String::new());
+    content.apply(move |value| set_text.set(value));
+    create_effect({
+        let text = text.clone();
+        move || {
+            let value = text.get();
+            with_document(|document| set_component_detail(document, shadow, format!("{value:?}")));
+        }
     });
-    node
+    view! {
+        <text string={text} font_size={font_size} color={color} align={align.unwrap_or(TextAlign::Start)} />
+    }
 }
 
 #[component]
@@ -75,12 +80,16 @@ pub fn caption(content: Prop<String>, align: Option<TextAlign>) -> NodeId {
 #[component]
 pub fn paragraph(content: Prop<String>) -> NodeId {
     let shadow = current_component();
-    let node = view! { <text font_size={FONT_BODY} color={TEXT_MUTED} wrap={true} /> };
-    content.apply(move |value| {
-        with_document(|document| {
-            set_component_detail(document, shadow, format!("{value:?}"));
-            document.set_text(node, value);
-        })
+    let (text, set_text) = create_signal(String::new());
+    content.apply(move |value| set_text.set(value));
+    create_effect({
+        let text = text.clone();
+        move || {
+            let value = text.get();
+            with_document(|document| set_component_detail(document, shadow, format!("{value:?}")));
+        }
     });
-    node
+    view! {
+        <text string={text} font_size={FONT_BODY} color={TEXT_MUTED} wrap={true} />
+    }
 }
