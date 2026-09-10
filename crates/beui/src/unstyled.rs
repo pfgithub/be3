@@ -28,7 +28,8 @@ pub use disclosure::{
 pub use layout::{centered_row, column, row};
 pub use menu::{
     hover_menu_list_row, menu_list_len, menu_list_root_focusable, menu_list_row_button,
-    menu_list_row_submenu_content, menu_list_row_submenu_overlay, MenuItem, MenuRow, MenuRowHandle,
+    menu_list_row_submenu_content, menu_list_row_submenu_overlay, MenuItem, MenuPanel, MenuRow,
+    MenuRowHandle,
 };
 pub use pressable::PressableBuilder;
 pub use select::{

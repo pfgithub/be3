@@ -5,8 +5,7 @@ use crate::color::Color32;
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
-    with_document, Callback, FillBuilder, OutlineBuilder, PaddingBuilder, Prop, SizedBuilder,
-    TextBuilder,
+    Callback, FillBuilder, OutlineBuilder, PaddingBuilder, Prop, SizedBuilder, TextBuilder,
 };
 use crate::styled::theme::{
     ACCENT, ACCENT_SOFT, BORDER, BORDER_WIDTH, FONT_BODY, RADIUS, SURFACE, SURFACE_RAISED, TEXT,
@@ -31,9 +30,10 @@ pub fn select(
     on_change: Callback<Option<usize>>,
 ) -> NodeId {
     let trigger_options = options.clone();
-    let inner = view! {
+    view! {
         <unstyled::select
             options={options}
+            selected={selected}
             on_change={move |selected| on_change.call(selected)}
             search_placeholder={"Search".to_string()}
             search_font_size={FONT_BODY}
@@ -47,13 +47,7 @@ pub fn select(
             option={Box::new(option_view)}
             popup={Box::new(popup_view)}
         />
-    };
-
-    selected.apply(move |selected| {
-        with_document(|document| unstyled::set_select_selected(document, inner, selected));
-    });
-
-    inner
+    }
 }
 
 fn trigger_view(options: &[String], handle: SelectTriggerHandle) -> NodeId {

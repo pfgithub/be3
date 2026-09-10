@@ -24,6 +24,8 @@ pub struct MenuRowHandle {
 
 pub type MenuRow = StdRc<dyn Fn(MenuRowHandle) -> NodeId>;
 
+pub type MenuPanel = StdRc<dyn Fn(NodeId) -> NodeId>;
+
 #[derive(Clone)]
 pub struct MenuItem {
     pub label: String,
@@ -63,8 +65,13 @@ struct State {
     on_select: Callback<Vec<usize>>,
 }
 
-pub(crate) fn menu_list(document: &mut Document, items: &[MenuItem], row: &MenuRow) -> NodeId {
-    build_menu_list(document, items, None, row)
+pub(crate) fn menu_list(
+    document: &mut Document,
+    items: &[MenuItem],
+    row: &MenuRow,
+    panel: &MenuPanel,
+) -> NodeId {
+    build_menu_list(document, items, None, row, panel)
 }
 
 fn build_menu_list(
@@ -72,6 +79,7 @@ fn build_menu_list(
     items: &[MenuItem],
     parent: Option<(NodeId, NodeId)>,
     row: &MenuRow,
+    panel: &MenuPanel,
 ) -> NodeId {
     let column = unstyled::column(2.0);
     let menu_cell: Rc<Cell<Option<NodeId>>> = Rc::new(Cell::new(None));
@@ -151,8 +159,14 @@ fn build_menu_list(
             let overlay =
                 document.create_overlay(OverlayAnchor::Node(button), Placement::RightStart);
             document.append_child(column, overlay, ItemSize::Intrinsic);
-            let content = build_menu_list(document, &item.children, Some((overlay, button)), row);
-            document.set_overlay_content(overlay, content);
+            let content = build_menu_list(
+                document,
+                &item.children,
+                Some((overlay, button)),
+                row,
+                panel,
+            );
+            document.set_overlay_content(overlay, panel(content));
             menu_list_on_select(document, content).set(move |mut path: Vec<usize>| {
                 path.insert(0, index);
                 with_document(|document| select(document, menu, path));

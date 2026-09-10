@@ -45,7 +45,7 @@ struct State {
 
 #[component]
 pub fn text_input(
-    value: String,
+    value: Prop<String>,
     content: Option<TextInputContent>,
     placeholder: Prop<String>,
     #[prop(default = FONT_SIZE)] font_size: Prop<f32>,
@@ -64,9 +64,10 @@ pub fn text_input(
     let input = current_component();
     let (hovered_read, set_hovered) = create_signal(false);
     let (focused_read, set_focused) = create_signal(false);
+    let initial = value.peek();
 
     let text = with_document(|document| {
-        let text = document.create_text(value.clone(), FONT_SIZE, Color32::WHITE);
+        let text = document.create_text(initial.clone(), FONT_SIZE, Color32::WHITE);
         document.set_text_align(text, TextAlign::Start, TextAlign::Center);
         document.set_text_clip(text, true);
         text
@@ -156,14 +157,14 @@ pub fn text_input(
     };
 
     with_document(|document| {
-        reactive::set_component_detail(document, input, detail(&value));
+        reactive::set_component_detail(document, input, detail(&initial));
         set_component_state(
             document,
             input,
             State {
                 focusable,
                 text,
-                core: core(&value),
+                core: core(&initial),
                 dragging: false,
                 hovered: hovered_read,
                 focused: focused_read,
@@ -171,6 +172,14 @@ pub fn text_input(
                 on_submit,
             },
         );
+    });
+
+    value.apply(move |value| {
+        with_document(|document| {
+            if document.contains(input) {
+                set_text_input_value(document, input, value);
+            }
+        });
     });
 
     focusable

@@ -271,6 +271,16 @@ impl<T: 'static> Prop<T> {
         }
     }
 
+    pub fn peek(&self) -> T
+    where
+        T: Clone,
+    {
+        untrack(|| match self {
+            Prop::Static(value) => value.clone(),
+            Prop::Dynamic(read) => read(),
+        })
+    }
+
     pub fn map<U: 'static>(self, f: impl Fn(T) -> U + 'static) -> Prop<U> {
         match self {
             Prop::Static(value) => Prop::Static(f(value)),

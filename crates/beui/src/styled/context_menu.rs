@@ -2,11 +2,9 @@ use beui_macros::{component, view};
 
 use crate::base::TextAlign;
 use crate::color::Color32;
-use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
-    with_document, Callback, FillBuilder, OutlineBuilder, PaddingBuilder, Prop, SizedBuilder,
-    TextBuilder,
+    Callback, FillBuilder, OutlineBuilder, PaddingBuilder, Prop, SizedBuilder, TextBuilder,
 };
 use crate::styled::theme::{
     ACCENT_SOFT, BORDER, BORDER_WIDTH, FONT_BODY, RADIUS, SURFACE_RAISED, TEXT, TEXT_MUTED,
@@ -30,18 +28,12 @@ pub fn context_menu(
             region={region}
             items={Vec::new()}
             row={std::rc::Rc::new(row_view)}
+            panel={std::rc::Rc::new(panel_view)}
             on_select={move |path| on_select.call(path)}
         />
     };
 
-    items.apply(move |items| {
-        let panels = items.clone();
-        unstyled::set_context_menu_items(inner, items);
-        with_document(|document| {
-            let overlay = unstyled::context_menu_overlay(document, inner);
-            style_menu_panel(document, overlay, &panels);
-        });
-    });
+    items.apply(move |items| unstyled::set_context_menu_items(inner, items));
 
     inner
 }
@@ -67,21 +59,8 @@ fn row_view(row: MenuRowHandle) -> NodeId {
     }
 }
 
-fn style_menu_panel(document: &mut Document, overlay: NodeId, items: &[MenuItem]) {
-    let menu = document
-        .overlay_content(overlay)
-        .expect("menu overlay always has content");
-
-    for (index, item) in items.iter().enumerate() {
-        if item.children.is_empty() {
-            continue;
-        }
-        if let Some(overlay) = unstyled::menu_list_row_submenu_overlay(document, menu, index) {
-            style_menu_panel(document, overlay, &item.children);
-        }
-    }
-
-    let sized = view! {
+fn panel_view(menu: NodeId) -> NodeId {
+    view! {
         <sized width={MENU_WIDTH}>
             <outline color={BORDER} width={BORDER_WIDTH} radius={RADIUS} offset={0.0} visible={true}>
                 <fill color={SURFACE_RAISED} radius={RADIUS}>
@@ -89,8 +68,7 @@ fn style_menu_panel(document: &mut Document, overlay: NodeId, items: &[MenuItem]
                 </fill>
             </outline>
         </sized>
-    };
-    document.set_overlay_content(overlay, sized);
+    }
 }
 
 fn row_background(focused: bool, hovered: bool) -> Color32 {

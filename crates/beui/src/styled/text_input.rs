@@ -24,7 +24,7 @@ pub fn text_input(
 ) -> NodeId {
     let input = view! {
         <unstyled::text_input
-            value={String::new()}
+            value={value}
             placeholder={placeholder}
             font_size={FONT_BODY}
             color={TEXT}
@@ -52,10 +52,6 @@ pub fn text_input(
             }
         })} />
     };
-    value.apply(move |value| {
-        with_document(|document| unstyled::set_text_input_value(document, input, value));
-    });
-
     input
 }
 

@@ -10,12 +10,13 @@ use crate::reactive::{
     current_component, set_component_state, with_document, Callback, ClickCatcherBuilder,
 };
 use crate::unstyled;
-use crate::unstyled::menu::{self, MenuItem, MenuRow};
+use crate::unstyled::menu::{self, MenuItem, MenuPanel, MenuRow};
 
 struct State {
     overlay: NodeId,
     content: NodeId,
     row: MenuRow,
+    panel: MenuPanel,
     on_select: Callback<Vec<usize>>,
 }
 
@@ -24,15 +25,17 @@ pub fn context_menu(
     region: NodeId,
     items: Vec<MenuItem>,
     row: Option<MenuRow>,
+    panel: Option<MenuPanel>,
     on_select: Callback<Vec<usize>>,
 ) -> NodeId {
     let context_menu = current_component();
     let row = row.unwrap_or_else(|| std::rc::Rc::new(|_| unstyled::column(0.0)));
+    let panel = panel.unwrap_or_else(|| std::rc::Rc::new(|content| content));
     let (overlay, content) = with_document(|document| {
         let overlay =
             document.create_overlay(OverlayAnchor::Point(Pos2::ZERO), Placement::BelowStart);
-        let content = menu::menu_list(document, &items, &row);
-        document.set_overlay_content(overlay, content);
+        let content = menu::menu_list(document, &items, &row, &panel);
+        document.set_overlay_content(overlay, panel(content));
         (overlay, content)
     });
 
@@ -67,6 +70,7 @@ pub fn context_menu(
                 overlay,
                 content,
                 row,
+                panel,
                 on_select,
             },
         );
@@ -78,11 +82,13 @@ pub fn context_menu(
 pub fn set_context_menu_items(context_menu: NodeId, items: Vec<MenuItem>) {
     with_document(|document| {
         let overlay = document.component_state::<State>(context_menu).overlay;
-        let old_content = document.component_state::<State>(context_menu).content;
-        let row = document.component_state::<State>(context_menu).row.clone();
-        document.remove_node(old_content);
-        let content = menu::menu_list(document, &items, &row);
-        document.set_overlay_content(overlay, content);
+        let state = document.component_state::<State>(context_menu);
+        let old_content = state.content;
+        let row = state.row.clone();
+        let panel = state.panel.clone();
+        document.remove_node(document.overlay_content(overlay).unwrap_or(old_content));
+        let content = menu::menu_list(document, &items, &row, &panel);
+        document.set_overlay_content(overlay, panel(content));
         document.component_state_mut::<State>(context_menu).content = content;
         let on_select = document
             .component_state::<State>(context_menu)

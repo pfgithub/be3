@@ -61,7 +61,7 @@ struct State {
 #[component]
 pub fn select(
     options: Vec<String>,
-    selected: Option<usize>,
+    selected: Prop<Option<usize>>,
     on_change: Callback<Option<usize>>,
     search_placeholder: Prop<String>,
     search_font_size: Prop<f32>,
@@ -76,7 +76,8 @@ pub fn select(
     popup: Option<SelectPopup>,
 ) -> NodeId {
     let select = current_component();
-    let selected = selected.filter(|index| *index < options.len());
+    let selected_prop = selected;
+    let selected = selected_prop.peek().filter(|index| *index < options.len());
     let option = Rc::new(option.unwrap_or_else(|| Box::new(|_| unstyled::column(0.0))));
 
     let (highlighted_read, highlighted_write) = create_signal(selected);
@@ -195,6 +196,14 @@ pub fn select(
 
     with_document(|document| {
         document.set_overlay_on_dismiss(overlay, move || unstyled::focus_button(trigger));
+    });
+
+    selected_prop.apply(move |selected| {
+        with_document(|document| {
+            if document.contains(select) {
+                set_select_selected(document, select, selected);
+            }
+        });
     });
 
     root
