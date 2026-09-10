@@ -1,5 +1,5 @@
 use super::*;
-use crate::reactive::{view, with_reactive_scope, TextBuilder};
+use crate::reactive::{view, TextBuilder};
 
 #[test]
 fn a_virtual_scroll_row_can_build_reactive_content_during_dispatch() {
@@ -9,11 +9,7 @@ fn a_virtual_scroll_row_can_build_reactive_content_during_dispatch() {
         scroll,
         VIRTUAL_ITEM_COUNT,
         VIRTUAL_ITEM_HEIGHT,
-        move |document, index| {
-            with_reactive_scope(document, || {
-                view! { <text string={format!("Row {index}")} /> }
-            })
-        },
+        move |_document, index| view! { <text string={format!("Row {index}")} /> },
     );
     document.set_root(scroll);
 

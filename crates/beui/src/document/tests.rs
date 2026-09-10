@@ -14,6 +14,7 @@ mod backspace_deletes_the_character_before_the_caret;
 mod clicking_a_checkbox_toggles_it;
 mod clicking_a_row_collapses_its_children;
 mod clicking_a_row_selects_the_node_it_lists;
+mod clicking_a_switch_moves_its_knob_and_survives_a_tab_round_trip;
 mod clicking_a_tab_selects_the_panel_it_names;
 mod clicking_an_accordion_header_hides_its_content;
 mod clicking_outside_an_open_select_popup_closes_it_without_clicking_through;
@@ -30,6 +31,7 @@ mod enter_activates_the_focused_button;
 mod enter_confirms_the_highlighted_select_option_and_closes_the_popup;
 mod enter_toggles_the_focused_checkbox;
 mod escape_closes_an_open_select_popup_and_returns_focus_to_the_trigger;
+mod evicting_a_virtual_scroll_row_disposes_its_effects;
 mod finding_a_node_by_its_test_id;
 mod flipping_a_switch_can_replace_the_items_of_a_scroll;
 mod for_each_reuses_nodes_for_keys_that_persist_across_an_update;
@@ -108,6 +110,10 @@ impl Harness {
             viewport,
             ..Self::new(document)
         }
+    }
+
+    pub(crate) fn viewport_mut(&mut self) -> &mut Vec2 {
+        &mut self.viewport
     }
 
     pub(crate) fn frame(&mut self, events: Vec<Event>) -> crate::FrameOutput {

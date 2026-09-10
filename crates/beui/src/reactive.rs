@@ -110,6 +110,13 @@ pub fn bind(mut effect: impl FnMut(&mut Document) + 'static) {
     create_effect(move || with_document(&mut effect));
 }
 
+pub fn in_new_scope(f: impl FnOnce() -> NodeId) -> NodeId {
+    let scope = with_document(|document| document.reactive_scope().context().run(Scope::new));
+    let node = scope.context().run(f);
+    with_document(|document| document.register_node_scope(node, scope));
+    node
+}
+
 pub fn component(name: &'static str, f: impl FnOnce() -> NodeId) -> NodeId {
     let shadow = with_document(Document::reserve_shadow);
     let previous = CURRENT_COMPONENT.with(|cell| cell.replace(Some(shadow)));
@@ -226,18 +233,27 @@ pub struct Children(Vec<(NodeId, Prop<ItemSize>)>);
 
 impl Children {
     fn mount(self, parent: NodeId) {
+        let initial_sizes: Vec<ItemSize> = untrack(|| {
+            self.0
+                .iter()
+                .map(|(_, size)| match size {
+                    Prop::Static(size) => *size,
+                    Prop::Dynamic(read) => read(),
+                })
+                .collect()
+        });
+        with_document(|document| {
+            for ((child, _), size) in self.0.iter().zip(&initial_sizes) {
+                document.append_child(parent, *child, *size);
+            }
+        });
         for (child, size) in self.0 {
-            let mut appended = false;
-            size.apply(move |size| {
-                with_document(|document| {
-                    if appended {
-                        document.set_child_size(parent, child, size);
-                    } else {
-                        document.append_child(parent, child, size);
-                        appended = true;
-                    }
+            if let Prop::Dynamic(read) = size {
+                create_effect(move || {
+                    let size = read();
+                    with_document(|document| document.set_child_size(parent, child, size));
                 });
-            });
+            }
         }
     }
 
@@ -294,7 +310,8 @@ pub fn show(condition: Prop<bool>, then: Option<Box<dyn FnOnce() -> NodeId>>) ->
     let built: Rc<Cell<Option<NodeId>>> = Rc::new(Cell::new(None));
     condition.apply(move |visible| {
         if visible && built.get().is_none() {
-            let child = then.take().expect("show requires a `then` callback")();
+            let build = then.take().expect("show requires a `then` callback");
+            let child = in_new_scope(build);
             built.set(Some(child));
             with_document(|document| document.set_visibility_child(visibility, child));
         }
@@ -326,8 +343,14 @@ where
         let mut next = Vec::with_capacity(items.len());
         for item in &items {
             let entry = existing.remove(&key(item)).unwrap_or_else(|| {
-                let (node, size) = view(item);
-                (node, size.get())
+                let size: Rc<Cell<Option<ItemSize>>> = Rc::new(Cell::new(None));
+                let sink = size.clone();
+                let node = in_new_scope(|| {
+                    let (node, item_size) = view(item);
+                    sink.set(Some(item_size.get()));
+                    node
+                });
+                (node, size.get().expect("view must set an item size"))
             });
             next.push((key(item), entry));
         }

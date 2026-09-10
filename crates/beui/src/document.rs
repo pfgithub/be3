@@ -31,6 +31,7 @@ pub struct Document {
     pub(crate) copied_text: Option<String>,
     next_paint: Option<Instant>,
     reactive_scope: ::reactive::Scope,
+    node_scopes: HashMap<NodeId, ::reactive::Scope>,
 }
 
 impl Document {
@@ -53,6 +54,7 @@ impl Document {
             copied_text: None,
             next_paint: None,
             reactive_scope: ::reactive::Scope::new(),
+            node_scopes: HashMap::new(),
         }
     }
 
@@ -69,6 +71,10 @@ impl Document {
 
     pub(crate) fn reactive_scope(&self) -> &::reactive::Scope {
         &self.reactive_scope
+    }
+
+    pub(crate) fn register_node_scope(&mut self, node: NodeId, scope: ::reactive::Scope) {
+        self.node_scopes.insert(node, scope);
     }
 
     pub fn children(&self, id: NodeId) -> Vec<NodeId> {
@@ -105,6 +111,7 @@ impl Document {
             self.remove_node(child);
         }
         self.arena.remove(id);
+        self.node_scopes.remove(&id);
         if self.root == Some(id) {
             self.root = None;
         }

@@ -170,11 +170,9 @@ fn install_rows(document: &mut Document, scroll: NodeId, rows: &Rows, compact: b
         ROW_HEIGHT
     };
     let rows = rows.clone();
-    document.set_scroll_virtual_items(scroll, ROW_COUNT, height, move |document, index| {
+    document.set_scroll_virtual_items(scroll, ROW_COUNT, height, move |_document, index| {
         let rows = rows.clone();
-        with_reactive_scope(document, move || {
-            view! { <scroll_row index={index} rows={rows} compact={compact} /> }
-        })
+        view! { <scroll_row index={index} rows={rows} compact={compact} /> }
     });
 }
 

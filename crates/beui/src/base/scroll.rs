@@ -156,7 +156,7 @@ impl ScrollNode {
                 if bottom >= rect.height() {
                     break;
                 }
-                let item = (items.build)(doc, index);
+                let item = build_item(doc, &mut items.build, index);
                 bottom += height(doc, painter, item, width);
                 head.push(item);
             }
@@ -179,13 +179,20 @@ impl ScrollNode {
         }
 
         while bottom < rect.height() && first + self.items.len() < items.count {
-            let item = (items.build)(doc, first + self.items.len());
+            let item = build_item(doc, &mut items.build, first + self.items.len());
             bottom += height(doc, painter, item, width);
             self.items.push(item);
         }
 
         self.virtual_items = Some(items);
     }
+}
+
+fn build_item(doc: &mut Document, build: &mut ItemBuilder, index: usize) -> NodeId {
+    let scope = ::reactive::Scope::new();
+    let item = scope.context().run(|| build(doc, index));
+    doc.register_node_scope(item, scope);
+    item
 }
 
 impl Element for ScrollNode {
