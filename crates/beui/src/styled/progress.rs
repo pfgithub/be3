@@ -2,8 +2,7 @@ use beui_macros::{component, view};
 
 use crate::node::NodeId;
 use crate::reactive::{
-    create_effect, create_signal, current_component, with_document, FillBuilder, Prop, RowBuilder,
-    SizedBuilder, SpacerBuilder,
+    component_detail, create_signal, FillBuilder, Prop, RowBuilder, SizedBuilder, SpacerBuilder,
 };
 use crate::styled::theme::{ACCENT, TRACK};
 
@@ -12,7 +11,6 @@ const RADIUS: u8 = 3;
 
 #[component]
 pub fn progress(value: Prop<f32>) -> NodeId {
-    let shadow = current_component();
     let (value_read, value_write) = create_signal(0.0);
     value.apply(move |value| value_write.set(value.clamp(0.0, 1.0)));
 
@@ -36,10 +34,7 @@ pub fn progress(value: Prop<f32>) -> NodeId {
         </sized>
     };
 
-    create_effect(move || {
-        let value = value_read.get();
-        with_document(|document| document.set_component_detail(shadow, detail(value)));
-    });
+    component_detail(move || detail(value_read.get()));
 
     sized
 }

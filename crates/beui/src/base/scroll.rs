@@ -8,7 +8,10 @@ use crate::painter::Painter;
 
 use crate::document::Document;
 use crate::node::{Element, InteractInput, NodeId};
-use crate::reactive::Callback;
+use crate::reactive::{create_effect, create_signal, with_document, Callback, Prop};
+use beui_macros::component;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct ScrollPosition {
@@ -483,4 +486,30 @@ impl Document {
         path.pop();
         false
     }
+}
+
+#[component(base)]
+pub fn virtual_list(
+    count: Prop<usize>,
+    item_height: Prop<f32>,
+    item: Option<ItemBuilder>,
+) -> NodeId {
+    let scroll = with_document(Document::create_scroll);
+    let item = Rc::new(RefCell::new(
+        item.expect("virtual_list requires an `item` builder"),
+    ));
+    let (count_read, set_count) = create_signal(0);
+    let (height_read, set_height) = create_signal(0.0);
+    count.apply(move |value| set_count.set(value));
+    item_height.apply(move |value| set_height.set(value));
+    create_effect(move || {
+        let (count, height) = (count_read.get(), height_read.get());
+        let item = item.clone();
+        with_document(|document| {
+            document.set_scroll_virtual_items(scroll, count, height, move |index| {
+                (item.borrow_mut())(index)
+            });
+        });
+    });
+    scroll
 }

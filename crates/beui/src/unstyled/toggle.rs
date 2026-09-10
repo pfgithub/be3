@@ -5,7 +5,7 @@ use crate::input::CursorIcon;
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
-    self, create_effect, create_signal, current_component, set_component_state, untrack,
+    self, component_detail, create_signal, current_component, set_component_state, untrack,
     with_document, Callback, ClickCatcherBuilder, FocusableBuilder, Prop, ReadSignal,
 };
 
@@ -43,14 +43,9 @@ pub fn toggle(
     let (focused, set_focused) = create_signal(false);
     let (key_active, set_key_active) = create_signal(false);
 
-    create_effect({
+    component_detail({
         let checked = checked_read.clone();
-        move || {
-            let checked = checked.get();
-            with_document(|document| {
-                reactive::set_component_detail(document, toggle, detail(checked))
-            });
-        }
+        move || detail(checked.get()).to_owned()
     });
 
     let content_node = content.map(|build| {

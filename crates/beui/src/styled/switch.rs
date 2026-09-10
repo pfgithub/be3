@@ -5,9 +5,8 @@ use crate::color::Color32;
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
-    create_effect, current_component, set_component_detail, with_document, Callback,
-    CenteredRowBuilder, FillBuilder, OutlineBuilder, PaddingBuilder, Prop, SizedBuilder,
-    SpacerBuilder,
+    current_component, shadow_detail, Callback, CenteredRowBuilder, FillBuilder, OutlineBuilder,
+    PaddingBuilder, Prop, SizedBuilder, SpacerBuilder,
 };
 use crate::styled::theme::{ACCENT, ACCENT_HOVER, BORDER, KNOB, RADIUS, SURFACE_RAISED};
 use crate::unstyled;
@@ -45,12 +44,9 @@ pub fn switch(on: Prop<bool>, on_change: Callback<bool>) -> NodeId {
                 Prop::Dynamic(Box::new(move || track_fill(checked.get(), hovered.get())))
             };
 
-            create_effect({
+            shadow_detail(shadow, {
                 let checked = handle.checked.clone();
-                move || {
-                    let on = checked.get();
-                    with_document(|document| set_component_detail(document, shadow, detail(on)));
-                }
+                move || detail(checked.get()).to_owned()
             });
 
             view! {

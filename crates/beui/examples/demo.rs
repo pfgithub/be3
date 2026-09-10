@@ -1,7 +1,7 @@
 use beui::reactive::{
-    create_memo, create_signal, view, with_document, with_reactive_scope, CenteredRowBuilder,
-    ColumnBuilder, FillBuilder, OutlineBuilder, PaddingBuilder, Prop, ReadSignal, RowBuilder,
-    ShowBuilder, SpacerBuilder, VisibilityBuilder, WriteSignal,
+    create_memo, create_signal, view, with_reactive_scope, CenteredRowBuilder, ColumnBuilder,
+    FillBuilder, OutlineBuilder, PaddingBuilder, Prop, ReadSignal, RowBuilder, ShowBuilder,
+    SpacerBuilder, VirtualListBuilder, VisibilityBuilder, WriteSignal,
 };
 use beui::styled::theme::{
     ACCENT, ACCENT_SOFT, BACKGROUND, RADIUS, SCROLLBAR_WIDTH, SEPARATOR_HEIGHT, SURFACE,
@@ -77,19 +77,28 @@ struct Rows {
     set_selected: WriteSignal<Option<usize>>,
     timings: ReadSignal<bool>,
     set_timings: WriteSignal<bool>,
+    compact: ReadSignal<bool>,
+    set_compact: WriteSignal<bool>,
 }
 
 impl Rows {
     fn new(set_status: WriteSignal<String>) -> Self {
         let (selected, set_selected) = create_signal(None);
         let (timings, set_timings) = create_signal(true);
+        let (compact, set_compact) = create_signal(false);
         Self {
             set_status,
             selected,
             set_selected,
             timings,
             set_timings,
+            compact,
+            set_compact,
         }
+    }
+
+    fn set_compact(&self, compact: bool) {
+        self.set_compact.set(compact);
     }
 
     fn select(&self, index: usize) {
@@ -159,19 +168,6 @@ fn scroll_row(index: usize, rows: Rows, compact: bool) -> NodeId {
             })}
         />
     }
-}
-
-fn install_rows(document: &mut Document, scroll: NodeId, rows: &Rows, compact: bool) {
-    let height = if compact {
-        COMPACT_ROW_HEIGHT
-    } else {
-        ROW_HEIGHT
-    };
-    let rows = rows.clone();
-    document.set_scroll_virtual_items(scroll, ROW_COUNT, height, move |index| {
-        let rows = rows.clone();
-        view! { <scroll_row index={index} rows={rows} compact={compact} /> }
-    });
 }
 
 #[component]
@@ -245,8 +241,28 @@ fn build_sidebar() -> NodeId {
 fn build_main(value: NodeId) -> NodeId {
     let (status_text, set_status_text) = create_signal("Nothing selected".to_string());
     let rows = Rows::new(set_status_text);
-    let scroll = with_document(Document::create_scroll);
-    with_document(|document| install_rows(document, scroll, &rows, false));
+    let row_height = {
+        let compact = rows.compact.clone();
+        Prop::Dynamic(Box::new(move || {
+            if compact.get() {
+                COMPACT_ROW_HEIGHT
+            } else {
+                ROW_HEIGHT
+            }
+        }))
+    };
+    let item_rows = rows.clone();
+    let scroll = view! {
+        <virtual_list
+            count={ROW_COUNT}
+            item_height={row_height}
+            item={Box::new(move |index| {
+                let rows = item_rows.clone();
+                let compact = rows.compact.get();
+                view! { <scroll_row index={index} rows={rows} compact={compact} /> }
+            })}
+        />
+    };
 
     view! {
         <column spacing={20.0}>
@@ -257,7 +273,7 @@ fn build_main(value: NodeId) -> NodeId {
                     <paragraph content={"Click the header buttons, or focus one with Tab and press Enter.".to_string()} />
                 </column>
             </card>
-            <build_controls scroll={scroll} rows={rows.clone()} />
+            <build_controls rows={rows.clone()} />
             @percent(100.0) <card>
                 <column spacing={12.0}>
                     <centered_row spacing={12.0}>
@@ -276,7 +292,7 @@ fn build_main(value: NodeId) -> NodeId {
 }
 
 #[component]
-fn build_controls(scroll: NodeId, rows: Rows) -> NodeId {
+fn build_controls(rows: Rows) -> NodeId {
     let (selected_tab, set_selected_tab) = create_signal(0usize);
 
     let list_rows = rows.clone();
@@ -297,7 +313,7 @@ fn build_controls(scroll: NodeId, rows: Rows) -> NodeId {
                     set_selected_tab.set(selected);
                 }} />
                 <column spacing={0.0}>
-                    <show condition={list_condition} then={Box::new(move || view! { <build_list_controls scroll={scroll} rows={list_rows} /> })} />
+                    <show condition={list_condition} then={Box::new(move || view! { <build_list_controls rows={list_rows} /> })} />
                     <show condition={load_condition} then={Box::new(|| view! { <build_load_controls /> })} />
                     <show condition={name_condition} then={Box::new(|| view! { <build_name_controls /> })} />
                     <show condition={choices_condition} then={Box::new(|| view! { <build_choice_controls /> })} />
@@ -309,7 +325,7 @@ fn build_controls(scroll: NodeId, rows: Rows) -> NodeId {
 }
 
 #[component]
-fn build_list_controls(scroll: NodeId, rows: Rows) -> NodeId {
+fn build_list_controls(rows: Rows) -> NodeId {
     let timing_rows = rows.clone();
     let compact_rows = rows.clone();
     view! {
@@ -318,9 +334,7 @@ fn build_list_controls(scroll: NodeId, rows: Rows) -> NodeId {
                 timing_rows.show_timings(checked);
             }} />
             <centered_row spacing={12.0}>
-                <switch on={false} on_change={move |on| {
-                    with_document(|document| install_rows(document, scroll, &compact_rows, on));
-                }} />
+                <switch on={false} on_change={move |on| compact_rows.set_compact(on)} />
                 @percent(100.0) <body content={"Compact rows".to_string()} />
             </centered_row>
         </column>

@@ -149,6 +149,17 @@ pub fn set_component_detail(document: &mut Document, shadow: NodeId, detail: imp
     }
 }
 
+pub fn component_detail(detail: impl Fn() -> String + 'static) {
+    shadow_detail(current_component(), detail);
+}
+
+pub fn shadow_detail(shadow: NodeId, detail: impl Fn() -> String + 'static) {
+    create_effect(move || {
+        let detail = detail();
+        with_document(|document| set_component_detail(document, shadow, detail));
+    });
+}
+
 pub fn set_component_state<T: 'static>(document: &mut Document, shadow: NodeId, state: T) {
     if document.contains(shadow) {
         document.set_component_state(shadow, state);
@@ -353,6 +364,7 @@ pub use crate::base::fill::FillBuilder;
 pub use crate::base::focusable::FocusableBuilder;
 pub use crate::base::outline::OutlineBuilder;
 pub use crate::base::padding::PaddingBuilder;
+pub use crate::base::scroll::VirtualListBuilder;
 pub use crate::base::sized::SizedBuilder;
 pub use crate::base::text::TextBuilder;
 pub use crate::base::visibility::VisibilityBuilder;

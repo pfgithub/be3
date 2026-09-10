@@ -5,7 +5,7 @@ use crate::input::{CursorIcon, Key, KeyPress, PointerPress};
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
-    self, create_effect, create_signal, current_component, set_component_state, untrack,
+    self, component_detail, create_signal, current_component, set_component_state, untrack,
     with_document, Callback, ClickCatcherBuilder, FocusableBuilder, Prop, ReadSignal,
 };
 
@@ -43,14 +43,9 @@ pub fn slider(
     let (dragging, set_dragging) = create_signal(false);
     let (focused, set_focused) = create_signal(false);
 
-    create_effect({
+    component_detail({
         let value = value_read.clone();
-        move || {
-            let value = value.get();
-            with_document(|document| {
-                reactive::set_component_detail(document, slider, detail(value))
-            });
-        }
+        move || detail(value.get())
     });
 
     let content_node = content.map(|build| {

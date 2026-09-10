@@ -5,8 +5,8 @@ use crate::color::Color32;
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
-    create_effect, current_component, set_component_detail, with_document, Callback,
-    CenteredRowBuilder, FillBuilder, OutlineBuilder, Prop, SizedBuilder,
+    current_component, shadow_detail, Callback, CenteredRowBuilder, FillBuilder, OutlineBuilder,
+    Prop, SizedBuilder,
 };
 use crate::styled::theme::{ACCENT, ACCENT_HOVER, KNOB, RADIUS, TRACK};
 use crate::unstyled;
@@ -38,12 +38,9 @@ pub fn slider(value: Prop<f32>, on_change: Callback<f32>) -> NodeId {
             };
             let knob_color = Prop::Dynamic(Box::new(move || knob_fill_color(handle.dragging.get())));
 
-            create_effect({
+            shadow_detail(shadow, {
                 let slider_value = handle.value.clone();
-                move || {
-                    let value = slider_value.get();
-                    with_document(|document| set_component_detail(document, shadow, detail(value)));
-                }
+                move || detail(slider_value.get())
             });
 
             view! {

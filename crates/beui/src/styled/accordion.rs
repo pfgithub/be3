@@ -6,9 +6,8 @@ use crate::base::TextAlign;
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
-    create_effect, create_signal, current_component, set_component_detail, with_document, Callback,
-    CenteredRowBuilder, Children, FillBuilder, OutlineBuilder, PaddingBuilder, Prop, SizedBuilder,
-    TextBuilder,
+    component_detail, create_signal, Callback, CenteredRowBuilder, Children, FillBuilder,
+    OutlineBuilder, PaddingBuilder, Prop, SizedBuilder, TextBuilder,
 };
 use crate::styled::theme::{
     ACCENT, FONT_HEADING, FONT_SMALL, RADIUS, SURFACE_RAISED, TEXT, TEXT_MUTED,
@@ -31,16 +30,12 @@ pub fn accordion(
     let child = children
         .into_first()
         .expect("accordion requires a child, e.g. <accordion>{content}</accordion>");
-    let shadow = current_component();
 
     let (title_text, set_title_text) = create_signal(String::new());
     title.apply(move |value| set_title_text.set(value));
-    create_effect({
+    component_detail({
         let title_text = title_text.clone();
-        move || {
-            let value = title_text.get();
-            with_document(|document| set_component_detail(document, shadow, value));
-        }
+        move || title_text.get()
     });
 
     view! {

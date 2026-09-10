@@ -6,9 +6,8 @@ use crate::color::Color32;
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
-    create_effect, current_component, set_component_detail, with_document, Callback,
-    CenteredRowBuilder, FillBuilder, OutlineBuilder, Prop, SizedBuilder, SpacerBuilder,
-    TextBuilder, VisibilityBuilder,
+    current_component, shadow_detail, Callback, CenteredRowBuilder, FillBuilder, OutlineBuilder,
+    Prop, SizedBuilder, SpacerBuilder, TextBuilder, VisibilityBuilder,
 };
 use crate::styled::theme::{
     ACCENT, ACCENT_HOVER, BORDER, BORDER_WIDTH, CHIP_RADIUS, FONT_BODY, ON_ACCENT, RADIUS,
@@ -43,12 +42,9 @@ pub fn checkbox(label: Prop<String>, checked: Prop<bool>, on_change: Callback<bo
                 Prop::Dynamic(Box::new(move || !checked.get()))
             };
 
-            create_effect({
+            shadow_detail(shadow, {
                 let checked = handle.checked.clone();
-                move || {
-                    let checked = checked.get();
-                    with_document(|document| set_component_detail(document, shadow, detail(checked)));
-                }
+                move || detail(checked.get()).to_owned()
             });
 
             view! {
