@@ -32,12 +32,20 @@ pub fn select(
     let mut on_change = on_change;
 
     let inner = unstyled::select(&options, None);
+    let selected_signal =
+        with_document(|document| unstyled::select_selected_signal(document, inner));
     with_document(|document| {
         let trigger = unstyled::select_trigger(document, inner);
 
+        let label_text = {
+            let selected_signal = selected_signal.clone();
+            Prop::Dynamic(Box::new(move || {
+                trigger_label(&options, selected_signal.get())
+            }))
+        };
         let label = view! {
             <text
-                string={trigger_label(&options, None)}
+                string={label_text}
                 font_size={FONT_BODY}
                 color={TEXT}
                 align={TextAlign::Start}
@@ -143,7 +151,6 @@ pub fn select(
         );
 
         unstyled::set_select_on_change(document, inner, move |document, selected| {
-            document.set_text(label, trigger_label(&options, selected));
             if let Some(handler) = &mut on_change {
                 handler(document, selected);
             }

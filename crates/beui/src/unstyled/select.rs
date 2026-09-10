@@ -23,7 +23,8 @@ struct State {
     search: NodeId,
     list: NodeId,
     rows: Vec<Row>,
-    selected: Option<usize>,
+    selected_read: ReadSignal<Option<usize>>,
+    selected_write: WriteSignal<Option<usize>>,
     highlighted: Option<usize>,
     highlighted_read: ReadSignal<Option<usize>>,
     highlighted_write: WriteSignal<Option<usize>>,
@@ -54,6 +55,7 @@ fn select_in(document: &mut Document, options: &[String], selected: Option<usize
     document.append_child(root, overlay, ItemSize::Intrinsic);
 
     let (highlighted_read, highlighted_write) = create_signal(selected);
+    let (selected_read, selected_write) = create_signal(selected);
     let select = document.create_shadow("select", root, Vec::new());
     document.set_component_state(
         select,
@@ -63,7 +65,8 @@ fn select_in(document: &mut Document, options: &[String], selected: Option<usize
             search,
             list,
             rows: Vec::new(),
-            selected,
+            selected_read,
+            selected_write,
             highlighted: selected,
             highlighted_read,
             highlighted_write,
@@ -134,13 +137,23 @@ fn add_row(document: &mut Document, select: NodeId, label: &str) {
 }
 
 pub fn select_selected(document: &Document, select: NodeId) -> Option<usize> {
-    document.component_state::<State>(select).selected
+    document
+        .component_state::<State>(select)
+        .selected_read
+        .get()
+}
+
+pub fn select_selected_signal(document: &Document, select: NodeId) -> ReadSignal<Option<usize>> {
+    document
+        .component_state::<State>(select)
+        .selected_read
+        .clone()
 }
 
 pub fn set_select_selected(document: &mut Document, select: NodeId, selected: Option<usize>) {
     let state = document.component_state::<State>(select);
     let selected = selected.filter(|index| *index < state.rows.len());
-    if state.selected == selected {
+    if state.selected_read.get() == selected {
         return;
     }
     apply_selection(document, select, selected);
@@ -177,7 +190,7 @@ pub fn set_select_options(document: &mut Document, select: NodeId, options: &[St
         add_row(document, select, label);
     }
     let state = document.component_state_mut::<State>(select);
-    state.selected = None;
+    state.selected_write.set(None);
     state.highlighted = None;
     state.highlighted_write.set(None);
 }
@@ -269,7 +282,7 @@ fn trigger_key(document: &mut Document, select: NodeId, press: KeyPress) -> bool
 fn open(document: &mut Document, select: NodeId) {
     let (overlay, search, selected) = {
         let state = document.component_state::<State>(select);
-        (state.overlay, state.search, state.selected)
+        (state.overlay, state.search, state.selected_read.get())
     };
     document.open_overlay(overlay);
     unstyled::set_text_input_value(document, search, "");
@@ -288,7 +301,10 @@ fn confirm(document: &mut Document, select: NodeId, index: usize) {
 }
 
 fn apply_selection(document: &mut Document, select: NodeId, selected: Option<usize>) {
-    document.component_state_mut::<State>(select).selected = selected;
+    document
+        .component_state::<State>(select)
+        .selected_write
+        .set(selected);
     document.call_component_handler(select, selected, |state: &mut State| &mut state.on_change);
 }
 
