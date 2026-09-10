@@ -25,6 +25,13 @@ pub fn text_input(
     let input = view! {
         <unstyled::text_input
             value={String::new()}
+            placeholder={placeholder}
+            font_size={FONT_BODY}
+            color={TEXT}
+            placeholder_color={TEXT_MUTED}
+            selection_color={ACCENT_SOFT}
+            caret_color={ACCENT}
+            padding_horizontal={PADDING_HORIZONTAL}
             on_change={move |value| on_change.call(value)}
             on_submit={move |value| on_submit.call(value)}
             content={Box::new(move |handle: unstyled::TextInputHandle| {
@@ -45,21 +52,6 @@ pub fn text_input(
             }
         })} />
     };
-    let text = with_document(|document| unstyled::text_input_text(document, input));
-    with_document(|document| {
-        document.set_text_font_size(text, FONT_BODY);
-        document.set_text_color(text, TEXT);
-    });
-
-    unstyled::set_text_input_placeholder_color(input, TEXT_MUTED);
-    unstyled::set_text_input_selection_color(input, ACCENT_SOFT);
-    unstyled::set_text_input_caret_color(input, ACCENT);
-    unstyled::set_text_input_padding(input, PADDING_HORIZONTAL, 0.0);
-
-    placeholder.apply(move |placeholder| {
-        unstyled::set_text_input_placeholder(input, placeholder);
-    });
-
     value.apply(move |value| {
         with_document(|document| unstyled::set_text_input_value(document, input, value));
     });

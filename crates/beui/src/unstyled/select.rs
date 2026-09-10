@@ -4,19 +4,42 @@ use crate::document::Document;
 use crate::input::{Key, KeyPress};
 use crate::node::NodeId;
 use crate::reactive::{
-    create_signal, current_component, set_component_state, with_document, Callback, ColumnBuilder,
-    ReadSignal, WriteSignal,
+    bind, create_memo, create_signal, current_component, set_component_state, with_document,
+    Callback, ColumnBuilder, Memo, Prop, ReadSignal, WriteSignal,
 };
 use crate::unstyled;
+use crate::unstyled::button::{ButtonContent, ButtonHandle};
+use crate::unstyled::text_input::{TextInputContent, TextInputHandle};
 use beui_macros::{component, view};
+use std::rc::Rc;
 
-const FONT_SIZE: f32 = 14.0;
 const OPTIONS_MAX_HEIGHT: f32 = 240.0;
+
+pub struct SelectTriggerHandle {
+    pub selected: ReadSignal<Option<usize>>,
+    pub hovered: ReadSignal<bool>,
+    pub active: ReadSignal<bool>,
+    pub focused: ReadSignal<bool>,
+}
+
+pub type SelectTrigger = Box<dyn FnOnce(SelectTriggerHandle) -> NodeId>;
+
+pub struct SelectOptionHandle {
+    pub index: usize,
+    pub label: String,
+    pub highlighted: Memo<bool>,
+    pub hovered: ReadSignal<bool>,
+    pub focused: ReadSignal<bool>,
+}
+
+pub type SelectOption = Box<dyn Fn(SelectOptionHandle) -> NodeId>;
+
+pub type SelectPopup = Box<dyn FnOnce(NodeId) -> NodeId>;
 
 struct Row {
     button: NodeId,
     visibility: NodeId,
-    label: NodeId,
+    label: String,
     visible: bool,
 }
 
@@ -26,6 +49,7 @@ struct State {
     search: NodeId,
     list: NodeId,
     rows: Vec<Row>,
+    option: Rc<SelectOption>,
     selected_read: ReadSignal<Option<usize>>,
     selected_write: WriteSignal<Option<usize>>,
     highlighted: Option<usize>,
@@ -39,12 +63,40 @@ pub fn select(
     options: Vec<String>,
     selected: Option<usize>,
     on_change: Callback<Option<usize>>,
+    search_placeholder: Prop<String>,
+    search_font_size: Prop<f32>,
+    search_color: Prop<Color32>,
+    search_placeholder_color: Prop<Color32>,
+    search_selection_color: Prop<Color32>,
+    search_caret_color: Prop<Color32>,
+    search_padding_horizontal: Prop<f32>,
+    search_content: Option<TextInputContent>,
+    trigger: Option<SelectTrigger>,
+    option: Option<SelectOption>,
+    popup: Option<SelectPopup>,
 ) -> NodeId {
     let select = current_component();
     let selected = selected.filter(|index| *index < options.len());
+    let option = Rc::new(option.unwrap_or_else(|| Box::new(|_| unstyled::column(0.0))));
 
+    let (highlighted_read, highlighted_write) = create_signal(selected);
+    let (selected_read, selected_write) = create_signal(selected);
+
+    let trigger = trigger.unwrap_or_else(|| Box::new(|_| unstyled::column(0.0)));
+    let trigger_content: ButtonContent = {
+        let selected = selected_read.clone();
+        Box::new(move |handle: ButtonHandle| {
+            trigger(SelectTriggerHandle {
+                selected,
+                hovered: handle.hovered,
+                active: handle.active,
+                focused: handle.focused,
+            })
+        })
+    };
     let trigger = view! {
         <unstyled::button
+            content={trigger_content}
             on_click={move || with_document(|document| open(document, select))}
             on_key={move |press: KeyPress| {
                 with_document(|document| trigger_key(document, select, press))
@@ -54,6 +106,14 @@ pub fn select(
     let search = view! {
         <unstyled::text_input
             value={String::new()}
+            placeholder={search_placeholder}
+            font_size={search_font_size}
+            color={search_color}
+            placeholder_color={search_placeholder_color}
+            selection_color={search_selection_color}
+            caret_color={search_caret_color}
+            padding_horizontal={search_padding_horizontal}
+            content={search_content.unwrap_or_else(|| Box::new(|handle: TextInputHandle| handle.field))}
             on_change={move |text: String| {
                 with_document(|document| filter(document, select, &text));
             }}
@@ -72,16 +132,20 @@ pub fn select(
     };
     let list = with_document(Document::create_scroll);
 
-    let popup = view! {
+    let popup_content = view! {
         <column spacing={6.0}>
             {search}
             @fixed(OPTIONS_MAX_HEIGHT) {list}
         </column>
     };
+    let popup_content = match popup {
+        Some(decorate) => decorate(popup_content),
+        None => popup_content,
+    };
 
     let overlay = with_document(|document| {
         let overlay = document.create_overlay(OverlayAnchor::Node(trigger), Placement::BelowStart);
-        document.set_overlay_content(overlay, popup);
+        document.set_overlay_content(overlay, popup_content);
         overlay
     });
 
@@ -94,14 +158,19 @@ pub fn select(
 
     let rows = with_document(|document| {
         let mut rows = Vec::new();
-        for label in &options {
-            rows.push(add_row(document, select, list, label));
+        for (index, label) in options.iter().enumerate() {
+            rows.push(add_row(
+                document,
+                select,
+                list,
+                index,
+                label,
+                &option,
+                &highlighted_read,
+            ));
         }
         rows
     });
-
-    let (highlighted_read, highlighted_write) = create_signal(selected);
-    let (selected_read, selected_write) = create_signal(selected);
 
     with_document(|document| {
         set_component_state(
@@ -113,6 +182,7 @@ pub fn select(
                 search,
                 list,
                 rows,
+                option,
                 selected_read,
                 selected_write,
                 highlighted: selected,
@@ -130,13 +200,35 @@ pub fn select(
     root
 }
 
-fn add_row(document: &mut Document, select: NodeId, list: NodeId, label: &str) -> Row {
-    let text = document.create_text(label.to_owned(), FONT_SIZE, Color32::WHITE);
+fn add_row(
+    document: &mut Document,
+    select: NodeId,
+    list: NodeId,
+    index: usize,
+    label: &str,
+    option: &Rc<SelectOption>,
+    highlighted: &ReadSignal<Option<usize>>,
+) -> Row {
+    let content = {
+        let option = option.clone();
+        let label = label.to_owned();
+        let highlighted = highlighted.clone();
+        Box::new(move |handle: ButtonHandle| {
+            let is_highlighted = create_memo(move || highlighted.get() == Some(index));
+            option(SelectOptionHandle {
+                index,
+                label,
+                highlighted: is_highlighted,
+                hovered: handle.hovered.clone(),
+                focused: handle.focused,
+            })
+        })
+    };
     let button_cell: std::rc::Rc<std::cell::Cell<Option<NodeId>>> = std::rc::Rc::default();
     let button = view! {
         <unstyled::button
             tab_stop={false}
-            content={Box::new(move |_handle| text)}
+            content={content}
             on_click={{
                 let button_cell = button_cell.clone();
                 move || {
@@ -160,10 +252,17 @@ fn add_row(document: &mut Document, select: NodeId, list: NodeId, label: &str) -
     document.set_visibility_child(visibility, button);
     document.append_scroll_item(list, visibility);
 
+    let hovered = unstyled::button_hovered(document, button);
+    bind(move |document| {
+        if hovered.get() {
+            set_highlighted(document, select, Some(index));
+        }
+    });
+
     Row {
         button,
         visibility,
-        label: text,
+        label: label.to_owned(),
         visible: true,
     }
 }
@@ -217,10 +316,21 @@ pub fn set_select_options(document: &mut Document, select: NodeId, options: &[St
     for visibility in old_rows {
         document.remove_node(visibility);
     }
-    let list = document.component_state::<State>(select).list;
+    let state = document.component_state::<State>(select);
+    let list = state.list;
+    let option = state.option.clone();
+    let highlighted = state.highlighted_read.clone();
     let mut rows = Vec::new();
-    for label in options {
-        rows.push(add_row(document, select, list, label));
+    for (index, label) in options.iter().enumerate() {
+        rows.push(add_row(
+            document,
+            select,
+            list,
+            index,
+            label,
+            &option,
+            &highlighted,
+        ));
     }
     let state = document.component_state_mut::<State>(select);
     state.rows = rows;
@@ -254,10 +364,6 @@ pub fn select_option_count(document: &Document, select: NodeId) -> usize {
 
 pub fn select_option_button(document: &Document, select: NodeId, index: usize) -> NodeId {
     document.component_state::<State>(select).rows[index].button
-}
-
-pub fn select_option_label_node(document: &Document, select: NodeId, index: usize) -> NodeId {
-    document.component_state::<State>(select).rows[index].label
 }
 
 pub fn select_highlighted(document: &Document, select: NodeId) -> Option<usize> {
@@ -339,7 +445,7 @@ fn filter(document: &mut Document, select: NodeId, text: &str) {
         .component_state::<State>(select)
         .rows
         .iter()
-        .map(|row| document.text(row.label).to_owned())
+        .map(|row| row.label.clone())
         .collect();
     let mut first_visible = None;
     for (index, label) in labels.iter().enumerate() {

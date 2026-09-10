@@ -7,7 +7,8 @@ use crate::base::{ItemSize, TextAlign};
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
-    create_signal, view, with_document, with_reactive_scope, ClickCatcherBuilder, WriteSignal,
+    create_signal, view, with_document, with_reactive_scope, ClickCatcherBuilder, FillBuilder,
+    PaddingBuilder, Prop, ReadSignal, WriteSignal,
 };
 use crate::styled::theme::{
     ACCENT, BORDER_WIDTH, CHIP_RADIUS, ON_ACCENT, RADIUS, SCROLLBAR_WIDTH, SEPARATOR_HEIGHT,
@@ -46,28 +47,26 @@ pub(crate) struct Row {
     #[cfg(test)]
     pub(crate) marker: NodeId,
     pub(crate) outline: NodeId,
-    pub(crate) detail: NodeId,
-    pub(crate) size: NodeId,
+    pub(crate) set_detail: WriteSignal<String>,
+    pub(crate) set_size: WriteSignal<String>,
 }
 
 pub(crate) struct Panel {
     pub(crate) document: Document,
     pub(crate) scroll: NodeId,
     pub(crate) set_count: WriteSignal<String>,
-    pub(crate) toggle: NodeId,
-    pub(crate) toggle_label: NodeId,
-    pub(crate) selection: NodeId,
-    pub(crate) bounds: NodeId,
+    pub(crate) set_picking: WriteSignal<bool>,
+    pub(crate) set_selection: WriteSignal<String>,
+    pub(crate) set_bounds: WriteSignal<String>,
     pub(crate) rows: Vec<Row>,
 }
 
 struct Built {
     scroll: NodeId,
     set_count: WriteSignal<String>,
-    toggle: NodeId,
-    toggle_label: NodeId,
-    selection: NodeId,
-    bounds: NodeId,
+    set_picking: WriteSignal<bool>,
+    set_selection: WriteSignal<String>,
+    set_bounds: WriteSignal<String>,
     rows: Vec<Row>,
     panel: NodeId,
 }
@@ -85,17 +84,17 @@ pub(crate) fn build(entries: &[Entry], summary: &Summary, state: &Rc<State>, off
         document,
         scroll: built.scroll,
         set_count: built.set_count,
-        toggle: built.toggle,
-        toggle_label: built.toggle_label,
-        selection: built.selection,
-        bounds: built.bounds,
+        set_picking: built.set_picking,
+        set_selection: built.set_selection,
+        set_bounds: built.set_bounds,
         rows: built.rows,
     }
 }
 
 fn build_tree(entries: &[Entry], summary: &Summary, state: &Rc<State>, offset: f32) -> Built {
     let (count, set_count) = count_label(summary.total);
-    let (toggle, toggle_fill, toggle_label) = pick_toggle(state, summary.picking);
+    let (picking, set_picking) = create_signal(summary.picking);
+    let toggle = pick_toggle(state, &picking);
     let header = header(count, toggle);
 
     let scroll = with_document(Document::create_scroll);
@@ -110,11 +109,10 @@ fn build_tree(entries: &[Entry], summary: &Summary, state: &Rc<State>, offset: f
     with_document(|document| document.set_scroll_offset(scroll, offset));
     let body = body(scroll);
 
-    let selection = view! { <code content={summary.selection.clone()} /> };
-    let selection = with_document(|document| document.shadow_root(selection));
-    let bounds = view! { <code content={summary.bounds.clone()} /> };
-    let bounds = with_document(|document| document.shadow_root(bounds));
-    with_document(|document| document.set_text_color(bounds, TEXT_MUTED));
+    let (selection_text, set_selection) = create_signal(summary.selection.clone());
+    let (bounds_text, set_bounds) = create_signal(summary.bounds.clone());
+    let selection = view! { <code content={selection_text} /> };
+    let bounds = view! { <code content={bounds_text} color={TEXT_MUTED} /> };
     let footer = footer(selection, bounds);
 
     let column = unstyled::column(0.0);
@@ -144,10 +142,9 @@ fn build_tree(entries: &[Entry], summary: &Summary, state: &Rc<State>, offset: f
     Built {
         scroll,
         set_count,
-        toggle: toggle_fill,
-        toggle_label,
-        selection,
-        bounds,
+        set_picking,
+        set_selection,
+        set_bounds,
         rows,
         panel,
     }
@@ -178,11 +175,7 @@ pub(crate) fn toggle_text(picking: bool) -> Color32 {
 
 fn count_label(total: usize) -> (NodeId, WriteSignal<String>) {
     let (count_text, set_count_text) = create_signal(total_label(total));
-    let count = view! { <caption content={count_text} /> };
-    with_document(|document| {
-        let count_text_node = document.shadow_root(count);
-        document.set_text_align(count_text_node, TextAlign::End, TextAlign::Center);
-    });
+    let count = view! { <caption content={count_text} align={TextAlign::End} /> };
     (count, set_count_text)
 }
 
@@ -199,33 +192,34 @@ fn header(count: NodeId, toggle: NodeId) -> NodeId {
     })
 }
 
-fn pick_toggle(state: &Rc<State>, picking: bool) -> (NodeId, NodeId, NodeId) {
-    let label = view! { <code content={"Pick".to_owned()} /> };
-    let label = with_document(|document| {
-        let label = document.shadow_root(label);
-        document.set_text_align(label, TextAlign::Center, TextAlign::Center);
-        document.set_text_color(label, toggle_text(picking));
-        label
-    });
-
-    let fill = with_document(|document| {
-        let padding = document.create_padding(TOGGLE_PADDING_HORIZONTAL, TOGGLE_PADDING_VERTICAL);
-        document.set_padding_child(padding, label);
-
-        let fill = document.create_fill(toggle_fill(picking), CHIP_RADIUS);
-        document.set_fill_child(fill, padding);
-        fill
-    });
-
-    let bordered = view! { <bordered corner_radius={CHIP_RADIUS}>{fill}</bordered> };
-    let picker = state.clone();
-    let pressable = view! {
-        <unstyled::pressable on_click={move || picker.toggle_picking()}>
-            {bordered}
-        </unstyled::pressable>
+fn pick_toggle(state: &Rc<State>, picking: &ReadSignal<bool>) -> NodeId {
+    let label_color = {
+        let picking = picking.clone();
+        Prop::Dynamic(Box::new(move || toggle_text(picking.get())))
     };
-
-    (pressable, fill, label)
+    let fill_color = {
+        let picking = picking.clone();
+        Prop::Dynamic(Box::new(move || toggle_fill(picking.get())))
+    };
+    let picker = state.clone();
+    view! {
+        <unstyled::pressable on_click={move || picker.toggle_picking()}>
+            <bordered corner_radius={CHIP_RADIUS}>
+                <fill color={fill_color} radius={CHIP_RADIUS}>
+                    <padding
+                        horizontal={TOGGLE_PADDING_HORIZONTAL}
+                        vertical={TOGGLE_PADDING_VERTICAL}
+                    >
+                        <code
+                            content={"Pick".to_owned()}
+                            align={TextAlign::Center}
+                            color={label_color}
+                        />
+                    </padding>
+                </fill>
+            </bordered>
+        </unstyled::pressable>
+    }
 }
 
 fn body(scroll: NodeId) -> NodeId {
@@ -256,22 +250,12 @@ fn row(entry: &Entry, state: &Rc<State>) -> Row {
     let marker = marker(entry, state);
 
     let kind = view! { <code content={entry.kind.to_owned()} /> };
-    let kind = with_document(|document| document.shadow_root(kind));
-
-    let detail = view! { <code content={entry.detail.clone()} /> };
-    let detail = with_document(|document| {
-        let detail = document.shadow_root(detail);
-        document.set_text_color(detail, TEXT_MUTED);
-        detail
-    });
-
-    let size = view! { <code content={entry.size.clone()} /> };
-    let size = with_document(|document| {
-        let size = document.shadow_root(size);
-        document.set_text_color(size, TEXT_MUTED);
-        document.set_text_align(size, TextAlign::End, TextAlign::Center);
-        size
-    });
+    let (detail_text, set_detail) = create_signal(entry.detail.clone());
+    let (size_text, set_size) = create_signal(entry.size.clone());
+    let detail = view! { <code content={detail_text} color={TEXT_MUTED} /> };
+    let size = view! {
+        <code content={size_text} color={TEXT_MUTED} align={TextAlign::End} />
+    };
 
     let line = unstyled::centered_row(ROW_SPACING);
     with_document(|document| {
@@ -308,19 +292,19 @@ fn row(entry: &Entry, state: &Rc<State>) -> Row {
         #[cfg(test)]
         marker,
         outline,
-        detail,
-        size,
+        set_detail,
+        set_size,
     }
 }
 
 fn marker(entry: &Entry, state: &Rc<State>) -> NodeId {
-    let glyph_node = view! { <code content={glyph(entry).to_owned()} /> };
-    let glyph_node = with_document(|document| {
-        let glyph_node = document.shadow_root(glyph_node);
-        document.set_text_color(glyph_node, TEXT_MUTED);
-        document.set_text_align(glyph_node, TextAlign::Center, TextAlign::Center);
-        glyph_node
-    });
+    let glyph_node = view! {
+        <code
+            content={glyph(entry).to_owned()}
+            color={TEXT_MUTED}
+            align={TextAlign::Center}
+        />
+    };
     if !entry.expandable {
         return glyph_node;
     }

@@ -1,18 +1,17 @@
+use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use crate::base::ItemSize;
-use crate::color::Color32;
 use crate::document::Document;
 use crate::input::{Key, KeyPress};
 use crate::node::NodeId;
 use crate::reactive::{
-    self, bind, create_signal, current_component, set_component_detail, set_component_state,
-    untrack, with_document, Callback, Prop, ReadSignal, WriteSignal,
+    self, bind, create_memo, create_signal, current_component, set_component_detail,
+    set_component_state, untrack, with_document, Callback, Memo, Prop, ReadSignal, WriteSignal,
 };
 use crate::unstyled;
+use crate::unstyled::ButtonHandle;
 use beui_macros::view;
-
-const FONT_SIZE: f32 = 14.0;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum ChoiceKind {
@@ -21,9 +20,20 @@ pub enum ChoiceKind {
     Listbox,
 }
 
+pub struct ChoiceOptionHandle {
+    pub index: usize,
+    pub label: String,
+    pub selected: Memo<bool>,
+    pub hovered: ReadSignal<bool>,
+    pub active: ReadSignal<bool>,
+    pub focused: ReadSignal<bool>,
+}
+
+pub type ChoiceOption = Box<dyn Fn(ChoiceOptionHandle) -> NodeId>;
+
 struct Option_ {
     button: NodeId,
-    label: NodeId,
+    label: String,
 }
 
 struct State {
@@ -41,6 +51,7 @@ pub fn choice(
     selected: Prop<Option<usize>>,
     kind: ChoiceKind,
     on_change: Callback<Option<usize>>,
+    option: ChoiceOption,
 ) -> NodeId {
     let choice = reactive::component(kind_name(kind), move || {
         let choice = current_component();
@@ -51,19 +62,38 @@ pub fn choice(
         };
         let (selected_read, set_selected) = create_signal(None);
 
+        let option = Rc::new(option);
         let (options, focused_signals) = with_document(|document| {
             let mut options = Vec::new();
             let mut focused_signals = Vec::new();
             for (index, title) in labels.iter().enumerate() {
-                let label = document.create_text(*title, FONT_SIZE, Color32::WHITE);
+                let label = (*title).to_owned();
                 let tab_stop = {
                     let selected = selected_read.clone();
                     Prop::Dynamic(Box::new(move || selected.get().unwrap_or(0) == index))
                 };
+                let is_selected = {
+                    let selected = selected_read.clone();
+                    create_memo(move || selected.get() == Some(index))
+                };
+                let content = {
+                    let option = option.clone();
+                    let label = label.clone();
+                    Box::new(move |handle: ButtonHandle| {
+                        option(ChoiceOptionHandle {
+                            index,
+                            label,
+                            selected: is_selected,
+                            hovered: handle.hovered,
+                            active: handle.active,
+                            focused: handle.focused,
+                        })
+                    })
+                };
                 let button = view! {
                     <unstyled::button
                         tab_stop={tab_stop}
-                        content={Box::new(move |_handle| label)}
+                        content={content}
                         on_click={move || {
                             with_document(|document| select(document, choice, Some(index)));
                         }}
@@ -142,9 +172,9 @@ fn sync_selected(document: &mut Document, choice: NodeId, selected: Option<usize
     let set_selected = state.set_selected.clone();
     set_selected.set(selected);
     let detail = match selected {
-        Some(index) => document
-            .text(document.component_state::<State>(choice).options[index].label)
-            .to_owned(),
+        Some(index) => document.component_state::<State>(choice).options[index]
+            .label
+            .clone(),
         None => String::new(),
     };
     document.set_component_detail(choice, detail);
@@ -180,18 +210,6 @@ pub fn focus_choice(choice: NodeId) {
             unstyled::focus_button(button);
         }
     });
-}
-
-pub fn choice_option_count(document: &Document, choice: NodeId) -> usize {
-    document.component_state::<State>(choice).options.len()
-}
-
-pub fn choice_option_button(document: &Document, choice: NodeId, index: usize) -> NodeId {
-    document.component_state::<State>(choice).options[index].button
-}
-
-pub fn choice_option_label_node(document: &Document, choice: NodeId, index: usize) -> NodeId {
-    document.component_state::<State>(choice).options[index].label
 }
 
 fn key(document: &mut Document, choice: NodeId, index: usize, press: KeyPress) -> bool {
@@ -248,16 +266,11 @@ fn typeahead(document: &mut Document, choice: NodeId, index: usize, text: &str) 
     let labels: Vec<_> = state
         .options
         .iter()
-        .map(|option| (option.button, option.label))
+        .map(|option| (option.button, option.label.clone()))
         .collect();
     let matched = (0..labels.len())
         .map(|offset| (start + offset) % labels.len())
-        .find(|&i| {
-            document
-                .text(labels[i].1)
-                .to_lowercase()
-                .starts_with(&prefix)
-        });
+        .find(|&i| labels[i].1.to_lowercase().starts_with(&prefix));
     if let Some(next) = matched {
         unstyled::focus_button(labels[next].0);
         select(document, choice, Some(next));

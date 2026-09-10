@@ -115,6 +115,9 @@ impl Document {
     }
 
     pub fn set_focusable_tab_stop(&mut self, focusable: NodeId, tab_stop: bool) {
+        if !self.contains(focusable) {
+            return;
+        }
         if self.arena.get_as::<FocusableNode>(focusable).tab_stop != tab_stop {
             self.arena.get_mut_as::<FocusableNode>(focusable).tab_stop = tab_stop;
         }

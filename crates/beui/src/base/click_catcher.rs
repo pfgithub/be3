@@ -191,6 +191,9 @@ impl Document {
     }
 
     pub(crate) fn set_click_catcher_key_active(&mut self, id: NodeId, key_active: bool) {
+        if !self.contains(id) {
+            return;
+        }
         let click_catcher = self.arena.get_mut_as::<ClickCatcherNode>(id);
         click_catcher.key_active = key_active;
         let active = click_catcher.is_active();

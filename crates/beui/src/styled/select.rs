@@ -5,7 +5,7 @@ use crate::color::Color32;
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
-    bind, with_document, Callback, FillBuilder, OutlineBuilder, PaddingBuilder, Prop, SizedBuilder,
+    with_document, Callback, FillBuilder, OutlineBuilder, PaddingBuilder, Prop, SizedBuilder,
     TextBuilder,
 };
 use crate::styled::theme::{
@@ -13,6 +13,7 @@ use crate::styled::theme::{
     TEXT_MUTED,
 };
 use crate::unstyled;
+use crate::unstyled::{SelectOptionHandle, SelectTriggerHandle, TextInputHandle};
 
 const TRIGGER_WIDTH: f32 = 220.0;
 const POPUP_WIDTH: f32 = 220.0;
@@ -29,135 +30,112 @@ pub fn select(
     selected: Prop<Option<usize>>,
     on_change: Callback<Option<usize>>,
 ) -> NodeId {
+    let trigger_options = options.clone();
     let inner = view! {
         <unstyled::select
-            options={options.clone()}
+            options={options}
             on_change={move |selected| on_change.call(selected)}
+            search_placeholder={"Search".to_string()}
+            search_font_size={FONT_BODY}
+            search_color={TEXT}
+            search_placeholder_color={TEXT_MUTED}
+            search_selection_color={ACCENT_SOFT}
+            search_caret_color={ACCENT}
+            search_padding_horizontal={PADDING_HORIZONTAL}
+            search_content={Box::new(search_view)}
+            trigger={Box::new(move |handle| trigger_view(&trigger_options, handle))}
+            option={Box::new(option_view)}
+            popup={Box::new(popup_view)}
         />
     };
-    let selected_signal =
-        with_document(|document| unstyled::select_selected_signal(document, inner));
-    with_document(|document| {
-        let trigger = unstyled::select_trigger(document, inner);
-
-        let label_text = {
-            let selected_signal = selected_signal.clone();
-            Prop::Dynamic(Box::new(move || {
-                trigger_label(&options, selected_signal.get())
-            }))
-        };
-
-        let trigger_hovered = unstyled::button_hovered(document, trigger);
-        let trigger_focused = unstyled::button_focused(document, trigger);
-        let trigger_border_color = {
-            let trigger_focused = trigger_focused.clone();
-            Prop::Dynamic(Box::new(move || {
-                border_color(trigger_focused.get(), trigger_hovered.get())
-            }))
-        };
-        let ring = view! {
-            <outline color={ACCENT} width={FOCUS_RING_WIDTH} radius={RADIUS} offset={FOCUS_RING_OFFSET} visible={trigger_focused}>
-                <sized width={TRIGGER_WIDTH} height={HEIGHT}>
-                    <outline color={trigger_border_color} width={BORDER_WIDTH} radius={RADIUS} offset={0.0} visible={true}>
-                        <fill color={SURFACE_RAISED} radius={RADIUS}>
-                            <padding horizontal={PADDING_HORIZONTAL} vertical={0.0}>
-                                <text
-                                    string={label_text}
-                                    font_size={FONT_BODY}
-                                    color={TEXT}
-                                    align={TextAlign::Start}
-                                    clip={true}
-                                />
-                            </padding>
-                        </fill>
-                    </outline>
-                </sized>
-            </outline>
-        };
-        unstyled::set_button_child(trigger, ring);
-
-        let search = unstyled::select_search(document, inner);
-        let field = unstyled::text_input_field(document, search);
-        let search_text = unstyled::text_input_text(document, search);
-        document.set_text_font_size(search_text, FONT_BODY);
-        document.set_text_color(search_text, TEXT);
-        unstyled::set_text_input_placeholder_color(search, TEXT_MUTED);
-        unstyled::set_text_input_selection_color(search, ACCENT_SOFT);
-        unstyled::set_text_input_caret_color(search, ACCENT);
-        unstyled::set_text_input_padding(search, PADDING_HORIZONTAL, 0.0);
-        unstyled::set_text_input_placeholder(search, "Search");
-
-        let search_hovered = unstyled::text_input_hovered(document, search);
-        let search_focused = unstyled::text_input_focused(document, search);
-        let search_border_color = Prop::Dynamic(Box::new(move || {
-            border_color(search_focused.get(), search_hovered.get())
-        }));
-        unstyled::set_text_input_child(
-            search,
-            view! {
-                <sized height={HEIGHT}>
-                    <outline color={search_border_color} width={BORDER_WIDTH} radius={RADIUS} offset={0.0} visible={true}>
-                        <fill color={SURFACE} radius={RADIUS}>{field}</fill>
-                    </outline>
-                </sized>
-            },
-        );
-
-        for index in 0..unstyled::select_option_count(document, inner) {
-            let button = unstyled::select_option_button(document, inner, index);
-            let label_node = unstyled::select_option_label_node(document, inner, index);
-            document.set_text_font_size(label_node, FONT_BODY);
-            document.set_text_color(label_node, TEXT);
-            document.set_text_align(label_node, TextAlign::Start, TextAlign::Center);
-
-            let hovered = unstyled::button_hovered(document, button);
-            let highlighted = unstyled::select_highlighted_signal(document, inner);
-            let row_fill_color = {
-                let hovered = hovered.clone();
-                let highlighted = highlighted.clone();
-                Prop::Dynamic(Box::new(move || {
-                    let is_highlighted = highlighted.get() == Some(index);
-                    option_background(is_highlighted, hovered.get())
-                }))
-            };
-            let row_fill = view! {
-                <fill color={row_fill_color} radius={RADIUS}>
-                    <padding horizontal={PADDING_HORIZONTAL} vertical={OPTION_PADDING_VERTICAL}>
-                        {label_node}
-                    </padding>
-                </fill>
-            };
-            unstyled::set_button_child(button, row_fill);
-
-            bind(move |document| {
-                if hovered.get() {
-                    unstyled::set_select_highlighted(document, inner, Some(index));
-                }
-            });
-        }
-
-        let popup = document
-            .overlay_content(unstyled::select_overlay(document, inner))
-            .expect("select popup always has content");
-        document.set_overlay_content(
-            unstyled::select_overlay(document, inner),
-            view! {
-                <sized width={POPUP_WIDTH}>
-                    <outline color={BORDER} width={BORDER_WIDTH} radius={RADIUS} offset={0.0} visible={true}>
-                        <fill color={SURFACE_RAISED} radius={RADIUS}>
-                            <padding horizontal={POPUP_PADDING} vertical={POPUP_PADDING}>{popup}</padding>
-                        </fill>
-                    </outline>
-                </sized>
-            },
-        );
-    });
 
     selected.apply(move |selected| {
         with_document(|document| unstyled::set_select_selected(document, inner, selected));
     });
 
     inner
+}
+
+fn trigger_view(options: &[String], handle: SelectTriggerHandle) -> NodeId {
+    let label_text = {
+        let options = options.to_owned();
+        let selected = handle.selected;
+        Prop::Dynamic(Box::new(move || trigger_label(&options, selected.get())))
+    };
+    let focused = handle.focused;
+    let border = {
+        let focused = focused.clone();
+        Prop::Dynamic(Box::new(move || {
+            border_color(focused.get(), handle.hovered.get())
+        }))
+    };
+    view! {
+        <outline color={ACCENT} width={FOCUS_RING_WIDTH} radius={RADIUS} offset={FOCUS_RING_OFFSET} visible={focused}>
+            <sized width={TRIGGER_WIDTH} height={HEIGHT}>
+                <outline color={border} width={BORDER_WIDTH} radius={RADIUS} offset={0.0} visible={true}>
+                    <fill color={SURFACE_RAISED} radius={RADIUS}>
+                        <padding horizontal={PADDING_HORIZONTAL} vertical={0.0}>
+                            <text
+                                string={label_text}
+                                font_size={FONT_BODY}
+                                color={TEXT}
+                                align={TextAlign::Start}
+                                clip={true}
+                            />
+                        </padding>
+                    </fill>
+                </outline>
+            </sized>
+        </outline>
+    }
+}
+
+fn search_view(handle: TextInputHandle) -> NodeId {
+    let focused = handle.focused.clone();
+    let border = Prop::Dynamic(Box::new(move || {
+        border_color(handle.focused.get(), handle.hovered.get())
+    }));
+    let field = handle.field;
+    let _ = focused;
+    view! {
+        <sized height={HEIGHT}>
+            <outline color={border} width={BORDER_WIDTH} radius={RADIUS} offset={0.0} visible={true}>
+                <fill color={SURFACE} radius={RADIUS}>{field}</fill>
+            </outline>
+        </sized>
+    }
+}
+
+fn option_view(option: SelectOptionHandle) -> NodeId {
+    let highlighted = option.highlighted;
+    let hovered = option.hovered;
+    let fill_color = Prop::Dynamic(Box::new(move || {
+        option_background(highlighted.get(), hovered.get())
+    }));
+    view! {
+        <fill color={fill_color} radius={RADIUS}>
+            <padding horizontal={PADDING_HORIZONTAL} vertical={OPTION_PADDING_VERTICAL}>
+                <text
+                    string={option.label}
+                    font_size={FONT_BODY}
+                    color={TEXT}
+                    align={TextAlign::Start}
+                />
+            </padding>
+        </fill>
+    }
+}
+
+fn popup_view(content: NodeId) -> NodeId {
+    view! {
+        <sized width={POPUP_WIDTH}>
+            <outline color={BORDER} width={BORDER_WIDTH} radius={RADIUS} offset={0.0} visible={true}>
+                <fill color={SURFACE_RAISED} radius={RADIUS}>
+                    <padding horizontal={POPUP_PADDING} vertical={POPUP_PADDING}>{content}</padding>
+                </fill>
+            </outline>
+        </sized>
+    }
 }
 
 pub fn select_selected(document: &Document, select: NodeId) -> Option<usize> {

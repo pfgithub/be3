@@ -10,9 +10,19 @@ use beui_macros::view;
 
 use crate::reactive::{
     bind, create_signal, with_document, with_reactive_scope, Callback, FocusableBuilder, Prop,
-    WriteSignal,
+    ReadSignal, WriteSignal,
 };
 use crate::unstyled;
+use crate::unstyled::button::ButtonHandle;
+use std::rc::Rc as StdRc;
+
+pub struct MenuRowHandle {
+    pub item: MenuItem,
+    pub hovered: ReadSignal<bool>,
+    pub focused: ReadSignal<bool>,
+}
+
+pub type MenuRow = StdRc<dyn Fn(MenuRowHandle) -> NodeId>;
 
 #[derive(Clone)]
 pub struct MenuItem {
@@ -53,14 +63,15 @@ struct State {
     on_select: Callback<Vec<usize>>,
 }
 
-pub(crate) fn menu_list(document: &mut Document, items: &[MenuItem]) -> NodeId {
-    build_menu_list(document, items, None)
+pub(crate) fn menu_list(document: &mut Document, items: &[MenuItem], row: &MenuRow) -> NodeId {
+    build_menu_list(document, items, None, row)
 }
 
 fn build_menu_list(
     document: &mut Document,
     items: &[MenuItem],
     parent: Option<(NodeId, NodeId)>,
+    row: &MenuRow,
 ) -> NodeId {
     let column = unstyled::column(2.0);
     let menu_cell: Rc<Cell<Option<NodeId>>> = Rc::new(Cell::new(None));
@@ -102,9 +113,21 @@ fn build_menu_list(
             let active = active.clone();
             Prop::Dynamic(Box::new(move || active.get() == Some(index)))
         };
+        let content = {
+            let row = row.clone();
+            let item = item.clone();
+            Box::new(move |handle: ButtonHandle| {
+                row(MenuRowHandle {
+                    item,
+                    hovered: handle.hovered,
+                    focused: handle.focused,
+                })
+            })
+        };
         let button = view! {
             <unstyled::button
                 tab_stop={tab_stop}
+                content={content}
                 on_click={move || {
                     if disabled {
                         return;
@@ -128,7 +151,7 @@ fn build_menu_list(
             let overlay =
                 document.create_overlay(OverlayAnchor::Node(button), Placement::RightStart);
             document.append_child(column, overlay, ItemSize::Intrinsic);
-            let content = build_menu_list(document, &item.children, Some((overlay, button)));
+            let content = build_menu_list(document, &item.children, Some((overlay, button)), row);
             document.set_overlay_content(overlay, content);
             menu_list_on_select(document, content).set(move |mut path: Vec<usize>| {
                 path.insert(0, index);

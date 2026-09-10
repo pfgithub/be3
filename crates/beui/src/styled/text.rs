@@ -13,19 +13,29 @@ use crate::styled::theme::{
 };
 
 #[component]
-pub fn code(content: String) -> NodeId {
+pub fn code(
+    content: Prop<String>,
+    align: Option<TextAlign>,
+    #[prop(default = TEXT)] color: Prop<Color32>,
+) -> NodeId {
     view! {
-        <text string={content} font_size={FONT_SMALL} color={TEXT} align={TextAlign::Start} monospace={true} />
+        <text
+            string={content}
+            font_size={FONT_SMALL}
+            color={color}
+            align={align.unwrap_or(TextAlign::Start)}
+            monospace={true}
+        />
     }
 }
 
 #[component]
-pub fn icon(glyph: String) -> NodeId {
-    view! { <icon_sized glyph={glyph} font_size={ICON_SIZE} color={TEXT} /> }
+pub fn icon(glyph: String, #[prop(default = TEXT)] color: Prop<Color32>) -> NodeId {
+    view! { <icon_sized glyph={glyph} font_size={ICON_SIZE} color={color} /> }
 }
 
 #[component]
-pub fn icon_sized(glyph: String, font_size: f32, color: Color32) -> NodeId {
+pub fn icon_sized(glyph: String, font_size: f32, color: Prop<Color32>) -> NodeId {
     view! {
         <text string={glyph} font_size={font_size} color={color} align={TextAlign::Center} icon={true} />
     }
@@ -34,7 +44,7 @@ pub fn icon_sized(glyph: String, font_size: f32, color: Color32) -> NodeId {
 fn reactive_line(
     content: Prop<String>,
     font_size: f32,
-    color: Color32,
+    color: Prop<Color32>,
     align: Option<TextAlign>,
 ) -> NodeId {
     let shadow = current_component();
@@ -53,32 +63,55 @@ fn reactive_line(
 }
 
 #[component]
-pub fn display(content: Prop<String>, align: Option<TextAlign>) -> NodeId {
-    reactive_line(content, FONT_DISPLAY, TEXT, align)
+pub fn display(
+    content: Prop<String>,
+    align: Option<TextAlign>,
+    #[prop(default = TEXT)] color: Prop<Color32>,
+) -> NodeId {
+    reactive_line(content, FONT_DISPLAY, color, align)
 }
 
 #[component]
-pub fn title(content: Prop<String>, align: Option<TextAlign>) -> NodeId {
-    reactive_line(content, FONT_TITLE, TEXT, align)
+pub fn title(
+    content: Prop<String>,
+    align: Option<TextAlign>,
+    #[prop(default = TEXT)] color: Prop<Color32>,
+) -> NodeId {
+    reactive_line(content, FONT_TITLE, color, align)
 }
 
 #[component]
-pub fn heading(content: Prop<String>, align: Option<TextAlign>) -> NodeId {
-    reactive_line(content, FONT_HEADING, TEXT, align)
+pub fn heading(
+    content: Prop<String>,
+    align: Option<TextAlign>,
+    #[prop(default = TEXT)] color: Prop<Color32>,
+) -> NodeId {
+    reactive_line(content, FONT_HEADING, color, align)
 }
 
 #[component]
-pub fn body(content: Prop<String>, align: Option<TextAlign>) -> NodeId {
-    reactive_line(content, FONT_BODY, TEXT, align)
+pub fn body(
+    content: Prop<String>,
+    align: Option<TextAlign>,
+    #[prop(default = TEXT)] color: Prop<Color32>,
+) -> NodeId {
+    reactive_line(content, FONT_BODY, color, align)
 }
 
 #[component]
-pub fn caption(content: Prop<String>, align: Option<TextAlign>) -> NodeId {
-    reactive_line(content, FONT_SMALL, TEXT_MUTED, align)
+pub fn caption(
+    content: Prop<String>,
+    align: Option<TextAlign>,
+    #[prop(default = TEXT_MUTED)] color: Prop<Color32>,
+) -> NodeId {
+    reactive_line(content, FONT_SMALL, color, align)
 }
 
 #[component]
-pub fn paragraph(content: Prop<String>) -> NodeId {
+pub fn paragraph(
+    content: Prop<String>,
+    #[prop(default = TEXT_MUTED)] color: Prop<Color32>,
+) -> NodeId {
     let shadow = current_component();
     let (text, set_text) = create_signal(String::new());
     content.apply(move |value| set_text.set(value));
@@ -90,6 +123,6 @@ pub fn paragraph(content: Prop<String>) -> NodeId {
         }
     });
     view! {
-        <text string={text} font_size={FONT_BODY} color={TEXT_MUTED} wrap={true} />
+        <text string={text} font_size={FONT_BODY} color={color} wrap={true} />
     }
 }

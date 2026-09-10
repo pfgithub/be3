@@ -18,7 +18,6 @@ pub struct ButtonHandle {
 pub type ButtonContent = Box<dyn FnOnce(ButtonHandle) -> NodeId>;
 
 struct State {
-    click_catcher: NodeId,
     focusable: NodeId,
     hovered: ReadSignal<bool>,
     active: ReadSignal<bool>,
@@ -101,9 +100,6 @@ pub fn button(
             document,
             button,
             State {
-                click_catcher: click_catcher_cell
-                    .get()
-                    .expect("button click catcher not yet built"),
                 focusable,
                 hovered,
                 active,
@@ -114,13 +110,6 @@ pub fn button(
     });
 
     focusable
-}
-
-pub fn set_button_child(button: NodeId, child: NodeId) {
-    with_document(|document| {
-        let click_catcher = document.component_state::<State>(button).click_catcher;
-        document.set_click_catcher_child(click_catcher, child);
-    });
 }
 
 pub fn button_hovered(document: &Document, button: NodeId) -> ReadSignal<bool> {

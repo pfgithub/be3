@@ -1,5 +1,5 @@
 use beui::reactive::{
-    bind, create_memo, create_signal, view, with_document, with_reactive_scope, CenteredRowBuilder,
+    create_memo, create_signal, view, with_document, with_reactive_scope, CenteredRowBuilder,
     ColumnBuilder, FillBuilder, OutlineBuilder, PaddingBuilder, Prop, ReadSignal, RowBuilder,
     ShowBuilder, SpacerBuilder, VisibilityBuilder, WriteSignal,
 };
@@ -109,58 +109,56 @@ fn scroll_row(index: usize, rows: Rows, compact: bool) -> NodeId {
         create_memo(move || selected.get() == Some(index))
     };
 
-    let button = view! { <unstyled::button /> };
-    let (hovered, focused) = with_document(|document| {
-        (
-            unstyled::button_hovered(document, button),
-            unstyled::button_focused(document, button),
-        )
-    });
-
-    let label = view! { <body content={format!("Row {index}")} /> };
-    let value =
-        view! { <caption content={format!("{} ms", 7 + index * 3 % 91)} align={TextAlign::End} /> };
-    let value_text = with_document(|document| document.shadow_root(value));
-    let value_selected = is_selected.clone();
-    bind(move |document| {
-        let color = if value_selected.get() {
-            ACCENT
-        } else {
-            TEXT_MUTED
-        };
-        document.set_text_color(value_text, color);
-    });
-
     let vertical = if compact {
         COMPACT_ROW_PADDING_VERTICAL
     } else {
         ROW_PADDING_VERTICAL
     };
-    let fill_color = {
+    let timings = rows.timings.clone();
+    let value_color = {
         let is_selected = is_selected.clone();
-        Prop::Dynamic(Box::new(move || match (is_selected.get(), hovered.get()) {
-            (true, _) => ACCENT_SOFT,
-            (false, true) => SURFACE_RAISED,
-            (false, false) => Color32::TRANSPARENT,
+        Prop::Dynamic(Box::new(move || {
+            if is_selected.get() {
+                ACCENT
+            } else {
+                TEXT_MUTED
+            }
         }))
     };
-    let ring = view! {
-        <outline color={ACCENT} width={2.0} radius={RADIUS} offset={0.0} visible={focused}>
-            <fill color={fill_color} radius={RADIUS}>
-                <padding horizontal={ROW_PADDING_HORIZONTAL} vertical={vertical}>
-                    <centered_row spacing={12.0}>
-                        @percent(100.0) {label}
-                        <visibility visible={rows.timings.clone()}>{value}</visibility>
-                    </centered_row>
-                </padding>
-            </fill>
-        </outline>
-    };
 
-    unstyled::set_button_child(button, ring);
-    unstyled::set_button_on_click(button, move || rows.select(index));
-
-    button
+    view! {
+        <unstyled::button
+            on_click={move || rows.select(index)}
+            content={Box::new(move |handle: unstyled::ButtonHandle| {
+                let hovered = handle.hovered;
+                let fill_color = Prop::Dynamic(Box::new(move || {
+                    match (is_selected.get(), hovered.get()) {
+                        (true, _) => ACCENT_SOFT,
+                        (false, true) => SURFACE_RAISED,
+                        (false, false) => Color32::TRANSPARENT,
+                    }
+                }));
+                view! {
+                    <outline color={ACCENT} width={2.0} radius={RADIUS} offset={0.0} visible={handle.focused}>
+                        <fill color={fill_color} radius={RADIUS}>
+                            <padding horizontal={ROW_PADDING_HORIZONTAL} vertical={vertical}>
+                                <centered_row spacing={12.0}>
+                                    @percent(100.0) <body content={format!("Row {index}")} />
+                                    <visibility visible={timings}>
+                                        <caption
+                                            content={format!("{} ms", 7 + index * 3 % 91)}
+                                            align={TextAlign::End}
+                                            color={value_color}
+                                        />
+                                    </visibility>
+                                </centered_row>
+                            </padding>
+                        </fill>
+                    </outline>
+                }
+            })}
+        />
+    }
 }
 
 fn install_rows(document: &mut Document, scroll: NodeId, rows: &Rows, compact: bool) {

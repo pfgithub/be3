@@ -1,6 +1,4 @@
-use std::cell::Cell;
 use std::ops::Range;
-use std::rc::Rc;
 use std::sync::Arc;
 
 use text_editor_core::{
@@ -17,8 +15,8 @@ use crate::node::NodeId;
 use beui_macros::{component, view};
 
 use crate::reactive::{
-    self, create_signal, current_component, set_component_state, with_document, Callback,
-    ClickCatcherBuilder, FocusableBuilder, ReadSignal,
+    self, create_effect, create_signal, current_component, set_component_state, with_document,
+    Callback, ClickCatcherBuilder, FocusableBuilder, Prop, ReadSignal,
 };
 
 const FONT_SIZE: f32 = 14.0;
@@ -35,9 +33,7 @@ pub struct TextInputHandle {
 pub type TextInputContent = Box<dyn FnOnce(TextInputHandle) -> NodeId>;
 
 struct State {
-    click_catcher: NodeId,
     focusable: NodeId,
-    field: NodeId,
     text: NodeId,
     core: Core,
     dragging: bool,
@@ -51,6 +47,14 @@ struct State {
 pub fn text_input(
     value: String,
     content: Option<TextInputContent>,
+    placeholder: Prop<String>,
+    #[prop(default = FONT_SIZE)] font_size: Prop<f32>,
+    #[prop(default = Color32::WHITE)] color: Prop<Color32>,
+    placeholder_color: Prop<Color32>,
+    selection_color: Prop<Color32>,
+    caret_color: Prop<Color32>,
+    padding_horizontal: Prop<f32>,
+    padding_vertical: Prop<f32>,
     on_change: Callback<String>,
     on_submit: Callback<String>,
     on_hover_change: Callback<bool>,
@@ -73,6 +77,33 @@ pub fn text_input(
         field
     });
 
+    placeholder.apply(move |value| {
+        with_document(|document| document.set_text_placeholder(text, value));
+    });
+    font_size.apply(move |value| {
+        with_document(|document| document.set_text_font_size(text, value));
+    });
+    color.apply(move |value| {
+        with_document(|document| document.set_text_color(text, value));
+    });
+    placeholder_color.apply(move |value| {
+        with_document(|document| document.set_text_placeholder_color(text, value));
+    });
+    selection_color.apply(move |value| {
+        with_document(|document| document.set_text_selection_color(text, value));
+    });
+    caret_color.apply(move |value| {
+        with_document(|document| document.set_text_caret_color(text, value));
+    });
+    let (horizontal, set_horizontal) = create_signal(0.0);
+    let (vertical, set_vertical) = create_signal(0.0);
+    padding_horizontal.apply(move |value| set_horizontal.set(value));
+    padding_vertical.apply(move |value| set_vertical.set(value));
+    create_effect(move || {
+        let (horizontal, vertical) = (horizontal.get(), vertical.get());
+        with_document(|document| document.set_padding(field, horizontal, vertical));
+    });
+
     let content_node = match content {
         Some(build) => build(TextInputHandle {
             field,
@@ -81,8 +112,6 @@ pub fn text_input(
         }),
         None => field,
     };
-
-    let click_catcher_cell: Rc<Cell<Option<NodeId>>> = Rc::new(Cell::new(None));
 
     let focusable = view! {
         <focusable
@@ -108,32 +137,23 @@ pub fn text_input(
                 with_document(|document| key(document, input, press))
             }}
         >
-            {{
-                let click_catcher = view! {
-                    <click_catcher
-                        cursor={CursorIcon::Text}
-                        on_press={move |press: PointerPress| {
-                            with_document(|document| point(document, input, press));
-                        }}
-                        on_drag={move |press: PointerPress| {
-                            with_document(|document| extend(document, input, press));
-                        }}
-                        on_hover_change={move |hovered: bool| {
-                            set_hovered.set(hovered);
-                            on_hover_change.call(hovered);
-                        }}
-                    >
-                        {content_node}
-                    </click_catcher>
-                };
-                click_catcher_cell.set(Some(click_catcher));
-                click_catcher
-            }}
+            <click_catcher
+                cursor={CursorIcon::Text}
+                on_press={move |press: PointerPress| {
+                    with_document(|document| point(document, input, press));
+                }}
+                on_drag={move |press: PointerPress| {
+                    with_document(|document| extend(document, input, press));
+                }}
+                on_hover_change={move |hovered: bool| {
+                    set_hovered.set(hovered);
+                    on_hover_change.call(hovered);
+                }}
+            >
+                {content_node}
+            </click_catcher>
         </focusable>
     };
-    let click_catcher = click_catcher_cell
-        .get()
-        .expect("text_input click catcher not yet built");
 
     with_document(|document| {
         reactive::set_component_detail(document, input, detail(&value));
@@ -141,9 +161,7 @@ pub fn text_input(
             document,
             input,
             State {
-                click_catcher,
                 focusable,
-                field,
                 text,
                 core: core(&value),
                 dragging: false,
@@ -156,17 +174,6 @@ pub fn text_input(
     });
 
     focusable
-}
-
-pub fn set_text_input_child(input: NodeId, child: NodeId) {
-    with_document(|document| {
-        let click_catcher = document.component_state::<State>(input).click_catcher;
-        document.set_click_catcher_child(click_catcher, child);
-    });
-}
-
-pub fn text_input_field(document: &Document, input: NodeId) -> NodeId {
-    document.component_state::<State>(input).field
 }
 
 pub fn text_input_text(document: &Document, input: NodeId) -> NodeId {
@@ -192,41 +199,6 @@ pub fn set_text_input_value(document: &mut Document, input: NodeId, value: impl 
         input,
         EditorCommand::ReplaceWholeFile(value.as_bytes()),
     );
-}
-
-pub fn set_text_input_placeholder(input: NodeId, placeholder: impl Into<String>) {
-    with_document(|document| {
-        let text = text_input_text(document, input);
-        document.set_text_placeholder(text, placeholder);
-    });
-}
-
-pub fn set_text_input_placeholder_color(input: NodeId, color: Color32) {
-    with_document(|document| {
-        let text = text_input_text(document, input);
-        document.set_text_placeholder_color(text, color);
-    });
-}
-
-pub fn set_text_input_selection_color(input: NodeId, color: Color32) {
-    with_document(|document| {
-        let text = text_input_text(document, input);
-        document.set_text_selection_color(text, color);
-    });
-}
-
-pub fn set_text_input_caret_color(input: NodeId, color: Color32) {
-    with_document(|document| {
-        let text = text_input_text(document, input);
-        document.set_text_caret_color(text, color);
-    });
-}
-
-pub fn set_text_input_padding(input: NodeId, horizontal: f32, vertical: f32) {
-    with_document(|document| {
-        let field = text_input_field(document, input);
-        document.set_padding(field, horizontal, vertical);
-    });
 }
 
 pub fn focus_text_input(input: NodeId) {

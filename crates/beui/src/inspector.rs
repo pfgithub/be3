@@ -90,10 +90,9 @@ pub(crate) struct Inspector {
     pub(crate) state: Rc<State>,
     scroll: NodeId,
     set_count: WriteSignal<String>,
-    toggle: NodeId,
-    toggle_label: NodeId,
-    selection: NodeId,
-    bounds: NodeId,
+    set_picking: WriteSignal<bool>,
+    set_selection: WriteSignal<String>,
+    set_bounds: WriteSignal<String>,
     summary: Summary,
     offset: f32,
     pub(crate) width: f32,
@@ -119,10 +118,9 @@ impl Inspector {
             state,
             scroll: panel.scroll,
             set_count: panel.set_count,
-            toggle: panel.toggle,
-            toggle_label: panel.toggle_label,
-            selection: panel.selection,
-            bounds: panel.bounds,
+            set_picking: panel.set_picking,
+            set_selection: panel.set_selection,
+            set_bounds: panel.set_bounds,
             summary,
             offset: 0.0,
             width: DEFAULT_WIDTH,
@@ -221,10 +219,9 @@ impl Inspector {
         self.document = panel.document;
         self.scroll = panel.scroll;
         self.set_count = panel.set_count;
-        self.toggle = panel.toggle;
-        self.toggle_label = panel.toggle_label;
-        self.selection = panel.selection;
-        self.bounds = panel.bounds;
+        self.set_picking = panel.set_picking;
+        self.set_selection = panel.set_selection;
+        self.set_bounds = panel.set_bounds;
         self.rows = panel.rows;
     }
 
@@ -240,16 +237,22 @@ impl Inspector {
         for (index, entry) in entries.into_iter().enumerate() {
             let previous = &mut self.entries[index];
             let row = &self.rows[index];
-            if entry.detail != previous.detail {
-                self.document.set_text(row.detail, entry.detail.clone());
-            }
-            if entry.size != previous.size {
-                self.document.set_text(row.size, entry.size.clone());
-            }
+            let detail = (entry.detail != previous.detail)
+                .then(|| (row.set_detail.clone(), entry.detail.clone()));
+            let size =
+                (entry.size != previous.size).then(|| (row.set_size.clone(), entry.size.clone()));
             if entry.selected != previous.selected {
                 self.document
                     .set_outline_visible(row.outline, entry.selected);
             }
+            with_reactive_scope(&mut self.document, move || {
+                if let Some((set_detail, detail)) = detail {
+                    set_detail.set(detail);
+                }
+                if let Some((set_size, size)) = size {
+                    set_size.set(size);
+                }
+            });
             *previous = entry;
         }
     }
@@ -261,17 +264,19 @@ impl Inspector {
             with_reactive_scope(&mut self.document, move || set_count.set(text));
         }
         if summary.picking != self.summary.picking {
-            self.document
-                .set_fill_color(self.toggle, panel::toggle_fill(summary.picking));
-            self.document
-                .set_text_color(self.toggle_label, panel::toggle_text(summary.picking));
+            let set_picking = self.set_picking.clone();
+            let picking = summary.picking;
+            with_reactive_scope(&mut self.document, move || set_picking.set(picking));
         }
         if summary.selection != self.summary.selection {
-            self.document
-                .set_text(self.selection, summary.selection.clone());
+            let set_selection = self.set_selection.clone();
+            let selection = summary.selection.clone();
+            with_reactive_scope(&mut self.document, move || set_selection.set(selection));
         }
         if summary.bounds != self.summary.bounds {
-            self.document.set_text(self.bounds, summary.bounds.clone());
+            let set_bounds = self.set_bounds.clone();
+            let bounds = summary.bounds.clone();
+            with_reactive_scope(&mut self.document, move || set_bounds.set(bounds));
         }
         self.summary = summary;
     }

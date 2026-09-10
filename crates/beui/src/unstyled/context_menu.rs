@@ -10,11 +10,12 @@ use crate::reactive::{
     current_component, set_component_state, with_document, Callback, ClickCatcherBuilder,
 };
 use crate::unstyled;
-use crate::unstyled::menu::{self, MenuItem};
+use crate::unstyled::menu::{self, MenuItem, MenuRow};
 
 struct State {
     overlay: NodeId,
     content: NodeId,
+    row: MenuRow,
     on_select: Callback<Vec<usize>>,
 }
 
@@ -22,13 +23,15 @@ struct State {
 pub fn context_menu(
     region: NodeId,
     items: Vec<MenuItem>,
+    row: Option<MenuRow>,
     on_select: Callback<Vec<usize>>,
 ) -> NodeId {
     let context_menu = current_component();
+    let row = row.unwrap_or_else(|| std::rc::Rc::new(|_| unstyled::column(0.0)));
     let (overlay, content) = with_document(|document| {
         let overlay =
             document.create_overlay(OverlayAnchor::Point(Pos2::ZERO), Placement::BelowStart);
-        let content = menu::menu_list(document, &items);
+        let content = menu::menu_list(document, &items, &row);
         document.set_overlay_content(overlay, content);
         (overlay, content)
     });
@@ -56,16 +59,17 @@ pub fn context_menu(
     };
 
     with_document(|document| {
+        wire_on_select(document, content, overlay, &on_select);
         set_component_state(
             document,
             context_menu,
             State {
                 overlay,
                 content,
+                row,
                 on_select,
             },
         );
-        wire_on_select(document, context_menu, overlay, content);
     });
 
     catcher
@@ -75,11 +79,16 @@ pub fn set_context_menu_items(context_menu: NodeId, items: Vec<MenuItem>) {
     with_document(|document| {
         let overlay = document.component_state::<State>(context_menu).overlay;
         let old_content = document.component_state::<State>(context_menu).content;
+        let row = document.component_state::<State>(context_menu).row.clone();
         document.remove_node(old_content);
-        let content = menu::menu_list(document, &items);
+        let content = menu::menu_list(document, &items, &row);
         document.set_overlay_content(overlay, content);
         document.component_state_mut::<State>(context_menu).content = content;
-        wire_on_select(document, context_menu, overlay, content);
+        let on_select = document
+            .component_state::<State>(context_menu)
+            .on_select
+            .clone();
+        wire_on_select(document, content, overlay, &on_select);
     });
 }
 
@@ -91,11 +100,13 @@ pub fn context_menu_overlay(document: &Document, context_menu: NodeId) -> NodeId
     document.component_state::<State>(context_menu).overlay
 }
 
-fn wire_on_select(document: &mut Document, context_menu: NodeId, overlay: NodeId, content: NodeId) {
-    let on_select = document
-        .component_state::<State>(context_menu)
-        .on_select
-        .clone();
+fn wire_on_select(
+    document: &mut Document,
+    content: NodeId,
+    overlay: NodeId,
+    on_select: &Callback<Vec<usize>>,
+) {
+    let on_select = on_select.clone();
     menu::menu_list_on_select(document, content).set(move |path: Vec<usize>| {
         on_select.call(path);
         with_document(|document| document.close_overlay(overlay));
