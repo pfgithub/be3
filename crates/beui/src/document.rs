@@ -31,7 +31,7 @@ pub struct Document {
     pub(crate) copied_text: Option<String>,
     next_paint: Option<Instant>,
     reactive_scope: ::reactive::Scope,
-    node_scopes: HashMap<NodeId, ::reactive::Scope>,
+    node_scopes: HashMap<NodeId, Vec<::reactive::Scope>>,
 }
 
 impl Document {
@@ -74,7 +74,7 @@ impl Document {
     }
 
     pub(crate) fn register_node_scope(&mut self, node: NodeId, scope: ::reactive::Scope) {
-        self.node_scopes.insert(node, scope);
+        self.node_scopes.entry(node).or_default().push(scope);
     }
 
     pub fn children(&self, id: NodeId) -> Vec<NodeId> {
@@ -106,12 +106,18 @@ impl Document {
     }
 
     pub fn remove_node(&mut self, id: NodeId) {
+        let mut scopes = Vec::new();
+        self.detach_subtree(id, &mut scopes);
+        drop(scopes);
+    }
+
+    fn detach_subtree(&mut self, id: NodeId, scopes: &mut Vec<::reactive::Scope>) {
         let children = self.arena.get(id).children();
         for child in children {
-            self.remove_node(child);
+            self.detach_subtree(child, scopes);
         }
         self.arena.remove(id);
-        self.node_scopes.remove(&id);
+        scopes.extend(self.node_scopes.remove(&id).unwrap_or_default());
         if self.root == Some(id) {
             self.root = None;
         }

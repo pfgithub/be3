@@ -8,7 +8,10 @@ use crate::painter::Painter;
 
 use crate::document::Document;
 use crate::node::{Element, InteractInput, NodeId};
-use crate::reactive::{create_effect, create_signal, with_document, Callback, Children, Prop};
+use crate::reactive::{
+    create_effect, create_signal, owner_scope, with_document, Callback, Children, Prop,
+    ScopeContext,
+};
 use beui_macros::component;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -33,6 +36,7 @@ pub(crate) struct VirtualItems {
     pub(crate) estimated: f32,
     pub(crate) build: ItemBuilder,
     pub(crate) first: usize,
+    pub(crate) owner: Option<ScopeContext>,
 }
 
 enum ScrollAnchor {
@@ -140,6 +144,7 @@ impl ScrollNode {
         let Some(mut items) = self.virtual_items.take() else {
             return;
         };
+        let owner = items.owner.clone();
         let width = rect.width();
         let first = if items.estimated > 0.0 {
             ((self.offset / items.estimated) as usize).min(items.count.saturating_sub(1))
@@ -159,7 +164,7 @@ impl ScrollNode {
                 if bottom >= rect.height() {
                     break;
                 }
-                let item = build_item(doc, &mut items.build, index);
+                let item = build_item(doc, owner.clone(), &mut items.build, index);
                 bottom += height(doc, painter, item, width);
                 head.push(item);
             }
@@ -182,7 +187,12 @@ impl ScrollNode {
         }
 
         while bottom < rect.height() && first + self.items.len() < items.count {
-            let item = build_item(doc, &mut items.build, first + self.items.len());
+            let item = build_item(
+                doc,
+                owner.clone(),
+                &mut items.build,
+                first + self.items.len(),
+            );
             bottom += height(doc, painter, item, width);
             self.items.push(item);
         }
@@ -191,8 +201,13 @@ impl ScrollNode {
     }
 }
 
-fn build_item(doc: &mut Document, build: &mut ItemBuilder, index: usize) -> NodeId {
-    let scope = ::reactive::Scope::new();
+fn build_item(
+    doc: &mut Document,
+    owner: Option<ScopeContext>,
+    build: &mut ItemBuilder,
+    index: usize,
+) -> NodeId {
+    let scope = crate::reactive::node_scope(doc, owner);
     let item = scope.context().run(|| build(index));
     doc.register_node_scope(item, scope);
     item
@@ -335,11 +350,13 @@ impl Document {
         for item in items {
             self.remove_node(item);
         }
+        let owner = owner_scope();
         self.arena.get_mut_as::<ScrollNode>(scroll).virtual_items = Some(VirtualItems {
             count,
             estimated: estimated_height.max(0.0),
             build: Box::new(build),
             first: 0,
+            owner,
         });
     }
 

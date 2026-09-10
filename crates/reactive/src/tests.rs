@@ -2,9 +2,12 @@ use std::cell::{Cell, RefCell};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::rc::Rc;
 
-use crate::{batch, create_effect, create_memo, create_signal, on_cleanup, untrack, Scope};
+use crate::{
+    batch, create_effect, create_memo, create_signal, on_cleanup, owner_scope, untrack, Scope,
+};
 
 mod a_panicking_effect_can_run_again;
+mod a_scope_opened_inside_an_effect_belongs_to_the_effects_owner;
 mod all_cleanups_run_even_when_one_panics;
 mod cleanup_precedes_next_execution;
 mod cleanup_reads_do_not_become_dependencies;

@@ -17,6 +17,7 @@ type Callback = Box<dyn FnMut() -> bool>;
 
 pub(crate) struct Computation {
     parent: Weak<Computation>,
+    pub(crate) owner: Weak<Owner>,
     state: Cell<State>,
     refreshing: Cell<bool>,
     callback: RefCell<Option<Callback>>,
@@ -31,6 +32,7 @@ impl Computation {
         let owner = current_owner();
         let computation = Rc::new(Self {
             parent: owner.computation.clone(),
+            owner: Rc::downgrade(&owner),
             state: Cell::new(State::Dirty),
             refreshing: Cell::new(false),
             callback: RefCell::new(Some(callback)),

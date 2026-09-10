@@ -12,8 +12,8 @@ use crate::unstyled;
 
 pub use beui_macros::{component, view};
 pub use reactive::{
-    batch, create_effect, create_memo, create_signal, on_cleanup, untrack, Effect, Memo,
-    ReadSignal, Scope, WriteSignal,
+    batch, create_effect, create_memo, create_signal, on_cleanup, owner_scope, untrack, Effect,
+    Memo, ReadSignal, Scope, ScopeContext, WriteSignal,
 };
 
 thread_local! {
@@ -110,8 +110,15 @@ pub fn bind(mut effect: impl FnMut(&mut Document) + 'static) {
     create_effect(move || with_document(&mut effect));
 }
 
+pub(crate) fn node_scope(document: &Document, owner: Option<ScopeContext>) -> Scope {
+    owner
+        .or_else(owner_scope)
+        .and_then(|owner| owner.child())
+        .unwrap_or_else(|| document.reactive_scope().context().run(Scope::new))
+}
+
 pub fn in_new_scope(f: impl FnOnce() -> NodeId) -> NodeId {
-    let scope = with_document(|document| document.reactive_scope().context().run(Scope::new));
+    let scope = with_document(|document| node_scope(document, None));
     let node = scope.context().run(f);
     with_document(|document| document.register_node_scope(node, scope));
     node
@@ -119,10 +126,14 @@ pub fn in_new_scope(f: impl FnOnce() -> NodeId) -> NodeId {
 
 pub fn component(name: &'static str, f: impl FnOnce() -> NodeId) -> NodeId {
     let shadow = with_document(Document::reserve_shadow);
+    let scope = Scope::new();
     let previous = CURRENT_COMPONENT.with(|cell| cell.replace(Some(shadow)));
-    let root = f();
+    let root = scope.run(f);
     CURRENT_COMPONENT.with(|cell| cell.set(previous));
-    with_document(|document| document.finish_shadow(shadow, name, root, Vec::new()));
+    with_document(|document| {
+        document.finish_shadow(shadow, name, root, Vec::new());
+        document.register_node_scope(shadow, scope);
+    });
     if let Some(detail) = PENDING_DETAIL.with(|cell| cell.borrow_mut().remove(&shadow)) {
         with_document(|document| document.set_component_detail(shadow, detail));
     }

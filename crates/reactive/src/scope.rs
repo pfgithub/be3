@@ -96,6 +96,27 @@ impl ScopeContext {
         let _context = Context::enter(Weak::new(), self.0.clone());
         batch(f)
     }
+
+    pub fn is_alive(&self) -> bool {
+        self.0.upgrade().is_some_and(|owner| !owner.disposed.get())
+    }
+
+    pub fn child(&self) -> Option<Scope> {
+        self.is_alive().then(|| self.run(Scope::new))
+    }
+}
+
+pub fn owner_scope() -> Option<ScopeContext> {
+    RUNTIME.with(|runtime| {
+        let observer = runtime.observer.borrow().upgrade();
+        match observer {
+            Some(computation) => Some(ScopeContext(computation.owner.clone())),
+            None => {
+                let owner = runtime.owner.borrow().clone();
+                owner.upgrade().map(|_| ScopeContext(owner))
+            }
+        }
+    })
 }
 
 impl Default for Scope {

@@ -78,6 +78,16 @@ also disposes children, even when a child handle remains alive. A scope cannot
 be entered after disposal; a memo cannot be read after its owning scope is
 disposed. Disposal is idempotent.
 
+Inside a computation, the current scope is that computation's execution scope,
+which is thrown away every time it reruns. To open a scope that survives those
+reruns but still belongs to the surrounding tree, use `owner_scope()`: it
+returns the `ScopeContext` of the scope that created the running computation
+(or the current scope when no computation is running). `ScopeContext::child()`
+opens a child scope there, returning `None` if that scope is already gone, and
+`ScopeContext::is_alive()` answers the same question on its own. This is how a
+list keeps per-item scopes across updates of the list itself while still
+tearing them down with whatever owns the list.
+
 `on_cleanup(|| ...)` registers a callback on the current scope. Every computation
 has a fresh execution scope: before it reruns, its old nested computations and
 cleanups are disposed. Cleanups run in reverse registration order without
@@ -125,9 +135,22 @@ other node properties (fill color, visibility, and so on) from an effect.
 and `.../a_signal_write_from_a_click_handler_updates_its_bound_text_in_the_same_frame.rs`
 for the behavior they rely on.
 
-Each `Document` owns a root `reactive::Scope` (`Document::reactive_scope`);
-bindings created through `beui::reactive` are owned by it and live for as long
-as the document does. None of these functions hold `&mut Document` across a
+Each `Document` owns a root `reactive::Scope` (`Document::reactive_scope`), and
+every `#[component]` owns a scope of its own, registered against the shadow node
+that represents it. A component's scope is a child of the scope that built it,
+so component scopes form the same tree the nodes do. `Document::remove_node`
+disposes the scopes registered against the subtree it removes: the effects that
+were created while building those nodes stop, and the `on_cleanup` callbacks
+they registered run. Without that, an effect left alive by a removed component
+panics with "node was removed" the next time one of its inputs changes.
+
+Effects created outside any component body — directly in `build`'s closure, for
+instance — belong to the document's root scope and live as long as the document.
+`show`, `for_each`, and `virtual_list` open a scope per child they build,
+registered against that child's node, so dropping a row or scrolling one out of
+view disposes exactly that row's effects.
+
+None of these functions hold `&mut Document` across a
 call boundary: each reads it back out of a thread-local (`with_document`)
 installed by whichever ambient context is active, and releases it before
 returning. `build` installs the document (and enters its scope, so `text`'s
