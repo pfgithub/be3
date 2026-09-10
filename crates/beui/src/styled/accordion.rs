@@ -14,6 +14,7 @@ use crate::styled::theme::{
     ACCENT, FONT_HEADING, FONT_SMALL, RADIUS, SURFACE_RAISED, TEXT, TEXT_MUTED,
 };
 use crate::unstyled;
+use crate::unstyled::DisclosureHandle;
 
 const SPACING: f32 = 10.0;
 const MARKER_WIDTH: f32 = 12.0;
@@ -33,18 +34,6 @@ pub fn accordion(
     let shadow = current_component();
     let mut on_toggle = on_toggle;
 
-    let disclosure = unstyled::disclosure(SPACING, false);
-    let (hovered, focused, disclosure_open) = with_document(|document| {
-        (
-            unstyled::disclosure_hovered(document, disclosure),
-            unstyled::disclosure_focused(document, disclosure),
-            unstyled::disclosure_open_signal(document, disclosure),
-        )
-    });
-
-    let header_color = Prop::Dynamic(Box::new(move || header_fill(hovered.get())));
-    let marker_glyph = Prop::Dynamic(Box::new(move || glyph(disclosure_open.get()).to_owned()));
-
     let (title_text, set_title_text) = create_signal(String::new());
     title.apply(move |value| set_title_text.set(value));
     create_effect({
@@ -55,37 +44,43 @@ pub fn accordion(
         }
     });
 
-    let ring = view! {
-        <outline color={ACCENT} width={2.0} radius={RADIUS} offset={2.0} visible={focused}>
-            <fill color={header_color} radius={RADIUS}>
-                <padding horizontal={PADDING_HORIZONTAL} vertical={PADDING_VERTICAL}>
-                    <centered_row spacing={SPACING}>
-                        <sized width={MARKER_WIDTH}>
-                            <text
-                                string={marker_glyph}
-                                font_size={FONT_SMALL}
-                                color={TEXT_MUTED}
-                                monospace={true}
-                                align={TextAlign::Center}
-                            />
-                        </sized>
-                        @percent(100.0) <text string={title_text} font_size={FONT_HEADING} color={TEXT} align={TextAlign::Start} />
-                    </centered_row>
-                </padding>
-            </fill>
-        </outline>
+    let disclosure = view! {
+        <unstyled::disclosure
+            spacing={SPACING}
+            header={Box::new(move |handle: DisclosureHandle| {
+                let header_color = Prop::Dynamic(Box::new(move || header_fill(handle.hovered.get())));
+                let marker_glyph = Prop::Dynamic(Box::new(move || glyph(handle.open.get()).to_owned()));
+                view! {
+                    <outline color={ACCENT} width={2.0} radius={RADIUS} offset={2.0} visible={handle.focused}>
+                        <fill color={header_color} radius={RADIUS}>
+                            <padding horizontal={PADDING_HORIZONTAL} vertical={PADDING_VERTICAL}>
+                                <centered_row spacing={SPACING}>
+                                    <sized width={MARKER_WIDTH}>
+                                        <text
+                                            string={marker_glyph}
+                                            font_size={FONT_SMALL}
+                                            color={TEXT_MUTED}
+                                            monospace={true}
+                                            align={TextAlign::Center}
+                                        />
+                                    </sized>
+                                    @percent(100.0) <text string={title_text} font_size={FONT_HEADING} color={TEXT} align={TextAlign::Start} />
+                                </centered_row>
+                            </padding>
+                        </fill>
+                    </outline>
+                }
+            })}
+            open={open}
+        >
+            {child}
+        </unstyled::disclosure>
     };
-    unstyled::set_disclosure_header(disclosure, ring);
-    unstyled::set_disclosure_content(disclosure, child);
 
     unstyled::set_disclosure_on_toggle(disclosure, move |document, open| {
         if let Some(handler) = &mut on_toggle {
             handler(document, open);
         }
-    });
-
-    open.apply(move |open| {
-        with_document(|document| unstyled::set_disclosure_open(document, disclosure, open));
     });
 
     disclosure
