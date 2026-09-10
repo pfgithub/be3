@@ -33,7 +33,14 @@ pub fn checkbox(
     let mut on_change = on_change;
 
     let toggle = view! {
-        <toggle checked={false} content={Box::new(move |handle: unstyled::ToggleHandle| {
+        <toggle
+            checked={checked}
+            on_change={Box::new(move |document: &mut Document, checked| {
+                if let Some(handler) = &mut on_change {
+                    handler(document, checked);
+                }
+            })}
+            content={Box::new(move |handle: unstyled::ToggleHandle| {
             let fill_color = {
                 let checked = handle.checked.clone();
                 let hovered = handle.hovered.clone();
@@ -76,18 +83,6 @@ pub fn checkbox(
             }
         })} />
     };
-
-    with_document(|document| {
-        unstyled::set_toggle_on_change(document, toggle, move |document, checked| {
-            if let Some(handler) = &mut on_change {
-                handler(document, checked);
-            }
-        });
-    });
-
-    checked.apply(move |checked| {
-        with_document(|document| unstyled::set_toggle_checked(document, toggle, checked));
-    });
 
     toggle
 }

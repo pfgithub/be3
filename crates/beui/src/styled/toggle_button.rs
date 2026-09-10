@@ -33,7 +33,14 @@ pub fn toggle_button(
     });
 
     let toggle = view! {
-        <toggle checked={false} content={Box::new(move |handle: unstyled::ToggleHandle| {
+        <toggle
+            checked={pressed}
+            on_change={Box::new(move |document: &mut Document, pressed| {
+                if let Some(handler) = &mut on_change {
+                    handler(document, pressed);
+                }
+            })}
+            content={Box::new(move |handle: unstyled::ToggleHandle| {
             let fill_color = {
                 let checked = handle.checked.clone();
                 let hovered = handle.hovered.clone();
@@ -60,18 +67,6 @@ pub fn toggle_button(
             }
         })} />
     };
-
-    with_document(|document| {
-        unstyled::set_toggle_on_change(document, toggle, move |document, pressed| {
-            if let Some(handler) = &mut on_change {
-                handler(document, pressed);
-            }
-        });
-    });
-
-    pressed.apply(move |pressed| {
-        with_document(|document| unstyled::set_toggle_checked(document, toggle, pressed));
-    });
 
     toggle
 }

@@ -56,6 +56,6 @@ pub use text_input::{
     TextInputBuilder, TextInputHandle,
 };
 pub use toggle::{
-    focus_toggle, set_toggle_checked, set_toggle_on_change, toggle_active, toggle_checked,
-    toggle_focused, toggle_hovered, ToggleBuilder, ToggleHandle,
+    focus_toggle, toggle_active, toggle_checked, toggle_focused, toggle_hovered, ToggleBuilder,
+    ToggleHandle,
 };

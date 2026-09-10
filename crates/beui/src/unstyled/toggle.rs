@@ -8,8 +8,8 @@ use crate::input::CursorIcon;
 use crate::document::Document;
 use crate::node::{Handler, NodeId};
 use crate::reactive::{
-    self, create_signal, current_component, set_component_state, with_document,
-    ClickCatcherBuilder, FocusableBuilder, ReadSignal, WriteSignal,
+    self, create_effect, create_signal, current_component, set_component_state, with_document,
+    ClickCatcherBuilder, FocusableBuilder, Prop, ReadSignal, WriteSignal,
 };
 
 pub struct ToggleHandle {
@@ -35,12 +35,30 @@ struct State {
 }
 
 #[component]
-pub fn toggle(checked: bool, content: Option<ToggleContent>) -> NodeId {
+pub fn toggle(
+    checked: Prop<bool>,
+    content: Option<ToggleContent>,
+    on_change: Option<Handler<bool>>,
+) -> NodeId {
     let toggle = current_component();
-    let (checked_read, checked_write) = create_signal(checked);
+    let (checked_read, checked_write) = create_signal(false);
+    checked.apply({
+        let checked_write = checked_write.clone();
+        move |value| checked_write.set(value)
+    });
     let (hovered_read, hovered_write) = create_signal(false);
     let (active_read, active_write) = create_signal(false);
     let (focused_read, focused_write) = create_signal(false);
+
+    create_effect({
+        let checked_read = checked_read.clone();
+        move || {
+            let checked = checked_read.get();
+            with_document(|document| {
+                reactive::set_component_detail(document, toggle, detail(checked))
+            });
+        }
+    });
 
     let content_node = content.map(|build| {
         build(ToggleHandle {
@@ -82,7 +100,13 @@ pub fn toggle(checked: bool, content: Option<ToggleContent>) -> NodeId {
                         cursor={CursorIcon::PointingHand}
                         on_click={Box::new(move |document: &mut Document| {
                             let checked = !document.component_state::<State>(toggle).checked_read.get();
-                            set_toggle_checked(document, toggle, checked);
+                            document
+                                .component_state::<State>(toggle)
+                                .checked_write
+                                .set(checked);
+                            document.call_component_handler(toggle, checked, |state: &mut State| {
+                                &mut state.on_change
+                            });
                         })}
                         on_hover_change={Box::new(move |document: &mut Document, hovered: bool| {
                             document
@@ -106,7 +130,6 @@ pub fn toggle(checked: bool, content: Option<ToggleContent>) -> NodeId {
     };
 
     with_document(|document| {
-        reactive::set_component_detail(document, toggle, detail(checked));
         set_component_state(
             document,
             toggle,
@@ -120,7 +143,7 @@ pub fn toggle(checked: bool, content: Option<ToggleContent>) -> NodeId {
                 active_write,
                 focused_read,
                 focused_write,
-                on_change: None,
+                on_change,
             },
         );
     });
@@ -154,24 +177,6 @@ pub fn toggle_focused(document: &Document, toggle: NodeId) -> ReadSignal<bool> {
         .component_state::<State>(toggle)
         .focused_read
         .clone()
-}
-
-pub fn set_toggle_checked(document: &mut Document, toggle: NodeId, checked: bool) {
-    let state = document.component_state::<State>(toggle);
-    if state.checked_read.get() == checked {
-        return;
-    }
-    state.checked_write.set(checked);
-    document.set_component_detail(toggle, detail(checked));
-    document.call_component_handler(toggle, checked, |state: &mut State| &mut state.on_change);
-}
-
-pub fn set_toggle_on_change(
-    document: &mut Document,
-    toggle: NodeId,
-    handler: impl FnMut(&mut Document, bool) + 'static,
-) {
-    document.component_state_mut::<State>(toggle).on_change = Some(Box::new(handler));
 }
 
 fn detail(checked: bool) -> &'static str {

@@ -27,7 +27,14 @@ pub fn switch(on: Prop<bool>, on_change: Option<Handler<bool>>) -> NodeId {
     let mut on_change = on_change;
 
     let toggle = view! {
-        <toggle checked={false} content={Box::new(move |handle: unstyled::ToggleHandle| {
+        <toggle
+            checked={on}
+            on_change={Box::new(move |document: &mut Document, on| {
+                if let Some(handler) = &mut on_change {
+                    handler(document, on);
+                }
+            })}
+            content={Box::new(move |handle: unstyled::ToggleHandle| {
             let before_percent = {
                 let checked = handle.checked.clone();
                 Prop::Dynamic(Box::new(move || before_size(checked.get())))
@@ -69,18 +76,6 @@ pub fn switch(on: Prop<bool>, on_change: Option<Handler<bool>>) -> NodeId {
             }
         })} />
     };
-
-    with_document(|document| {
-        unstyled::set_toggle_on_change(document, toggle, move |document, on| {
-            if let Some(handler) = &mut on_change {
-                handler(document, on);
-            }
-        });
-    });
-
-    on.apply(move |on| {
-        with_document(|document| unstyled::set_toggle_checked(document, toggle, on));
-    });
 
     toggle
 }
