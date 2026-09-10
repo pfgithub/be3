@@ -8,8 +8,8 @@ use crate::input::{CursorIcon, Key, KeyPress, PointerPress};
 use crate::document::Document;
 use crate::node::{Handler, NodeId};
 use crate::reactive::{
-    self, create_signal, current_component, set_component_state, with_document,
-    ClickCatcherBuilder, FocusableBuilder, ReadSignal, WriteSignal,
+    self, create_effect, create_signal, current_component, set_component_state, with_document,
+    ClickCatcherBuilder, FocusableBuilder, Prop, ReadSignal, WriteSignal,
 };
 
 const STEP: f32 = 0.05;
@@ -36,11 +36,29 @@ struct State {
 }
 
 #[component]
-pub fn slider(value: f32, content: Option<SliderContent>) -> NodeId {
+pub fn slider(
+    value: Prop<f32>,
+    content: Option<SliderContent>,
+    on_change: Option<Handler<f32>>,
+) -> NodeId {
     let slider = current_component();
-    let (value_read, value_write) = create_signal(value.clamp(0.0, 1.0));
+    let (value_read, value_write) = create_signal(0.0);
+    value.apply({
+        let value_write = value_write.clone();
+        move |value| value_write.set(value.clamp(0.0, 1.0))
+    });
     let (dragging_read, dragging_write) = create_signal(false);
     let (focused_read, focused_write) = create_signal(false);
+
+    create_effect({
+        let value_read = value_read.clone();
+        move || {
+            let value = value_read.get();
+            with_document(|document| {
+                reactive::set_component_detail(document, slider, detail(value))
+            });
+        }
+    });
 
     let content_node = content.map(|build| {
         build(SliderHandle {
@@ -111,7 +129,6 @@ pub fn slider(value: f32, content: Option<SliderContent>) -> NodeId {
     };
 
     with_document(|document| {
-        reactive::set_component_detail(document, slider, detail(value_read.get()));
         set_component_state(
             document,
             slider,
@@ -123,7 +140,7 @@ pub fn slider(value: f32, content: Option<SliderContent>) -> NodeId {
                 dragging_write,
                 focused_read,
                 focused_write,
-                on_change: None,
+                on_change,
                 on_drag_change: None,
                 on_focus_change: None,
             },
@@ -158,18 +175,7 @@ fn set_value(document: &mut Document, slider: NodeId, value: f32) {
         return;
     }
     state.value_write.set(value);
-    document.set_component_detail(slider, detail(value));
     document.call_component_handler(slider, value, |state: &mut State| &mut state.on_change);
-}
-
-pub fn set_slider_value(document: &mut Document, slider: NodeId, value: f32) {
-    set_value(document, slider, value);
-}
-
-pub fn set_slider_on_change(slider: NodeId, handler: impl FnMut(&mut Document, f32) + 'static) {
-    with_document(|document| {
-        document.component_state_mut::<State>(slider).on_change = Some(Box::new(handler));
-    });
 }
 
 pub fn set_slider_on_drag_change(

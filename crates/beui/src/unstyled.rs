@@ -44,8 +44,8 @@ pub use select::{
     set_select_open, set_select_options, set_select_selected, SelectBuilder,
 };
 pub use slider::{
-    focus_slider, set_slider_on_change, set_slider_on_drag_change, set_slider_on_focus_change,
-    set_slider_value, slider_dragging, slider_focused, slider_value, SliderBuilder, SliderHandle,
+    focus_slider, set_slider_on_drag_change, set_slider_on_focus_change, slider_dragging,
+    slider_focused, slider_value, SliderBuilder, SliderHandle,
 };
 pub use text_input::{
     focus_text_input, set_text_input_caret_color, set_text_input_child, set_text_input_on_change,

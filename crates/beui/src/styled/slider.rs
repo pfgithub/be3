@@ -25,7 +25,14 @@ pub fn slider(value: Prop<f32>, on_change: Option<Handler<f32>>) -> NodeId {
     let mut on_change = on_change;
 
     let slider = view! {
-        <unstyled::slider value={0.0} content={Box::new(move |handle: unstyled::SliderHandle| {
+        <unstyled::slider
+            value={value}
+            on_change={Box::new(move |document: &mut Document, value| {
+                if let Some(handler) = &mut on_change {
+                    handler(document, value);
+                }
+            })}
+            content={Box::new(move |handle: unstyled::SliderHandle| {
             let filled_percent = {
                 let slider_value = handle.value.clone();
                 Prop::Dynamic(Box::new(move || filled_size(slider_value.get())))
@@ -57,16 +64,6 @@ pub fn slider(value: Prop<f32>, on_change: Option<Handler<f32>>) -> NodeId {
             }
         })} />
     };
-
-    unstyled::set_slider_on_change(slider, move |document, value| {
-        if let Some(handler) = &mut on_change {
-            handler(document, value);
-        }
-    });
-
-    value.apply(move |value| {
-        with_document(|document| unstyled::set_slider_value(document, slider, value));
-    });
 
     slider
 }
