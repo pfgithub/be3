@@ -53,7 +53,7 @@ pub fn button(
     on_click: Option<ClickHandler>,
 ) -> NodeId {
     let button = view! {
-        <unstyled::button content={Box::new(move |handle: unstyled::ButtonHandle| {
+        <unstyled::button disabled={disabled} content={Box::new(move |handle: unstyled::ButtonHandle| {
             let fill_color = Prop::Dynamic(Box::new(move || {
                 variant.fill(handle.hovered.get(), handle.active.get())
             }));
@@ -74,8 +74,6 @@ pub fn button(
     if let Some(on_click) = on_click {
         unstyled::set_button_on_click(button, on_click);
     }
-
-    disabled.apply(move |disabled| unstyled::set_button_disabled(button, disabled));
 
     button
 }

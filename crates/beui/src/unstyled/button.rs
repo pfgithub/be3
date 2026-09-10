@@ -9,7 +9,7 @@ use crate::document::Document;
 use crate::node::{ClickHandler, NodeId};
 use crate::reactive::{
     self, create_signal, current_component, set_component_state, with_document,
-    ClickCatcherBuilder, FocusableBuilder, ReadSignal, WriteSignal,
+    ClickCatcherBuilder, FocusableBuilder, Prop, ReadSignal, WriteSignal,
 };
 
 pub struct ButtonHandle {
@@ -29,16 +29,16 @@ struct State {
     active_write: WriteSignal<bool>,
     focused_read: ReadSignal<bool>,
     focused_write: WriteSignal<bool>,
-    disabled: bool,
     on_click: Option<ClickHandler>,
 }
 
 #[component]
-pub fn button(content: Option<ButtonContent>) -> NodeId {
+pub fn button(content: Option<ButtonContent>, disabled: Prop<bool>) -> NodeId {
     let button = current_component();
     let (hovered_read, hovered_write) = create_signal(false);
     let (active_read, active_write) = create_signal(false);
     let (focused_read, focused_write) = create_signal(false);
+    let disabled_cell: Rc<Cell<bool>> = Rc::new(Cell::new(false));
 
     let content_node = content.map(|build| {
         build(ButtonHandle {
@@ -51,6 +51,7 @@ pub fn button(content: Option<ButtonContent>) -> NodeId {
     let click_catcher_cell: Rc<Cell<Option<NodeId>>> = Rc::new(Cell::new(None));
     let on_activate_change_cell = click_catcher_cell.clone();
     let on_activate_cell = click_catcher_cell.clone();
+    let on_click_disabled_cell = disabled_cell.clone();
 
     let focusable = view! {
         <focusable
@@ -78,7 +79,7 @@ pub fn button(content: Option<ButtonContent>) -> NodeId {
                     <click_catcher
                         cursor={CursorIcon::PointingHand}
                         on_click={Box::new(move |document: &mut Document| {
-                            if document.component_state::<State>(button).disabled {
+                            if on_click_disabled_cell.get() {
                                 return;
                             }
                             document.call_component_click::<State>(button, |state| &mut state.on_click);
@@ -119,10 +120,14 @@ pub fn button(content: Option<ButtonContent>) -> NodeId {
                 active_write,
                 focused_read,
                 focused_write,
-                disabled: false,
                 on_click: None,
             },
         );
+    });
+
+    disabled.apply(move |disabled| {
+        disabled_cell.set(disabled);
+        with_document(|document| document.set_focusable_tab_stop(focusable, !disabled));
     });
 
     focusable
@@ -154,18 +159,6 @@ pub fn button_focused(document: &Document, button: NodeId) -> ReadSignal<bool> {
         .component_state::<State>(button)
         .focused_read
         .clone()
-}
-
-pub fn button_disabled(document: &Document, button: NodeId) -> bool {
-    document.component_state::<State>(button).disabled
-}
-
-pub fn set_button_disabled(button: NodeId, disabled: bool) {
-    with_document(|document| {
-        document.component_state_mut::<State>(button).disabled = disabled;
-        let focusable = button_focusable(document, button);
-        document.set_focusable_tab_stop(focusable, !disabled);
-    });
 }
 
 pub fn set_button_on_click(button: NodeId, handler: impl FnMut(&mut Document) + 'static) {
