@@ -22,11 +22,23 @@ pub fn text_input(
     on_change: Option<Handler<String>>,
     on_submit: Option<Handler<String>>,
 ) -> NodeId {
-    let mut on_change = on_change;
-    let mut on_submit = on_submit;
+    let mut on_change_forward = on_change;
+    let mut on_submit_forward = on_submit;
 
     let input = view! {
-        <unstyled::text_input value={String::new()} content={Box::new(move |handle: unstyled::TextInputHandle| {
+        <unstyled::text_input
+            value={String::new()}
+            on_change={Box::new(move |document: &mut Document, value| {
+                if let Some(handler) = &mut on_change_forward {
+                    handler(document, value);
+                }
+            })}
+            on_submit={Box::new(move |document: &mut Document, value| {
+                if let Some(handler) = &mut on_submit_forward {
+                    handler(document, value);
+                }
+            })}
+            content={Box::new(move |handle: unstyled::TextInputHandle| {
             let border_color = {
                 let focused = handle.focused.clone();
                 let hovered = handle.hovered.clone();
@@ -54,17 +66,6 @@ pub fn text_input(
     unstyled::set_text_input_selection_color(input, ACCENT_SOFT);
     unstyled::set_text_input_caret_color(input, ACCENT);
     unstyled::set_text_input_padding(input, PADDING_HORIZONTAL, 0.0);
-
-    unstyled::set_text_input_on_change(input, move |document, value| {
-        if let Some(handler) = &mut on_change {
-            handler(document, value);
-        }
-    });
-    unstyled::set_text_input_on_submit(input, move |document, value| {
-        if let Some(handler) = &mut on_submit {
-            handler(document, value);
-        }
-    });
 
     placeholder.apply(move |placeholder| {
         unstyled::set_text_input_placeholder(input, placeholder);

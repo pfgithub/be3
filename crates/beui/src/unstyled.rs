@@ -48,12 +48,11 @@ pub use slider::{
     slider_focused, slider_value, SliderBuilder, SliderHandle,
 };
 pub use text_input::{
-    focus_text_input, set_text_input_caret_color, set_text_input_child, set_text_input_on_change,
+    focus_text_input, set_text_input_caret_color, set_text_input_child,
     set_text_input_on_focus_change, set_text_input_on_hover_change, set_text_input_on_key_override,
-    set_text_input_on_submit, set_text_input_padding, set_text_input_placeholder,
-    set_text_input_placeholder_color, set_text_input_selection_color, set_text_input_value,
-    text_input_field, text_input_focused, text_input_hovered, text_input_text, text_input_value,
-    TextInputBuilder, TextInputHandle,
+    set_text_input_padding, set_text_input_placeholder, set_text_input_placeholder_color,
+    set_text_input_selection_color, set_text_input_value, text_input_field, text_input_focused,
+    text_input_hovered, text_input_text, text_input_value, TextInputBuilder, TextInputHandle,
 };
 pub use toggle::{
     focus_toggle, toggle_active, toggle_checked, toggle_focused, toggle_hovered, ToggleBuilder,

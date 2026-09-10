@@ -55,7 +55,12 @@ struct State {
 }
 
 #[component]
-pub fn text_input(value: String, content: Option<TextInputContent>) -> NodeId {
+pub fn text_input(
+    value: String,
+    content: Option<TextInputContent>,
+    on_change: Option<Handler<String>>,
+    on_submit: Option<Handler<String>>,
+) -> NodeId {
     let input = current_component();
     let (hovered_read, hovered_write) = create_signal(false);
     let (focused_read, focused_write) = create_signal(false);
@@ -164,8 +169,8 @@ pub fn text_input(value: String, content: Option<TextInputContent>) -> NodeId {
                 hovered_write,
                 focused_read,
                 focused_write,
-                on_change: None,
-                on_submit: None,
+                on_change,
+                on_submit,
                 on_hover_change: None,
                 on_focus_change: None,
                 on_key_override: None,
@@ -250,24 +255,6 @@ pub fn set_text_input_padding(input: NodeId, horizontal: f32, vertical: f32) {
     with_document(|document| {
         let field = text_input_field(document, input);
         document.set_padding(field, horizontal, vertical);
-    });
-}
-
-pub fn set_text_input_on_change(
-    input: NodeId,
-    handler: impl FnMut(&mut Document, String) + 'static,
-) {
-    with_document(|document| {
-        document.component_state_mut::<State>(input).on_change = Some(Box::new(handler));
-    });
-}
-
-pub fn set_text_input_on_submit(
-    input: NodeId,
-    handler: impl FnMut(&mut Document, String) + 'static,
-) {
-    with_document(|document| {
-        document.component_state_mut::<State>(input).on_submit = Some(Box::new(handler));
     });
 }
 

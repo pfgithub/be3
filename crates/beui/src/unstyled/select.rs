@@ -40,7 +40,23 @@ pub fn select(options: Vec<String>, selected: Option<usize>) -> NodeId {
     let selected = selected.filter(|index| *index < options.len());
 
     let trigger = view! { <unstyled::button /> };
-    let search = view! { <unstyled::text_input value={String::new()} /> };
+    let search = view! {
+        <unstyled::text_input
+            value={String::new()}
+            on_change={Box::new(move |document: &mut Document, text| {
+                filter(document, select, &text);
+            })}
+            on_submit={Box::new(move |document: &mut Document, _text| {
+                let highlighted = document.component_state::<State>(select).highlighted;
+                if let Some(index) = highlighted {
+                    confirm(document, select, index);
+                }
+            })}
+        />
+    };
+    unstyled::set_text_input_on_key_override(search, move |document, press| {
+        navigate(document, select, press)
+    });
     let list = with_document(Document::create_scroll);
 
     let popup = view! {
@@ -104,18 +120,6 @@ pub fn select(options: Vec<String>, selected: Option<usize>) -> NodeId {
         document.set_overlay_on_dismiss(overlay, move |_document| {
             unstyled::focus_button(trigger);
         });
-    });
-    unstyled::set_text_input_on_change(search, move |document, text| {
-        filter(document, select, &text);
-    });
-    unstyled::set_text_input_on_submit(search, move |document, _text| {
-        let highlighted = document.component_state::<State>(select).highlighted;
-        if let Some(index) = highlighted {
-            confirm(document, select, index);
-        }
-    });
-    unstyled::set_text_input_on_key_override(search, move |document, press| {
-        navigate(document, select, press)
     });
 
     root
