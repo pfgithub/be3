@@ -1,3 +1,6 @@
+use std::cell::Cell;
+use std::rc::Rc;
+
 use beui_macros::{component, view};
 
 use crate::input::{CursorIcon, Key, KeyPress, PointerPress};
@@ -32,23 +35,8 @@ pub fn slider(value: f32) -> NodeId {
     let (dragging_read, dragging_write) = create_signal(false);
     let (focused_read, focused_write) = create_signal(false);
 
-    let click_catcher = view! {
-        <click_catcher
-            cursor={CursorIcon::PointingHand}
-            on_drag={Box::new(move |document: &mut Document, press: PointerPress| {
-                set_value(document, slider, press.fraction.x);
-            })}
-            on_active_change={Box::new(move |document: &mut Document, dragging: bool| {
-                document
-                    .component_state::<State>(slider)
-                    .dragging_write
-                    .set(dragging);
-                document.call_component_handler(slider, dragging, |state: &mut State| {
-                    &mut state.on_drag_change
-                });
-            })}
-        ></click_catcher>
-    };
+    let click_catcher_cell: Rc<Cell<Option<NodeId>>> = Rc::new(Cell::new(None));
+
     let focusable = view! {
         <focusable
             on_focus_change={Box::new(move |document: &mut Document, focused: bool| {
@@ -82,9 +70,32 @@ pub fn slider(value: f32) -> NodeId {
                 true
             })}
         >
-            {click_catcher}
+            {{
+                let click_catcher = view! {
+                    <click_catcher
+                        cursor={CursorIcon::PointingHand}
+                        on_drag={Box::new(move |document: &mut Document, press: PointerPress| {
+                            set_value(document, slider, press.fraction.x);
+                        })}
+                        on_active_change={Box::new(move |document: &mut Document, dragging: bool| {
+                            document
+                                .component_state::<State>(slider)
+                                .dragging_write
+                                .set(dragging);
+                            document.call_component_handler(slider, dragging, |state: &mut State| {
+                                &mut state.on_drag_change
+                            });
+                        })}
+                    ></click_catcher>
+                };
+                click_catcher_cell.set(Some(click_catcher));
+                click_catcher
+            }}
         </focusable>
     };
+    let click_catcher = click_catcher_cell
+        .get()
+        .expect("slider click catcher not yet built");
 
     with_document(|document| {
         reactive::set_component_detail(document, slider, detail(value_read.get()));

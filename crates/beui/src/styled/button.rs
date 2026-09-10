@@ -52,29 +52,24 @@ pub fn button(
     disabled: Prop<bool>,
     on_click: Option<ClickHandler>,
 ) -> NodeId {
-    let button = view! { <unstyled::button /> };
-    let (hovered, active, focused) = with_document(|document| {
-        (
-            unstyled::button_hovered(document, button),
-            unstyled::button_active(document, button),
-            unstyled::button_focused(document, button),
-        )
-    });
-
-    let fill_color = Prop::Dynamic(Box::new(move || variant.fill(hovered.get(), active.get())));
-
-    let ring = view! {
-        <outline color={ACCENT} width={FOCUS_RING_WIDTH} radius={RADIUS + 4} offset={FOCUS_RING_OFFSET} visible={focused}>
-            <outline color={BORDER} width={BORDER_WIDTH} radius={RADIUS} offset={0.0} visible={variant == ButtonVariant::Secondary}>
-                <fill color={fill_color} radius={RADIUS}>
-                    <padding horizontal={PADDING_HORIZONTAL} vertical={PADDING_VERTICAL}>
-                        <text string={label} font_size={FONT_BODY} color={variant.label()} align={TextAlign::Center} />
-                    </padding>
-                </fill>
-            </outline>
-        </outline>
+    let button = view! {
+        <unstyled::button content={Box::new(move |handle: unstyled::ButtonHandle| {
+            let fill_color = Prop::Dynamic(Box::new(move || {
+                variant.fill(handle.hovered.get(), handle.active.get())
+            }));
+            view! {
+                <outline color={ACCENT} width={FOCUS_RING_WIDTH} radius={RADIUS + 4} offset={FOCUS_RING_OFFSET} visible={handle.focused}>
+                    <outline color={BORDER} width={BORDER_WIDTH} radius={RADIUS} offset={0.0} visible={variant == ButtonVariant::Secondary}>
+                        <fill color={fill_color} radius={RADIUS}>
+                            <padding horizontal={PADDING_HORIZONTAL} vertical={PADDING_VERTICAL}>
+                                <text string={label} font_size={FONT_BODY} color={variant.label()} align={TextAlign::Center} />
+                            </padding>
+                        </fill>
+                    </outline>
+                </outline>
+            }
+        })} />
     };
-    unstyled::set_button_child(button, ring);
 
     if let Some(on_click) = on_click {
         unstyled::set_button_on_click(button, on_click);

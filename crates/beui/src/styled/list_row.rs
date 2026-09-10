@@ -3,7 +3,7 @@ use beui_macros::{component, view};
 use crate::color::Color32;
 
 use crate::node::{ClickHandler, NodeId};
-use crate::reactive::{with_document, Children, FillBuilder, OutlineBuilder, PaddingBuilder, Prop};
+use crate::reactive::{Children, FillBuilder, OutlineBuilder, PaddingBuilder, Prop};
 use crate::styled::theme::{ACCENT, BORDER, RADIUS, SURFACE_RAISED};
 use crate::unstyled;
 use crate::unstyled::ButtonBuilder;
@@ -17,24 +17,20 @@ pub fn list_row(children: Children, on_click: Option<ClickHandler>) -> NodeId {
         .into_first()
         .expect("list_row requires a child, e.g. <list_row>{content}</list_row>");
 
-    let row = view! { <button /> };
-    let (hovered, active, focused) = with_document(|document| {
-        (
-            unstyled::button_hovered(document, row),
-            unstyled::button_active(document, row),
-            unstyled::button_focused(document, row),
-        )
-    });
-
-    let fill_color = Prop::Dynamic(Box::new(move || background(hovered.get(), active.get())));
-    let ring = view! {
-        <outline color={ACCENT} width={2.0} radius={RADIUS} offset={0.0} visible={focused}>
-            <fill color={fill_color} radius={RADIUS}>
-                <padding horizontal={PADDING_HORIZONTAL} vertical={PADDING_VERTICAL}>{child}</padding>
-            </fill>
-        </outline>
+    let row = view! {
+        <button content={Box::new(move |handle: unstyled::ButtonHandle| {
+            let fill_color = Prop::Dynamic(Box::new(move || {
+                background(handle.hovered.get(), handle.active.get())
+            }));
+            view! {
+                <outline color={ACCENT} width={2.0} radius={RADIUS} offset={0.0} visible={handle.focused}>
+                    <fill color={fill_color} radius={RADIUS}>
+                        <padding horizontal={PADDING_HORIZONTAL} vertical={PADDING_VERTICAL}>{child}</padding>
+                    </fill>
+                </outline>
+            }
+        })} />
     };
-    unstyled::set_button_child(row, ring);
 
     if let Some(on_click) = on_click {
         unstyled::set_button_on_click(row, on_click);

@@ -1,3 +1,6 @@
+use std::cell::Cell;
+use std::rc::Rc;
+
 use beui_macros::{component, view};
 
 use crate::input::CursorIcon;
@@ -9,8 +12,16 @@ use crate::reactive::{
     ClickCatcherBuilder, FocusableBuilder, ReadSignal, WriteSignal,
 };
 
+pub struct ToggleHandle {
+    pub checked: ReadSignal<bool>,
+    pub hovered: ReadSignal<bool>,
+    pub active: ReadSignal<bool>,
+    pub focused: ReadSignal<bool>,
+}
+
+pub type ToggleContent = Box<dyn FnOnce(ToggleHandle) -> NodeId>;
+
 struct State {
-    click_catcher: NodeId,
     focusable: NodeId,
     checked_read: ReadSignal<bool>,
     checked_write: WriteSignal<bool>,
@@ -24,34 +35,26 @@ struct State {
 }
 
 #[component]
-pub fn toggle(checked: bool) -> NodeId {
+pub fn toggle(checked: bool, content: Option<ToggleContent>) -> NodeId {
     let toggle = current_component();
     let (checked_read, checked_write) = create_signal(checked);
     let (hovered_read, hovered_write) = create_signal(false);
     let (active_read, active_write) = create_signal(false);
     let (focused_read, focused_write) = create_signal(false);
 
-    let click_catcher = view! {
-        <click_catcher
-            cursor={CursorIcon::PointingHand}
-            on_click={Box::new(move |document: &mut Document| {
-                let checked = !document.component_state::<State>(toggle).checked_read.get();
-                set_toggle_checked(document, toggle, checked);
-            })}
-            on_hover_change={Box::new(move |document: &mut Document, hovered: bool| {
-                document
-                    .component_state::<State>(toggle)
-                    .hovered_write
-                    .set(hovered);
-            })}
-            on_active_change={Box::new(move |document: &mut Document, active: bool| {
-                document
-                    .component_state::<State>(toggle)
-                    .active_write
-                    .set(active);
-            })}
-        ></click_catcher>
-    };
+    let content_node = content.map(|build| {
+        build(ToggleHandle {
+            checked: checked_read.clone(),
+            hovered: hovered_read.clone(),
+            active: active_read.clone(),
+            focused: focused_read.clone(),
+        })
+    });
+
+    let click_catcher_cell: Rc<Cell<Option<NodeId>>> = Rc::new(Cell::new(None));
+    let on_activate_change_cell = click_catcher_cell.clone();
+    let on_activate_cell = click_catcher_cell.clone();
+
     let focusable = view! {
         <focusable
             on_focus_change={Box::new(move |document: &mut Document, focused: bool| {
@@ -61,13 +64,44 @@ pub fn toggle(checked: bool) -> NodeId {
                     .set(focused);
             })}
             on_activate_change={Box::new(move |document: &mut Document, pressed: bool| {
+                let click_catcher = on_activate_change_cell
+                    .get()
+                    .expect("toggle click catcher not yet built");
                 document.set_click_catcher_key_active(click_catcher, pressed);
             })}
             on_activate={Box::new(move |document: &mut Document| {
+                let click_catcher = on_activate_cell
+                    .get()
+                    .expect("toggle click catcher not yet built");
                 document.click_click_catcher(click_catcher);
             })}
         >
-            {click_catcher}
+            {{
+                let click_catcher = view! {
+                    <click_catcher
+                        cursor={CursorIcon::PointingHand}
+                        on_click={Box::new(move |document: &mut Document| {
+                            let checked = !document.component_state::<State>(toggle).checked_read.get();
+                            set_toggle_checked(document, toggle, checked);
+                        })}
+                        on_hover_change={Box::new(move |document: &mut Document, hovered: bool| {
+                            document
+                                .component_state::<State>(toggle)
+                                .hovered_write
+                                .set(hovered);
+                        })}
+                        on_active_change={Box::new(move |document: &mut Document, active: bool| {
+                            document
+                                .component_state::<State>(toggle)
+                                .active_write
+                                .set(active);
+                        })}
+                        children={content_node.map(reactive::intrinsic)}
+                    />
+                };
+                click_catcher_cell.set(Some(click_catcher));
+                click_catcher
+            }}
         </focusable>
     };
 
@@ -77,7 +111,6 @@ pub fn toggle(checked: bool) -> NodeId {
             document,
             toggle,
             State {
-                click_catcher,
                 focusable,
                 checked_read,
                 checked_write,
@@ -93,11 +126,6 @@ pub fn toggle(checked: bool) -> NodeId {
     });
 
     focusable
-}
-
-pub fn set_toggle_child(document: &mut Document, toggle: NodeId, child: NodeId) {
-    let click_catcher = document.component_state::<State>(toggle).click_catcher;
-    document.set_click_catcher_child(click_catcher, child);
 }
 
 pub fn toggle_checked(document: &Document, toggle: NodeId) -> ReadSignal<bool> {

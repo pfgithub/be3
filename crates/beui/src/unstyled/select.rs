@@ -103,10 +103,9 @@ fn select_in(document: &mut Document, options: &[String], selected: Option<usize
 }
 
 fn add_row(document: &mut Document, select: NodeId, label: &str) {
-    let button = view! { <unstyled::button /> };
-    unstyled::set_button_tab_stop(button, false);
     let text = document.create_text(label.to_owned(), FONT_SIZE, Color32::WHITE);
-    unstyled::set_button_child(button, text);
+    let button = view! { <unstyled::button content={Box::new(move |_handle| text)} /> };
+    unstyled::set_button_tab_stop(button, false);
     let visibility = document.create_visibility(true);
     document.set_visibility_child(visibility, button);
 

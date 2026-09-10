@@ -1,3 +1,6 @@
+use std::cell::Cell;
+use std::rc::Rc;
+
 use beui_macros::{component, view};
 
 use crate::input::CursorIcon;
@@ -30,26 +33,10 @@ pub fn pressable() -> NodeId {
     let (active_read, active_write) = create_signal(false);
     let (focused_read, focused_write) = create_signal(false);
 
-    let click_catcher = view! {
-        <click_catcher
-            cursor={CursorIcon::PointingHand}
-            on_click={Box::new(move |document: &mut Document| {
-                document.call_component_click::<State>(pressable, |state| &mut state.on_click);
-            })}
-            on_hover_change={Box::new(move |document: &mut Document, hovered: bool| {
-                document.component_state::<State>(pressable).hovered_write.set(hovered);
-                document.call_component_handler(pressable, hovered, |state: &mut State| {
-                    &mut state.on_hover_change
-                });
-            })}
-            on_active_change={Box::new(move |document: &mut Document, active: bool| {
-                document.component_state::<State>(pressable).active_write.set(active);
-                document.call_component_handler(pressable, active, |state: &mut State| {
-                    &mut state.on_active_change
-                });
-            })}
-        ></click_catcher>
-    };
+    let click_catcher_cell: Rc<Cell<Option<NodeId>>> = Rc::new(Cell::new(None));
+    let on_activate_change_cell = click_catcher_cell.clone();
+    let on_activate_cell = click_catcher_cell.clone();
+
     let focusable = view! {
         <focusable
             on_focus_change={Box::new(move |document: &mut Document, focused: bool| {
@@ -59,15 +46,47 @@ pub fn pressable() -> NodeId {
                 });
             })}
             on_activate_change={Box::new(move |document: &mut Document, pressed: bool| {
+                let click_catcher = on_activate_change_cell
+                    .get()
+                    .expect("pressable click catcher not yet built");
                 document.set_click_catcher_key_active(click_catcher, pressed);
             })}
             on_activate={Box::new(move |document: &mut Document| {
+                let click_catcher = on_activate_cell
+                    .get()
+                    .expect("pressable click catcher not yet built");
                 document.click_click_catcher(click_catcher);
             })}
         >
-            {click_catcher}
+            {{
+                let click_catcher = view! {
+                    <click_catcher
+                        cursor={CursorIcon::PointingHand}
+                        on_click={Box::new(move |document: &mut Document| {
+                            document.call_component_click::<State>(pressable, |state| &mut state.on_click);
+                        })}
+                        on_hover_change={Box::new(move |document: &mut Document, hovered: bool| {
+                            document.component_state::<State>(pressable).hovered_write.set(hovered);
+                            document.call_component_handler(pressable, hovered, |state: &mut State| {
+                                &mut state.on_hover_change
+                            });
+                        })}
+                        on_active_change={Box::new(move |document: &mut Document, active: bool| {
+                            document.component_state::<State>(pressable).active_write.set(active);
+                            document.call_component_handler(pressable, active, |state: &mut State| {
+                                &mut state.on_active_change
+                            });
+                        })}
+                    ></click_catcher>
+                };
+                click_catcher_cell.set(Some(click_catcher));
+                click_catcher
+            }}
         </focusable>
     };
+    let click_catcher = click_catcher_cell
+        .get()
+        .expect("pressable click catcher not yet built");
 
     with_document(|document| {
         set_component_state(

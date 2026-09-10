@@ -7,6 +7,8 @@ use crate::geometry::{pos2, Pos2, Rect, Vec2};
 use crate::input::{CursorIcon, PointerPress};
 use crate::painter::Painter;
 
+use beui_macros::view;
+
 use crate::document::Document;
 use crate::node::{ClickHandler, Element, InteractInput, NodeId};
 use crate::reactive::{with_reactive_scope, ClickCatcherBuilder};
@@ -159,14 +161,15 @@ impl Document {
         let overlay_cell: Rc<Cell<Option<NodeId>>> = Rc::new(Cell::new(None));
         let press_cell = overlay_cell.clone();
         let scrim = with_reactive_scope(self, || {
-            ClickCatcherBuilder::default()
-                .cursor(CursorIcon::Default)
-                .on_press(Box::new(move |doc: &mut Document, press: PointerPress| {
-                    let id = press_cell.get().expect("overlay not yet initialized");
-                    doc.dismiss_overlay_if_outside(id, press.pos);
-                }))
-                .children([])
-                .build()
+            view! {
+                <click_catcher
+                    cursor={CursorIcon::Default}
+                    on_press={Box::new(move |doc: &mut Document, press: PointerPress| {
+                        let id = press_cell.get().expect("overlay not yet initialized");
+                        doc.dismiss_overlay_if_outside(id, press.pos);
+                    })}
+                ></click_catcher>
+            }
         });
         let id = self
             .arena

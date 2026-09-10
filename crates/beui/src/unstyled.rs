@@ -13,7 +13,7 @@ mod toggle;
 pub use button::{
     button_active, button_disabled, button_focusable, button_focused, button_hovered, focus_button,
     set_button_child, set_button_disabled, set_button_on_click, set_button_on_key,
-    set_button_tab_stop, ButtonBuilder,
+    set_button_tab_stop, ButtonBuilder, ButtonHandle,
 };
 pub use choice::{
     choice, choice_option_button, choice_option_count, choice_option_label_node, choice_selected,
@@ -58,6 +58,6 @@ pub use text_input::{
     TextInputBuilder,
 };
 pub use toggle::{
-    focus_toggle, set_toggle_checked, set_toggle_child, set_toggle_on_change, toggle_active,
-    toggle_checked, toggle_focused, toggle_hovered, ToggleBuilder,
+    focus_toggle, set_toggle_checked, set_toggle_on_change, toggle_active, toggle_checked,
+    toggle_focused, toggle_hovered, ToggleBuilder, ToggleHandle,
 };

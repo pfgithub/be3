@@ -351,10 +351,10 @@ where
 
 #[component]
 pub fn button(children: Children, disabled: Prop<bool>, on_click: Option<ClickHandler>) -> NodeId {
-    let button = view! { <unstyled::button /> };
-    if let Some(child) = children.into_first() {
-        unstyled::set_button_child(button, child);
-    }
+    let button = match children.into_first() {
+        Some(child) => view! { <unstyled::button content={Box::new(move |_handle| child)} /> },
+        None => view! { <unstyled::button /> },
+    };
     if let Some(on_click) = on_click {
         unstyled::set_button_on_click(button, on_click);
     }

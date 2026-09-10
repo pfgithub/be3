@@ -26,51 +26,49 @@ pub fn switch(on: Prop<bool>, on_change: Option<Handler<bool>>) -> NodeId {
     let shadow = current_component();
     let mut on_change = on_change;
 
-    let toggle = view! { <toggle checked={false} /> };
-    let (checked, hovered, focused) = with_document(|document| {
-        (
-            unstyled::toggle_checked(document, toggle),
-            unstyled::toggle_hovered(document, toggle),
-            unstyled::toggle_focused(document, toggle),
-        )
-    });
+    let toggle = view! {
+        <toggle checked={false} content={Box::new(move |handle: unstyled::ToggleHandle| {
+            let before_percent = {
+                let checked = handle.checked.clone();
+                Prop::Dynamic(Box::new(move || before_size(checked.get())))
+            };
+            let after_percent = {
+                let checked = handle.checked.clone();
+                Prop::Dynamic(Box::new(move || after_size(checked.get())))
+            };
+            let track_color = {
+                let checked = handle.checked.clone();
+                let hovered = handle.hovered.clone();
+                Prop::Dynamic(Box::new(move || track_fill(checked.get(), hovered.get())))
+            };
 
-    let before_percent = {
-        let checked = checked.clone();
-        Prop::Dynamic(Box::new(move || before_size(checked.get())))
-    };
-    let after_percent = {
-        let checked = checked.clone();
-        Prop::Dynamic(Box::new(move || after_size(checked.get())))
-    };
-    let track_color = {
-        let checked = checked.clone();
-        Prop::Dynamic(Box::new(move || track_fill(checked.get(), hovered.get())))
-    };
+            create_effect({
+                let checked = handle.checked.clone();
+                move || {
+                    let on = checked.get();
+                    with_document(|document| set_component_detail(document, shadow, detail(on)));
+                }
+            });
 
-    let ring = view! {
-        <outline color={ACCENT} width={FOCUS_RING_WIDTH} radius={RADIUS} offset={FOCUS_RING_OFFSET} visible={focused}>
-            <sized width={WIDTH} height={HEIGHT}>
-                <fill color={track_color} radius={TRACK_RADIUS}>
-                    <padding horizontal={PADDING} vertical={PADDING}>
-                        <centered_row spacing={0.0}>
-                            @percent(before_percent) <spacer />
-                            <sized width={KNOB_SIZE} height={KNOB_SIZE}>
-                                <fill color={KNOB} radius={KNOB_RADIUS}></fill>
-                            </sized>
-                            @percent(after_percent) <spacer />
-                        </centered_row>
-                    </padding>
-                </fill>
-            </sized>
-        </outline>
+            view! {
+                <outline color={ACCENT} width={FOCUS_RING_WIDTH} radius={RADIUS} offset={FOCUS_RING_OFFSET} visible={handle.focused}>
+                    <sized width={WIDTH} height={HEIGHT}>
+                        <fill color={track_color} radius={TRACK_RADIUS}>
+                            <padding horizontal={PADDING} vertical={PADDING}>
+                                <centered_row spacing={0.0}>
+                                    @percent(before_percent) <spacer />
+                                    <sized width={KNOB_SIZE} height={KNOB_SIZE}>
+                                        <fill color={KNOB} radius={KNOB_RADIUS}></fill>
+                                    </sized>
+                                    @percent(after_percent) <spacer />
+                                </centered_row>
+                            </padding>
+                        </fill>
+                    </sized>
+                </outline>
+            }
+        })} />
     };
-    with_document(|document| unstyled::set_toggle_child(document, toggle, ring));
-
-    create_effect(move || {
-        let on = checked.get();
-        with_document(|document| set_component_detail(document, shadow, detail(on)));
-    });
 
     with_document(|document| {
         unstyled::set_toggle_on_change(document, toggle, move |document, on| {

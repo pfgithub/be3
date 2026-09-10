@@ -1,4 +1,6 @@
+use std::cell::Cell;
 use std::ops::Range;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use text_editor_core::{
@@ -62,25 +64,8 @@ pub fn text_input(value: String) -> NodeId {
         field
     });
 
-    let click_catcher = view! {
-        <click_catcher
-            cursor={CursorIcon::Text}
-            on_press={Box::new(move |document: &mut Document, press: PointerPress| {
-                point(document, input, press);
-            })}
-            on_drag={Box::new(move |document: &mut Document, press: PointerPress| {
-                extend(document, input, press);
-            })}
-            on_hover_change={Box::new(move |document: &mut Document, hovered: bool| {
-                document.component_state::<State>(input).hovered_write.set(hovered);
-                document.call_component_handler(input, hovered, |state: &mut State| {
-                    &mut state.on_hover_change
-                });
-            })}
-        >
-            {field}
-        </click_catcher>
-    };
+    let click_catcher_cell: Rc<Cell<Option<NodeId>>> = Rc::new(Cell::new(None));
+
     let focusable = view! {
         <focusable
             on_focus_change={Box::new(move |document: &mut Document, focused: bool| {
@@ -117,9 +102,34 @@ pub fn text_input(value: String) -> NodeId {
                 key(document, input, press)
             })}
         >
-            {click_catcher}
+            {{
+                let click_catcher = view! {
+                    <click_catcher
+                        cursor={CursorIcon::Text}
+                        on_press={Box::new(move |document: &mut Document, press: PointerPress| {
+                            point(document, input, press);
+                        })}
+                        on_drag={Box::new(move |document: &mut Document, press: PointerPress| {
+                            extend(document, input, press);
+                        })}
+                        on_hover_change={Box::new(move |document: &mut Document, hovered: bool| {
+                            document.component_state::<State>(input).hovered_write.set(hovered);
+                            document.call_component_handler(input, hovered, |state: &mut State| {
+                                &mut state.on_hover_change
+                            });
+                        })}
+                    >
+                        {field}
+                    </click_catcher>
+                };
+                click_catcher_cell.set(Some(click_catcher));
+                click_catcher
+            }}
         </focusable>
     };
+    let click_catcher = click_catcher_cell
+        .get()
+        .expect("text_input click catcher not yet built");
 
     with_document(|document| {
         reactive::set_component_detail(document, input, detail(&value));

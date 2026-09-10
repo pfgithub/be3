@@ -18,8 +18,7 @@ struct State {
 pub fn disclosure(spacing: f32, open: bool) -> NodeId {
     with_document(|document| {
         let header = document.create_slot("header");
-        let button = view! { <unstyled::button /> };
-        unstyled::set_button_child(button, header);
+        let button = view! { <unstyled::button content={Box::new(move |_handle| header)} /> };
 
         let content = document.create_slot("content");
         let visibility = document.create_visibility(open);

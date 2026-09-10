@@ -66,10 +66,9 @@ fn choice_in(
     );
     let mut focused_signals = Vec::new();
     for (index, title) in labels.iter().enumerate() {
-        let button = view! { <unstyled::button /> };
-        unstyled::set_button_tab_stop(button, index == selected.unwrap_or(0));
         let label = document.create_text(*title, FONT_SIZE, Color32::WHITE);
-        unstyled::set_button_child(button, label);
+        let button = view! { <unstyled::button content={Box::new(move |_handle| label)} /> };
+        unstyled::set_button_tab_stop(button, index == selected.unwrap_or(0));
 
         unstyled::set_button_on_click(button, move |document| {
             set_choice_selected(document, choice, Some(index));

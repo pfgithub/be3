@@ -22,15 +22,6 @@ pub fn toggle_button(
     let shadow = current_component();
     let mut on_change = on_change;
 
-    let toggle = view! { <toggle checked={false} /> };
-    let (toggle_checked, toggle_hovered, toggle_focused) = with_document(|document| {
-        (
-            unstyled::toggle_checked(document, toggle),
-            unstyled::toggle_hovered(document, toggle),
-            unstyled::toggle_focused(document, toggle),
-        )
-    });
-
     let (label_text, set_label_text) = create_signal(String::new());
     label.apply(move |value| set_label_text.set(value));
     create_effect({
@@ -41,33 +32,34 @@ pub fn toggle_button(
         }
     });
 
-    let fill_color = {
-        let checked = toggle_checked.clone();
-        let hovered = toggle_hovered;
-        Prop::Dynamic(Box::new(move || fill_for(checked.get(), hovered.get())))
-    };
-    let border_color = Prop::Dynamic(Box::new(
-        move || {
-            if toggle_checked.get() {
-                ACCENT
-            } else {
-                BORDER
-            }
-        },
-    ));
+    let toggle = view! {
+        <toggle checked={false} content={Box::new(move |handle: unstyled::ToggleHandle| {
+            let fill_color = {
+                let checked = handle.checked.clone();
+                let hovered = handle.hovered.clone();
+                Prop::Dynamic(Box::new(move || fill_for(checked.get(), hovered.get())))
+            };
+            let border_color = Prop::Dynamic(Box::new(move || {
+                if handle.checked.get() {
+                    ACCENT
+                } else {
+                    BORDER
+                }
+            }));
 
-    let ring = view! {
-        <outline color={ACCENT} width={2.0} radius={RADIUS} offset={3.0} visible={toggle_focused}>
-            <outline color={border_color} width={1.0} radius={RADIUS} offset={0.0} visible={true}>
-                <fill color={fill_color} radius={RADIUS}>
-                    <padding horizontal={14.0} vertical={8.0}>
-                        <text string={label_text} font_size={FONT_BODY} color={TEXT} />
-                    </padding>
-                </fill>
-            </outline>
-        </outline>
+            view! {
+                <outline color={ACCENT} width={2.0} radius={RADIUS} offset={3.0} visible={handle.focused}>
+                    <outline color={border_color} width={1.0} radius={RADIUS} offset={0.0} visible={true}>
+                        <fill color={fill_color} radius={RADIUS}>
+                            <padding horizontal={14.0} vertical={8.0}>
+                                <text string={label_text} font_size={FONT_BODY} color={TEXT} />
+                            </padding>
+                        </fill>
+                    </outline>
+                </outline>
+            }
+        })} />
     };
-    with_document(|document| unstyled::set_toggle_child(document, toggle, ring));
 
     with_document(|document| {
         unstyled::set_toggle_on_change(document, toggle, move |document, pressed| {

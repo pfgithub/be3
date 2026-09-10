@@ -1,3 +1,6 @@
+use std::cell::Cell;
+use std::rc::Rc;
+
 use beui_macros::{component, view};
 
 use crate::input::CursorIcon;
@@ -5,9 +8,17 @@ use crate::input::CursorIcon;
 use crate::document::Document;
 use crate::node::{ClickHandler, NodeId};
 use crate::reactive::{
-    create_signal, current_component, set_component_state, with_document, ClickCatcherBuilder,
-    FocusableBuilder, ReadSignal, WriteSignal,
+    self, create_signal, current_component, set_component_state, with_document,
+    ClickCatcherBuilder, FocusableBuilder, ReadSignal, WriteSignal,
 };
+
+pub struct ButtonHandle {
+    pub hovered: ReadSignal<bool>,
+    pub active: ReadSignal<bool>,
+    pub focused: ReadSignal<bool>,
+}
+
+pub type ButtonContent = Box<dyn FnOnce(ButtonHandle) -> NodeId>;
 
 struct State {
     click_catcher: NodeId,
@@ -23,35 +34,24 @@ struct State {
 }
 
 #[component]
-pub fn button() -> NodeId {
+pub fn button(content: Option<ButtonContent>) -> NodeId {
     let button = current_component();
     let (hovered_read, hovered_write) = create_signal(false);
     let (active_read, active_write) = create_signal(false);
     let (focused_read, focused_write) = create_signal(false);
 
-    let click_catcher = view! {
-        <click_catcher
-            cursor={CursorIcon::PointingHand}
-            on_click={Box::new(move |document: &mut Document| {
-                if document.component_state::<State>(button).disabled {
-                    return;
-                }
-                document.call_component_click::<State>(button, |state| &mut state.on_click);
-            })}
-            on_hover_change={Box::new(move |document: &mut Document, hovered: bool| {
-                document
-                    .component_state::<State>(button)
-                    .hovered_write
-                    .set(hovered);
-            })}
-            on_active_change={Box::new(move |document: &mut Document, active: bool| {
-                document
-                    .component_state::<State>(button)
-                    .active_write
-                    .set(active);
-            })}
-        ></click_catcher>
-    };
+    let content_node = content.map(|build| {
+        build(ButtonHandle {
+            hovered: hovered_read.clone(),
+            active: active_read.clone(),
+            focused: focused_read.clone(),
+        })
+    });
+
+    let click_catcher_cell: Rc<Cell<Option<NodeId>>> = Rc::new(Cell::new(None));
+    let on_activate_change_cell = click_catcher_cell.clone();
+    let on_activate_cell = click_catcher_cell.clone();
+
     let focusable = view! {
         <focusable
             on_focus_change={Box::new(move |document: &mut Document, focused: bool| {
@@ -61,13 +61,46 @@ pub fn button() -> NodeId {
                     .set(focused);
             })}
             on_activate_change={Box::new(move |document: &mut Document, pressed: bool| {
+                let click_catcher = on_activate_change_cell
+                    .get()
+                    .expect("button click catcher not yet built");
                 document.set_click_catcher_key_active(click_catcher, pressed);
             })}
             on_activate={Box::new(move |document: &mut Document| {
+                let click_catcher = on_activate_cell
+                    .get()
+                    .expect("button click catcher not yet built");
                 document.click_click_catcher(click_catcher);
             })}
         >
-            {click_catcher}
+            {{
+                let click_catcher = view! {
+                    <click_catcher
+                        cursor={CursorIcon::PointingHand}
+                        on_click={Box::new(move |document: &mut Document| {
+                            if document.component_state::<State>(button).disabled {
+                                return;
+                            }
+                            document.call_component_click::<State>(button, |state| &mut state.on_click);
+                        })}
+                        on_hover_change={Box::new(move |document: &mut Document, hovered: bool| {
+                            document
+                                .component_state::<State>(button)
+                                .hovered_write
+                                .set(hovered);
+                        })}
+                        on_active_change={Box::new(move |document: &mut Document, active: bool| {
+                            document
+                                .component_state::<State>(button)
+                                .active_write
+                                .set(active);
+                        })}
+                        children={content_node.map(reactive::intrinsic)}
+                    />
+                };
+                click_catcher_cell.set(Some(click_catcher));
+                click_catcher
+            }}
         </focusable>
     };
 
@@ -76,7 +109,9 @@ pub fn button() -> NodeId {
             document,
             button,
             State {
-                click_catcher,
+                click_catcher: click_catcher_cell
+                    .get()
+                    .expect("button click catcher not yet built"),
                 focusable,
                 hovered_read,
                 hovered_write,

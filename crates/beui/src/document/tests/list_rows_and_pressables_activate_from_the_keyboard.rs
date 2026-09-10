@@ -13,8 +13,8 @@ fn list_rows_and_pressables_activate_from_the_keyboard() {
     });
     let sink = count.clone();
     let pressable = with_reactive_scope(&mut document, || {
-        let pressable = unstyled::PressableBuilder::default().build();
         let text = with_document(|document| document.create_text("Press", 14.0, Color32::WHITE));
+        let pressable = view! { <unstyled::pressable /> };
         unstyled::set_pressable_child(pressable, text);
         unstyled::set_pressable_on_click(pressable, move |_| sink.set(sink.get() + 1));
         pressable

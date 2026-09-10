@@ -81,6 +81,7 @@ use crate::base::list::{Direction, ItemSize};
 use crate::inspector::Inspector;
 use crate::styled;
 use crate::unstyled;
+use beui_macros::view;
 
 const VIEWPORT: Vec2 = Vec2::new(400.0, 300.0);
 const WIDE_VIEWPORT: Vec2 = Vec2::new(1000.0, 600.0);
@@ -256,14 +257,12 @@ pub(crate) fn with_installed<R>(document: &mut Document, f: impl FnOnce(&mut Doc
 
 pub(crate) fn labelled_button(document: &mut Document, label: &str) -> NodeId {
     with_installed(document, |document| {
-        let button = unstyled::ButtonBuilder::default().build();
         let text = document.create_text(label, 14.0, Color32::WHITE);
         let padding = document.create_padding(20.0, 12.0);
         document.set_padding_child(padding, text);
         let fill = document.create_fill(Color32::from_gray(60), 4);
         document.set_fill_child(fill, padding);
-        unstyled::set_button_child(button, fill);
-        button
+        view! { <unstyled::button content={Box::new(move |_handle| fill)} /> }
     })
 }
 
