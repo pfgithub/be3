@@ -26,7 +26,7 @@ struct State {
 }
 
 #[component]
-pub fn pressable(children: Children) -> NodeId {
+pub fn pressable(children: Children, on_click: Option<ClickHandler>) -> NodeId {
     let pressable = current_component();
     let (hovered_read, hovered_write) = create_signal(false);
     let (active_read, active_write) = create_signal(false);
@@ -98,7 +98,7 @@ pub fn pressable(children: Children) -> NodeId {
                 focused_read,
                 focused_write,
                 on_focus_change: None,
-                on_click: None,
+                on_click,
                 on_hover_change: None,
                 on_active_change: None,
             },
@@ -120,12 +120,6 @@ pub fn pressable_active(document: &Document, pressable: NodeId) -> ReadSignal<bo
         .component_state::<State>(pressable)
         .active_read
         .clone()
-}
-
-pub fn set_pressable_on_click(pressable: NodeId, handler: impl FnMut(&mut Document) + 'static) {
-    with_document(|document| {
-        document.component_state_mut::<State>(pressable).on_click = Some(Box::new(handler));
-    });
 }
 
 pub fn set_pressable_on_hover_change(

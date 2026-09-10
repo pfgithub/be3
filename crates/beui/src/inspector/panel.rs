@@ -218,10 +218,12 @@ fn pick_toggle(state: &Rc<State>, picking: bool) -> (NodeId, NodeId, NodeId) {
     });
 
     let bordered = view! { <bordered corner_radius={CHIP_RADIUS}>{fill}</bordered> };
-    let pressable = view! { <unstyled::pressable>{bordered}</unstyled::pressable> };
-
     let picker = state.clone();
-    unstyled::set_pressable_on_click(pressable, move |_document| picker.toggle_picking());
+    let pressable = view! {
+        <unstyled::pressable on_click={Box::new(move |_document: &mut Document| picker.toggle_picking())}>
+            {bordered}
+        </unstyled::pressable>
+    };
 
     (pressable, fill, label)
 }
@@ -327,15 +329,16 @@ fn marker(entry: &Entry, state: &Rc<State>) -> NodeId {
         return glyph_node;
     }
 
-    let marker = view! { <unstyled::pressable>{glyph_node}</unstyled::pressable> };
-
     let expansion = state.clone();
     let key = entry.key;
     let expanded = entry.expanded;
-    unstyled::set_pressable_on_click(marker, move |_document| {
-        expansion.set_expanded(key, !expanded);
-    });
-    marker
+    view! {
+        <unstyled::pressable on_click={Box::new(move |_document: &mut Document| {
+            expansion.set_expanded(key, !expanded);
+        })}>
+            {glyph_node}
+        </unstyled::pressable>
+    }
 }
 
 fn glyph(entry: &Entry) -> &'static str {

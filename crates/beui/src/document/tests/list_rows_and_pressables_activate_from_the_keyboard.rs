@@ -14,9 +14,11 @@ fn list_rows_and_pressables_activate_from_the_keyboard() {
     let sink = count.clone();
     let pressable = with_reactive_scope(&mut document, || {
         let text = with_document(|document| document.create_text("Press", 14.0, Color32::WHITE));
-        let pressable = view! { <unstyled::pressable>{text}</unstyled::pressable> };
-        unstyled::set_pressable_on_click(pressable, move |_| sink.set(sink.get() + 1));
-        pressable
+        view! {
+            <unstyled::pressable on_click={Box::new(move |_document: &mut Document| sink.set(sink.get() + 1))}>
+                {text}
+            </unstyled::pressable>
+        }
     });
     toolbar(&mut document, &[row, pressable]);
     let mut harness = Harness::new(document);

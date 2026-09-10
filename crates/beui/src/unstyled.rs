@@ -34,8 +34,8 @@ pub use menu::{
 };
 pub use pressable::{
     focus_pressable, pressable_active, pressable_focused, pressable_hovered,
-    set_pressable_on_active_change, set_pressable_on_click, set_pressable_on_focus_change,
-    set_pressable_on_hover_change, PressableBuilder,
+    set_pressable_on_active_change, set_pressable_on_focus_change, set_pressable_on_hover_change,
+    PressableBuilder,
 };
 pub use select::{
     focus_select, select_highlighted, select_highlighted_signal, select_open, select_option_button,
