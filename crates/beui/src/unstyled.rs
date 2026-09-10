@@ -20,8 +20,8 @@ pub use choice::{
     choice_selected_signal, focus_choice, set_choice_on_change, set_choice_selected, ChoiceKind,
 };
 pub use context_menu::{
-    context_menu, context_menu_menu, context_menu_overlay, set_context_menu_items,
-    set_context_menu_on_select,
+    context_menu_menu, context_menu_overlay, set_context_menu_items, set_context_menu_on_select,
+    ContextMenuBuilder,
 };
 pub use disclosure::{
     disclosure, disclosure_focused, disclosure_hovered, disclosure_open, disclosure_open_signal,

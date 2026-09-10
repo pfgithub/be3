@@ -43,15 +43,6 @@ pub fn select(
                 trigger_label(&options, selected_signal.get())
             }))
         };
-        let label = view! {
-            <text
-                string={label_text}
-                font_size={FONT_BODY}
-                color={TEXT}
-                align={TextAlign::Start}
-                clip={true}
-            />
-        };
 
         let trigger_hovered = unstyled::button_hovered(document, trigger);
         let trigger_focused = unstyled::button_focused(document, trigger);
@@ -66,7 +57,15 @@ pub fn select(
                 <sized width={TRIGGER_WIDTH} height={HEIGHT}>
                     <outline color={trigger_border_color} width={BORDER_WIDTH} radius={RADIUS} offset={0.0} visible={true}>
                         <fill color={SURFACE_RAISED} radius={RADIUS}>
-                            <padding horizontal={PADDING_HORIZONTAL} vertical={0.0}>{label}</padding>
+                            <padding horizontal={PADDING_HORIZONTAL} vertical={0.0}>
+                                <text
+                                    string={label_text}
+                                    font_size={FONT_BODY}
+                                    color={TEXT}
+                                    align={TextAlign::Start}
+                                    clip={true}
+                                />
+                            </padding>
                         </fill>
                     </outline>
                 </sized>
