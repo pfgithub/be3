@@ -1,12 +1,14 @@
 use crate::base::overlay::{OverlayAnchor, Placement};
-use crate::base::ItemSize;
 use crate::color::Color32;
 use crate::document::Document;
 use crate::input::{Key, KeyPress};
 use crate::node::{Handler, NodeId};
-use crate::reactive::{create_signal, with_document, ReadSignal, WriteSignal};
+use crate::reactive::{
+    create_signal, current_component, set_component_state, with_document, ColumnBuilder,
+    ReadSignal, WriteSignal,
+};
 use crate::unstyled;
-use beui_macros::view;
+use beui_macros::{component, view};
 
 const FONT_SIZE: f32 = 14.0;
 const OPTIONS_MAX_HEIGHT: f32 = 240.0;
@@ -32,50 +34,65 @@ struct State {
     on_change: Option<Handler<Option<usize>>>,
 }
 
-pub fn select(options: &[String], selected: Option<usize>) -> NodeId {
-    with_document(|document| select_in(document, options, selected))
-}
-
-fn select_in(document: &mut Document, options: &[String], selected: Option<usize>) -> NodeId {
+#[component]
+pub fn select(options: Vec<String>, selected: Option<usize>) -> NodeId {
+    let select = current_component();
     let selected = selected.filter(|index| *index < options.len());
+
     let trigger = view! { <unstyled::button /> };
-
     let search = view! { <unstyled::text_input value={String::new()} /> };
-    let list = document.create_scroll();
-    let popup = unstyled::column(6.0);
-    document.append_child(popup, search, ItemSize::Intrinsic);
-    document.append_child(popup, list, ItemSize::Fixed(OPTIONS_MAX_HEIGHT));
+    let list = with_document(Document::create_scroll);
 
-    let overlay = document.create_overlay(OverlayAnchor::Node(trigger), Placement::BelowStart);
-    document.set_overlay_content(overlay, popup);
+    let popup = view! {
+        <column spacing={6.0}>
+            {search}
+            @fixed(OPTIONS_MAX_HEIGHT) {list}
+        </column>
+    };
 
-    let root = unstyled::column(0.0);
-    document.append_child(root, trigger, ItemSize::Intrinsic);
-    document.append_child(root, overlay, ItemSize::Intrinsic);
+    let overlay = with_document(|document| {
+        let overlay = document.create_overlay(OverlayAnchor::Node(trigger), Placement::BelowStart);
+        document.set_overlay_content(overlay, popup);
+        overlay
+    });
+
+    let root = view! {
+        <column spacing={0.0}>
+            {trigger}
+            {overlay}
+        </column>
+    };
+
+    let rows = with_document(|document| {
+        let mut rows = Vec::new();
+        for label in &options {
+            rows.push(add_row(document, select, list, label));
+        }
+        rows
+    });
 
     let (highlighted_read, highlighted_write) = create_signal(selected);
     let (selected_read, selected_write) = create_signal(selected);
-    let select = document.create_shadow("select", root, Vec::new());
-    document.set_component_state(
-        select,
-        State {
-            trigger,
-            overlay,
-            search,
-            list,
-            rows: Vec::new(),
-            selected_read,
-            selected_write,
-            highlighted: selected,
-            highlighted_read,
-            highlighted_write,
-            on_change: None,
-        },
-    );
 
-    for label in options {
-        add_row(document, select, label);
-    }
+    with_document(|document| {
+        set_component_state(
+            document,
+            select,
+            State {
+                trigger,
+                overlay,
+                search,
+                list,
+                rows,
+                selected_read,
+                selected_write,
+                highlighted: selected,
+                highlighted_read,
+                highlighted_write,
+                on_change: None,
+            },
+        );
+    });
 
     unstyled::set_button_on_click(trigger, move |document| {
         open(document, select);
@@ -83,8 +100,10 @@ fn select_in(document: &mut Document, options: &[String], selected: Option<usize
     unstyled::set_button_on_key(trigger, move |document, press| {
         trigger_key(document, select, press)
     });
-    document.set_overlay_on_dismiss(overlay, move |_document| {
-        unstyled::focus_button(trigger);
+    with_document(|document| {
+        document.set_overlay_on_dismiss(overlay, move |_document| {
+            unstyled::focus_button(trigger);
+        });
     });
     unstyled::set_text_input_on_change(search, move |document, text| {
         filter(document, select, &text);
@@ -99,28 +118,16 @@ fn select_in(document: &mut Document, options: &[String], selected: Option<usize
         navigate(document, select, press)
     });
 
-    select
+    root
 }
 
-fn add_row(document: &mut Document, select: NodeId, label: &str) {
+fn add_row(document: &mut Document, select: NodeId, list: NodeId, label: &str) -> Row {
     let text = document.create_text(label.to_owned(), FONT_SIZE, Color32::WHITE);
     let button = view! { <unstyled::button content={Box::new(move |_handle| text)} /> };
     unstyled::set_button_tab_stop(button, false);
     let visibility = document.create_visibility(true);
     document.set_visibility_child(visibility, button);
-
-    let state = document.component_state::<State>(select);
-    let list = state.list;
     document.append_scroll_item(list, visibility);
-    document
-        .component_state_mut::<State>(select)
-        .rows
-        .push(Row {
-            button,
-            visibility,
-            label: text,
-            visible: true,
-        });
 
     unstyled::set_button_on_click(button, move |document| {
         let index = document
@@ -132,6 +139,13 @@ fn add_row(document: &mut Document, select: NodeId, label: &str) {
             confirm(document, select, index);
         }
     });
+
+    Row {
+        button,
+        visibility,
+        label: text,
+        visible: true,
+    }
 }
 
 pub fn select_selected(document: &Document, select: NodeId) -> Option<usize> {
@@ -183,11 +197,13 @@ pub fn set_select_options(document: &mut Document, select: NodeId, options: &[St
     for visibility in old_rows {
         document.remove_node(visibility);
     }
-    document.component_state_mut::<State>(select).rows.clear();
+    let list = document.component_state::<State>(select).list;
+    let mut rows = Vec::new();
     for label in options {
-        add_row(document, select, label);
+        rows.push(add_row(document, select, list, label));
     }
     let state = document.component_state_mut::<State>(select);
+    state.rows = rows;
     state.selected_write.set(None);
     state.highlighted = None;
     state.highlighted_write.set(None);

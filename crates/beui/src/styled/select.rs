@@ -31,7 +31,7 @@ pub fn select(
 ) -> NodeId {
     let mut on_change = on_change;
 
-    let inner = unstyled::select(&options, None);
+    let inner = view! { <unstyled::select options={options.clone()} /> };
     let selected_signal =
         with_document(|document| unstyled::select_selected_signal(document, inner));
     with_document(|document| {

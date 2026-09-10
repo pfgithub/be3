@@ -5,7 +5,10 @@ use crate::color::Color32;
 use crate::document::Document;
 use crate::input::{Key, KeyPress};
 use crate::node::{Handler, NodeId};
-use crate::reactive::{bind, create_signal, with_document, ReadSignal, WriteSignal};
+use crate::reactive::{
+    self, bind, create_signal, current_component, set_component_detail, set_component_state,
+    with_document, ReadSignal, WriteSignal,
+};
 use crate::unstyled;
 use beui_macros::view;
 
@@ -34,72 +37,78 @@ struct State {
 }
 
 pub fn choice(labels: &[&str], selected: Option<usize>, kind: ChoiceKind) -> NodeId {
-    with_document(|document| choice_in(document, labels, selected, kind))
-}
+    reactive::component(kind_name(kind), move || {
+        let choice = current_component();
+        let selected = selected.filter(|index| *index < labels.len());
+        let line = if kind == ChoiceKind::Tabs {
+            unstyled::row(6.0)
+        } else {
+            unstyled::column(6.0)
+        };
+        let (selected_read, selected_write) = create_signal(selected);
 
-fn choice_in(
-    document: &mut Document,
-    labels: &[&str],
-    selected: Option<usize>,
-    kind: ChoiceKind,
-) -> NodeId {
-    let selected = selected.filter(|index| *index < labels.len());
-    let line = if kind == ChoiceKind::Tabs {
-        unstyled::row(6.0)
-    } else {
-        unstyled::column(6.0)
-    };
-    let choice = document.create_shadow(kind_name(kind), line, Vec::new());
-    document.set_component_detail(choice, selected.map_or("", |index| labels[index]));
-    let (selected_read, selected_write) = create_signal(selected);
-    document.set_component_state(
-        choice,
-        State {
-            options: Vec::new(),
-            selected_read,
-            selected_write,
-            kind,
-            search: String::new(),
-            typed_at: None,
-            on_change: None,
-        },
-    );
-    let mut focused_signals = Vec::new();
-    for (index, title) in labels.iter().enumerate() {
-        let label = document.create_text(*title, FONT_SIZE, Color32::WHITE);
-        let button = view! { <unstyled::button content={Box::new(move |_handle| label)} /> };
-        unstyled::set_button_tab_stop(button, index == selected.unwrap_or(0));
+        let (options, focused_signals) = with_document(|document| {
+            let mut options = Vec::new();
+            let mut focused_signals = Vec::new();
+            for (index, title) in labels.iter().enumerate() {
+                let label = document.create_text(*title, FONT_SIZE, Color32::WHITE);
+                let button =
+                    view! { <unstyled::button content={Box::new(move |_handle| label)} /> };
+                unstyled::set_button_tab_stop(button, index == selected.unwrap_or(0));
 
-        unstyled::set_button_on_click(button, move |document| {
-            set_choice_selected(document, choice, Some(index));
+                unstyled::set_button_on_click(button, move |document| {
+                    set_choice_selected(document, choice, Some(index));
+                });
+                focused_signals.push(unstyled::button_focused(document, button));
+                unstyled::set_button_on_key(button, move |document, press| {
+                    key(document, choice, index, press)
+                });
+                if kind == ChoiceKind::Listbox {
+                    let focusable = unstyled::button_focusable(document, button);
+                    document.set_focusable_on_text(focusable, move |document, text| {
+                        typeahead(document, choice, index, &text);
+                    });
+                }
+                document.append_child(line, button, ItemSize::Intrinsic);
+                options.push(Option_ { button, label });
+            }
+            (options, focused_signals)
         });
-        focused_signals.push(unstyled::button_focused(document, button));
-        unstyled::set_button_on_key(button, move |document, press| {
-            key(document, choice, index, press)
+
+        with_document(|document| {
+            set_component_detail(
+                document,
+                choice,
+                selected.map_or(String::new(), |index| labels[index].to_owned()),
+            );
+            set_component_state(
+                document,
+                choice,
+                State {
+                    options,
+                    selected_read,
+                    selected_write,
+                    kind,
+                    search: String::new(),
+                    typed_at: None,
+                    on_change: None,
+                },
+            );
         });
+
         if kind == ChoiceKind::Listbox {
-            let focusable = unstyled::button_focusable(document, button);
-            document.set_focusable_on_text(focusable, move |document, text| {
-                typeahead(document, choice, index, &text);
+            bind(move |document| {
+                let any_focused = focused_signals.iter().any(ReadSignal::get);
+                if !any_focused {
+                    let state = document.component_state_mut::<State>(choice);
+                    state.search.clear();
+                    state.typed_at = None;
+                }
             });
         }
-        document.append_child(line, button, ItemSize::Intrinsic);
-        document
-            .component_state_mut::<State>(choice)
-            .options
-            .push(Option_ { button, label });
-    }
-    if kind == ChoiceKind::Listbox {
-        bind(move |document| {
-            let any_focused = focused_signals.iter().any(ReadSignal::get);
-            if !any_focused {
-                let state = document.component_state_mut::<State>(choice);
-                state.search.clear();
-                state.typed_at = None;
-            }
-        });
-    }
-    choice
+
+        line
+    })
 }
 
 pub fn choice_selected(document: &Document, choice: NodeId) -> Option<usize> {
