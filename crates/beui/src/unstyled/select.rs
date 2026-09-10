@@ -3,6 +3,7 @@ use crate::color::Color32;
 use crate::document::Document;
 use crate::input::{Key, KeyPress};
 use crate::node::NodeId;
+use crate::reactive::VisibilityBuilder;
 use crate::reactive::{
     bind, create_memo, create_signal, current_component, set_component_state, with_document,
     Callback, ColumnBuilder, Memo, Prop, ReadSignal, WriteSignal,
@@ -40,7 +41,8 @@ struct Row {
     button: NodeId,
     visibility: NodeId,
     label: String,
-    visible: bool,
+    visible: ReadSignal<bool>,
+    set_visible: WriteSignal<bool>,
 }
 
 struct State {
@@ -258,8 +260,8 @@ fn add_row(
         />
     };
     button_cell.set(Some(button));
-    let visibility = document.create_visibility(true);
-    document.set_visibility_child(visibility, button);
+    let (visible, set_visible) = create_signal(true);
+    let visibility = view! { <visibility visible={visible.clone()}>{button}</visibility> };
     document.append_scroll_item(list, visibility);
 
     let hovered = unstyled::button_hovered(document, button);
@@ -273,7 +275,8 @@ fn add_row(
         button,
         visibility,
         label: label.to_owned(),
-        visible: true,
+        visible,
+        set_visible,
     }
 }
 
@@ -460,16 +463,20 @@ fn filter(document: &mut Document, select: NodeId, text: &str) {
     let mut first_visible = None;
     for (index, label) in labels.iter().enumerate() {
         let visible = query.is_empty() || label.to_lowercase().contains(&query);
-        let visibility = document.component_state::<State>(select).rows[index].visibility;
-        document.set_visible(visibility, visible);
-        document.component_state_mut::<State>(select).rows[index].visible = visible;
+        let set_visible = document.component_state::<State>(select).rows[index]
+            .set_visible
+            .clone();
+        set_visible.set(visible);
         if visible && first_visible.is_none() {
             first_visible = Some(index);
         }
     }
     let highlighted = document.component_state::<State>(select).highlighted;
-    let still_visible = highlighted
-        .is_some_and(|index| document.component_state::<State>(select).rows[index].visible);
+    let still_visible = highlighted.is_some_and(|index| {
+        document.component_state::<State>(select).rows[index]
+            .visible
+            .get()
+    });
     if !still_visible {
         set_highlighted(document, select, first_visible);
     }
@@ -485,7 +492,7 @@ fn navigate(document: &mut Document, select: NodeId, press: KeyPress) -> bool {
         .rows
         .iter()
         .enumerate()
-        .filter(|(_, row)| row.visible)
+        .filter(|(_, row)| row.visible.get())
         .map(|(index, _)| index)
         .collect();
     if visible.is_empty() {
