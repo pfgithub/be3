@@ -24,47 +24,44 @@ pub fn slider(value: Prop<f32>, on_change: Option<Handler<f32>>) -> NodeId {
     let shadow = current_component();
     let mut on_change = on_change;
 
-    let slider = view! { <unstyled::slider value={0.0} /> };
-    let (slider_value, dragging, focused) = with_document(|document| {
-        (
-            unstyled::slider_value(document, slider),
-            unstyled::slider_dragging(document, slider),
-            unstyled::slider_focused(document, slider),
-        )
-    });
+    let slider = view! {
+        <unstyled::slider value={0.0} content={Box::new(move |handle: unstyled::SliderHandle| {
+            let filled_percent = {
+                let slider_value = handle.value.clone();
+                Prop::Dynamic(Box::new(move || filled_size(slider_value.get())))
+            };
+            let rest_percent = {
+                let slider_value = handle.value.clone();
+                Prop::Dynamic(Box::new(move || rest_size(slider_value.get())))
+            };
+            let knob_color = Prop::Dynamic(Box::new(move || knob_fill_color(handle.dragging.get())));
 
-    let filled_percent = {
-        let slider_value = slider_value.clone();
-        Prop::Dynamic(Box::new(move || filled_size(slider_value.get())))
-    };
-    let rest_percent = {
-        let slider_value = slider_value.clone();
-        Prop::Dynamic(Box::new(move || rest_size(slider_value.get())))
-    };
-    let knob_color = Prop::Dynamic(Box::new(move || knob_fill_color(dragging.get())));
+            create_effect({
+                let slider_value = handle.value.clone();
+                move || {
+                    let value = slider_value.get();
+                    with_document(|document| set_component_detail(document, shadow, detail(value)));
+                }
+            });
 
-    let ring = view! {
-        <outline color={ACCENT} width={FOCUS_RING_WIDTH} radius={RADIUS} offset={FOCUS_RING_OFFSET} visible={focused}>
-            <sized height={HEIGHT}>
-                <centered_row spacing={0.0}>
-                    @percent(filled_percent) <sized height={TRACK_HEIGHT}><fill color={ACCENT} radius={TRACK_RADIUS}></fill></sized>
-                    <sized width={KNOB_SIZE} height={KNOB_SIZE}><fill color={knob_color} radius={KNOB_RADIUS}></fill></sized>
-                    @percent(rest_percent) <sized height={TRACK_HEIGHT}><fill color={TRACK} radius={TRACK_RADIUS}></fill></sized>
-                </centered_row>
-            </sized>
-        </outline>
+            view! {
+                <outline color={ACCENT} width={FOCUS_RING_WIDTH} radius={RADIUS} offset={FOCUS_RING_OFFSET} visible={handle.focused}>
+                    <sized height={HEIGHT}>
+                        <centered_row spacing={0.0}>
+                            @percent(filled_percent) <sized height={TRACK_HEIGHT}><fill color={ACCENT} radius={TRACK_RADIUS}></fill></sized>
+                            <sized width={KNOB_SIZE} height={KNOB_SIZE}><fill color={knob_color} radius={KNOB_RADIUS}></fill></sized>
+                            @percent(rest_percent) <sized height={TRACK_HEIGHT}><fill color={TRACK} radius={TRACK_RADIUS}></fill></sized>
+                        </centered_row>
+                    </sized>
+                </outline>
+            }
+        })} />
     };
-    unstyled::set_slider_child(slider, ring);
 
     unstyled::set_slider_on_change(slider, move |document, value| {
         if let Some(handler) = &mut on_change {
             handler(document, value);
         }
-    });
-
-    create_effect(move || {
-        let value = slider_value.get();
-        with_document(|document| set_component_detail(document, shadow, detail(value)));
     });
 
     value.apply(move |value| {

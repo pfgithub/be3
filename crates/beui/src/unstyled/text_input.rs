@@ -28,6 +28,14 @@ const ALL_CLICKS: u32 = 4;
 
 type KeyOverrideHandler = Box<dyn FnMut(&mut Document, KeyPress) -> bool>;
 
+pub struct TextInputHandle {
+    pub field: NodeId,
+    pub hovered: ReadSignal<bool>,
+    pub focused: ReadSignal<bool>,
+}
+
+pub type TextInputContent = Box<dyn FnOnce(TextInputHandle) -> NodeId>;
+
 struct State {
     click_catcher: NodeId,
     focusable: NodeId,
@@ -47,7 +55,7 @@ struct State {
 }
 
 #[component]
-pub fn text_input(value: String) -> NodeId {
+pub fn text_input(value: String, content: Option<TextInputContent>) -> NodeId {
     let input = current_component();
     let (hovered_read, hovered_write) = create_signal(false);
     let (focused_read, focused_write) = create_signal(false);
@@ -63,6 +71,15 @@ pub fn text_input(value: String) -> NodeId {
         document.set_padding_child(field, text);
         field
     });
+
+    let content_node = match content {
+        Some(build) => build(TextInputHandle {
+            field,
+            hovered: hovered_read.clone(),
+            focused: focused_read.clone(),
+        }),
+        None => field,
+    };
 
     let click_catcher_cell: Rc<Cell<Option<NodeId>>> = Rc::new(Cell::new(None));
 
@@ -119,7 +136,7 @@ pub fn text_input(value: String) -> NodeId {
                             });
                         })}
                     >
-                        {field}
+                        {content_node}
                     </click_catcher>
                 };
                 click_catcher_cell.set(Some(click_catcher));

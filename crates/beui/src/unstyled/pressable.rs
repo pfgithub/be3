@@ -8,12 +8,11 @@ use crate::input::CursorIcon;
 use crate::document::Document;
 use crate::node::{ClickHandler, Handler, NodeId};
 use crate::reactive::{
-    create_signal, current_component, set_component_state, with_document, ClickCatcherBuilder,
-    FocusableBuilder, ReadSignal, WriteSignal,
+    self, create_signal, current_component, set_component_state, with_document, Children,
+    ClickCatcherBuilder, FocusableBuilder, ReadSignal, WriteSignal,
 };
 
 struct State {
-    click_catcher: NodeId,
     hovered_read: ReadSignal<bool>,
     hovered_write: WriteSignal<bool>,
     active_read: ReadSignal<bool>,
@@ -27,11 +26,12 @@ struct State {
 }
 
 #[component]
-pub fn pressable() -> NodeId {
+pub fn pressable(children: Children) -> NodeId {
     let pressable = current_component();
     let (hovered_read, hovered_write) = create_signal(false);
     let (active_read, active_write) = create_signal(false);
     let (focused_read, focused_write) = create_signal(false);
+    let child = children.into_first();
 
     let click_catcher_cell: Rc<Cell<Option<NodeId>>> = Rc::new(Cell::new(None));
     let on_activate_change_cell = click_catcher_cell.clone();
@@ -77,23 +77,20 @@ pub fn pressable() -> NodeId {
                                 &mut state.on_active_change
                             });
                         })}
-                    ></click_catcher>
+                        children={child.map(reactive::intrinsic)}
+                    />
                 };
                 click_catcher_cell.set(Some(click_catcher));
                 click_catcher
             }}
         </focusable>
     };
-    let click_catcher = click_catcher_cell
-        .get()
-        .expect("pressable click catcher not yet built");
 
     with_document(|document| {
         set_component_state(
             document,
             pressable,
             State {
-                click_catcher,
                 hovered_read,
                 hovered_write,
                 active_read,
@@ -109,13 +106,6 @@ pub fn pressable() -> NodeId {
     });
 
     focusable
-}
-
-pub fn set_pressable_child(pressable: NodeId, child: NodeId) {
-    with_document(|document| {
-        let click_catcher = document.component_state::<State>(pressable).click_catcher;
-        document.set_click_catcher_child(click_catcher, child);
-    });
 }
 
 pub fn pressable_hovered(document: &Document, pressable: NodeId) -> ReadSignal<bool> {

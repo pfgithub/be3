@@ -14,8 +14,15 @@ use crate::reactive::{
 
 const STEP: f32 = 0.05;
 
+pub struct SliderHandle {
+    pub value: ReadSignal<f32>,
+    pub dragging: ReadSignal<bool>,
+    pub focused: ReadSignal<bool>,
+}
+
+pub type SliderContent = Box<dyn FnOnce(SliderHandle) -> NodeId>;
+
 struct State {
-    click_catcher: NodeId,
     focusable: NodeId,
     value_read: ReadSignal<f32>,
     value_write: WriteSignal<f32>,
@@ -29,11 +36,19 @@ struct State {
 }
 
 #[component]
-pub fn slider(value: f32) -> NodeId {
+pub fn slider(value: f32, content: Option<SliderContent>) -> NodeId {
     let slider = current_component();
     let (value_read, value_write) = create_signal(value.clamp(0.0, 1.0));
     let (dragging_read, dragging_write) = create_signal(false);
     let (focused_read, focused_write) = create_signal(false);
+
+    let content_node = content.map(|build| {
+        build(SliderHandle {
+            value: value_read.clone(),
+            dragging: dragging_read.clone(),
+            focused: focused_read.clone(),
+        })
+    });
 
     let click_catcher_cell: Rc<Cell<Option<NodeId>>> = Rc::new(Cell::new(None));
 
@@ -86,16 +101,14 @@ pub fn slider(value: f32) -> NodeId {
                                 &mut state.on_drag_change
                             });
                         })}
-                    ></click_catcher>
+                        children={content_node.map(reactive::intrinsic)}
+                    />
                 };
                 click_catcher_cell.set(Some(click_catcher));
                 click_catcher
             }}
         </focusable>
     };
-    let click_catcher = click_catcher_cell
-        .get()
-        .expect("slider click catcher not yet built");
 
     with_document(|document| {
         reactive::set_component_detail(document, slider, detail(value_read.get()));
@@ -103,7 +116,6 @@ pub fn slider(value: f32) -> NodeId {
             document,
             slider,
             State {
-                click_catcher,
                 focusable,
                 value_read,
                 value_write,
@@ -119,13 +131,6 @@ pub fn slider(value: f32) -> NodeId {
     });
 
     focusable
-}
-
-pub fn set_slider_child(slider: NodeId, child: NodeId) {
-    with_document(|document| {
-        let click_catcher = document.component_state::<State>(slider).click_catcher;
-        document.set_click_catcher_child(click_catcher, child);
-    });
 }
 
 pub fn slider_value(document: &Document, slider: NodeId) -> ReadSignal<f32> {

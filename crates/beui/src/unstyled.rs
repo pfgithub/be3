@@ -34,7 +34,7 @@ pub use menu::{
     menu_list_row_submenu_content, menu_list_row_submenu_overlay, MenuItem,
 };
 pub use pressable::{
-    focus_pressable, pressable_active, pressable_focused, pressable_hovered, set_pressable_child,
+    focus_pressable, pressable_active, pressable_focused, pressable_hovered,
     set_pressable_on_active_change, set_pressable_on_click, set_pressable_on_focus_change,
     set_pressable_on_hover_change, PressableBuilder,
 };
@@ -45,9 +45,8 @@ pub use select::{
     set_select_on_change, set_select_open, set_select_options, set_select_selected,
 };
 pub use slider::{
-    focus_slider, set_slider_child, set_slider_on_change, set_slider_on_drag_change,
-    set_slider_on_focus_change, set_slider_value, slider_dragging, slider_focused, slider_value,
-    SliderBuilder,
+    focus_slider, set_slider_on_change, set_slider_on_drag_change, set_slider_on_focus_change,
+    set_slider_value, slider_dragging, slider_focused, slider_value, SliderBuilder, SliderHandle,
 };
 pub use text_input::{
     focus_text_input, set_text_input_caret_color, set_text_input_child, set_text_input_on_change,
@@ -55,7 +54,7 @@ pub use text_input::{
     set_text_input_on_submit, set_text_input_padding, set_text_input_placeholder,
     set_text_input_placeholder_color, set_text_input_selection_color, set_text_input_value,
     text_input_field, text_input_focused, text_input_hovered, text_input_text, text_input_value,
-    TextInputBuilder,
+    TextInputBuilder, TextInputHandle,
 };
 pub use toggle::{
     focus_toggle, set_toggle_checked, set_toggle_on_change, toggle_active, toggle_checked,
