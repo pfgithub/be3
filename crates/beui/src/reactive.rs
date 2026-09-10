@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::hash::Hash;
 use std::rc::Rc;
 
-use crate::base::ItemSize;
+use crate::base::{Align, Direction, ItemSize};
 use crate::color::Color32;
 use crate::document::Document;
 use crate::node::{ClickHandler, Handler, NodeId};
@@ -388,24 +388,43 @@ pub use crate::base::text::TextBuilder;
 pub use crate::base::visibility::VisibilityBuilder;
 
 #[component(base)]
+pub fn list(
+    direction: Direction,
+    align: Option<Align>,
+    spacing: f32,
+    children: Children,
+) -> NodeId {
+    let list = with_document(|document| {
+        let list = document.create_list(direction, spacing);
+        if let Some(align) = align {
+            document.set_list_align(list, align);
+        }
+        list
+    });
+    children.mount(list);
+    list
+}
+
+#[component(base)]
 pub fn row(spacing: f32, children: Children) -> NodeId {
-    let row = unstyled::row(spacing);
-    children.mount(row);
-    row
+    view! { <list direction={Direction::Horizontal} spacing={spacing} children={children} /> }
 }
 
 #[component(base)]
 pub fn column(spacing: f32, children: Children) -> NodeId {
-    let column = unstyled::column(spacing);
-    children.mount(column);
-    column
+    view! { <list direction={Direction::Vertical} spacing={spacing} children={children} /> }
 }
 
 #[component(base)]
 pub fn centered_row(spacing: f32, children: Children) -> NodeId {
-    let row = unstyled::centered_row(spacing);
-    children.mount(row);
-    row
+    view! {
+        <list
+            direction={Direction::Horizontal}
+            align={Align::Center}
+            spacing={spacing}
+            children={children}
+        />
+    }
 }
 
 #[component(base)]
@@ -445,7 +464,7 @@ where
 {
     let key = key.expect("for_each requires a `key` callback");
     let view = view.expect("for_each requires a `view` callback");
-    let parent = unstyled::column(spacing);
+    let parent = view! { <column spacing={spacing} /> };
     let existing: Rc<RefCell<HashMap<K, (NodeId, ItemSize)>>> =
         Rc::new(RefCell::new(HashMap::new()));
     items.apply(move |items| {

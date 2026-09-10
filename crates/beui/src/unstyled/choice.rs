@@ -1,13 +1,14 @@
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use crate::base::ItemSize;
+use crate::base::Direction;
 use crate::document::Document;
 use crate::input::{Key, KeyPress};
 use crate::node::NodeId;
 use crate::reactive::{
-    self, bind, create_memo, create_signal, current_component, set_component_detail,
-    set_component_state, untrack, with_document, Callback, Memo, Prop, ReadSignal, WriteSignal,
+    self, bind, create_memo, create_signal, current_component, intrinsic, set_component_detail,
+    set_component_state, untrack, with_document, Callback, ListBuilder, Memo, Prop, ReadSignal,
+    WriteSignal,
 };
 use crate::unstyled;
 use crate::unstyled::ButtonHandle;
@@ -55,17 +56,18 @@ pub fn choice(
 ) -> NodeId {
     let choice = reactive::component(kind_name(kind), move || {
         let choice = current_component();
-        let line = if kind == ChoiceKind::Tabs {
-            unstyled::row(6.0)
+        let direction = if kind == ChoiceKind::Tabs {
+            Direction::Horizontal
         } else {
-            unstyled::column(6.0)
+            Direction::Vertical
         };
         let (selected_read, set_selected) = create_signal(None);
 
         let option = Rc::new(option);
-        let (options, focused_signals) = with_document(|document| {
+        let (options, focused_signals, buttons) = with_document(|document| {
             let mut options = Vec::new();
             let mut focused_signals = Vec::new();
+            let mut buttons = Vec::new();
             for (index, title) in labels.iter().enumerate() {
                 let label = (*title).to_owned();
                 let tab_stop = {
@@ -112,11 +114,15 @@ pub fn choice(
                     />
                 };
                 focused_signals.push(unstyled::button_focused(document, button));
-                document.append_child(line, button, ItemSize::Intrinsic);
+                buttons.push(intrinsic(button));
                 options.push(Option_ { button, label });
             }
-            (options, focused_signals)
+            (options, focused_signals, buttons)
         });
+
+        let line = view! {
+            <list direction={direction} spacing={6.0} children={buttons} />
+        };
 
         with_document(|document| {
             set_component_detail(document, choice, String::new());

@@ -78,12 +78,13 @@ pub fn select(
     let select = current_component();
     let selected_prop = selected;
     let selected = selected_prop.peek().filter(|index| *index < options.len());
-    let option = Rc::new(option.unwrap_or_else(|| Box::new(|_| unstyled::column(0.0))));
+    let option =
+        Rc::new(option.unwrap_or_else(|| Box::new(|_| view! { <column spacing={0.0} /> })));
 
     let (highlighted_read, highlighted_write) = create_signal(selected);
     let (selected_read, selected_write) = create_signal(selected);
 
-    let trigger = trigger.unwrap_or_else(|| Box::new(|_| unstyled::column(0.0)));
+    let trigger = trigger.unwrap_or_else(|| Box::new(|_| view! { <column spacing={0.0} /> }));
     let trigger_content: ButtonContent = {
         let selected = selected_read.clone();
         Box::new(move |handle: ButtonHandle| {

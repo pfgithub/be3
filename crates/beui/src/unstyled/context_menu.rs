@@ -1,15 +1,14 @@
 use beui_macros::{component, view};
 
 use crate::base::overlay::{OverlayAnchor, Placement};
-use crate::base::ItemSize;
 use crate::document::Document;
 use crate::geometry::Pos2;
 use crate::input::{CursorIcon, PointerPress};
 use crate::node::NodeId;
 use crate::reactive::{
     current_component, set_component_state, with_document, Callback, ClickCatcherBuilder,
+    ColumnBuilder,
 };
-use crate::unstyled;
 use crate::unstyled::menu::{self, MenuItem, MenuPanel, MenuRow};
 
 struct State {
@@ -29,7 +28,7 @@ pub fn context_menu(
     on_select: Callback<Vec<usize>>,
 ) -> NodeId {
     let context_menu = current_component();
-    let row = row.unwrap_or_else(|| std::rc::Rc::new(|_| unstyled::column(0.0)));
+    let row = row.unwrap_or_else(|| std::rc::Rc::new(|_| view! { <column spacing={0.0} /> }));
     let panel = panel.unwrap_or_else(|| std::rc::Rc::new(|content| content));
     let (overlay, content) = with_document(|document| {
         let overlay =
@@ -37,12 +36,6 @@ pub fn context_menu(
         let content = menu::menu_list(document, &items, &row, &panel);
         document.set_overlay_content(overlay, panel(content));
         (overlay, content)
-    });
-
-    let root = unstyled::column(0.0);
-    with_document(|document| {
-        document.append_child(root, region, ItemSize::Intrinsic);
-        document.append_child(root, overlay, ItemSize::Intrinsic);
     });
 
     let catcher = view! {
@@ -57,7 +50,10 @@ pub fn context_menu(
                 });
             }}
         >
-            {root}
+            <column spacing={0.0}>
+                {region}
+                {overlay}
+            </column>
         </click_catcher>
     };
 

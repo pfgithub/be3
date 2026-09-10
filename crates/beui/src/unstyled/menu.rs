@@ -1,16 +1,12 @@
-use std::cell::Cell;
-use std::rc::Rc;
-
 use crate::base::overlay::{OverlayAnchor, Placement};
-use crate::base::ItemSize;
 use crate::document::Document;
 use crate::input::{Key, KeyPress};
 use crate::node::NodeId;
 use beui_macros::view;
 
 use crate::reactive::{
-    bind, create_signal, with_document, with_reactive_scope, Callback, FocusableBuilder, Prop,
-    ReadSignal, WriteSignal,
+    bind, create_signal, intrinsic, with_document, with_reactive_scope, Callback, ColumnBuilder,
+    FocusableBuilder, Prop, ReadSignal, WriteSignal,
 };
 use crate::unstyled;
 use crate::unstyled::button::ButtonHandle;
@@ -81,9 +77,7 @@ fn build_menu_list(
     row: &MenuRow,
     panel: &MenuPanel,
 ) -> NodeId {
-    let column = unstyled::column(2.0);
-    let menu_cell: Rc<Cell<Option<NodeId>>> = Rc::new(Cell::new(None));
-    let key_cell = menu_cell.clone();
+    let menu = document.reserve_shadow();
     let (active, set_active) = create_signal(None);
     let root_tab_stop = {
         let active = active.clone();
@@ -94,27 +88,14 @@ fn build_menu_list(
             <focusable
                 tab_stop={root_tab_stop}
                 on_key={move |press: KeyPress| {
-                    let menu = key_cell.get().expect("menu not yet initialized");
                     with_document(|document| root_key(document, menu, press))
                 }}
             ></focusable>
         }
     });
-    let wrapper = unstyled::column(0.0);
-    document.append_child(wrapper, root, ItemSize::Intrinsic);
-    document.append_child(wrapper, column, ItemSize::Intrinsic);
-    let menu = document.create_shadow("menu", wrapper, Vec::new());
-    menu_cell.set(Some(menu));
-    document.set_component_state(
-        menu,
-        State {
-            rows: Vec::new(),
-            root,
-            set_active,
-            on_select: Callback::empty(),
-        },
-    );
 
+    let mut lines = Vec::new();
+    let mut rows = Vec::new();
     for (index, item) in items.iter().enumerate() {
         let disabled = item.disabled;
         let tab_stop = {
@@ -151,14 +132,14 @@ fn build_menu_list(
                 }}
             />
         };
-        document.append_child(column, button, ItemSize::Intrinsic);
+        lines.push(intrinsic(button));
 
         let (submenu, submenu_content) = if item.children.is_empty() {
             (None, None)
         } else {
             let overlay =
                 document.create_overlay(OverlayAnchor::Node(button), Placement::RightStart);
-            document.append_child(column, overlay, ItemSize::Intrinsic);
+            lines.push(intrinsic(overlay));
             let content = build_menu_list(
                 document,
                 &item.children,
@@ -174,7 +155,7 @@ fn build_menu_list(
             (Some(overlay), Some(content))
         };
 
-        document.component_state_mut::<State>(menu).rows.push(Row {
+        rows.push(Row {
             button,
             disabled: item.disabled,
             submenu,
@@ -188,6 +169,23 @@ fn build_menu_list(
             }
         });
     }
+
+    let wrapper = view! {
+        <column spacing={0.0}>
+            {root}
+            <column spacing={2.0} children={lines} />
+        </column>
+    };
+    document.finish_shadow(menu, "menu", wrapper, Vec::new());
+    document.set_component_state(
+        menu,
+        State {
+            rows,
+            root,
+            set_active,
+            on_select: Callback::empty(),
+        },
+    );
 
     menu
 }
