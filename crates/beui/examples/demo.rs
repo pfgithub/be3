@@ -109,7 +109,7 @@ fn scroll_row(index: usize, rows: Rows, compact: bool) -> NodeId {
         create_memo(move || selected.get() == Some(index))
     };
 
-    let button = unstyled::ButtonBuilder::default().build();
+    let button = view! { <unstyled::button /> };
     let (hovered, focused) = with_document(|document| {
         (
             unstyled::button_hovered(document, button),

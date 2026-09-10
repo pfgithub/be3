@@ -6,6 +6,7 @@ use crate::input::{Key, KeyPress};
 use crate::node::{Handler, NodeId};
 use crate::reactive::{create_signal, with_document, ReadSignal, WriteSignal};
 use crate::unstyled;
+use beui_macros::view;
 
 const FONT_SIZE: f32 = 14.0;
 const OPTIONS_MAX_HEIGHT: f32 = 240.0;
@@ -37,11 +38,9 @@ pub fn select(options: &[String], selected: Option<usize>) -> NodeId {
 
 fn select_in(document: &mut Document, options: &[String], selected: Option<usize>) -> NodeId {
     let selected = selected.filter(|index| *index < options.len());
-    let trigger = unstyled::ButtonBuilder::default().build();
+    let trigger = view! { <unstyled::button /> };
 
-    let search = unstyled::TextInputBuilder::default()
-        .value(String::new())
-        .build();
+    let search = view! { <unstyled::text_input value={String::new()} /> };
     let list = document.create_scroll();
     let popup = unstyled::column(6.0);
     document.append_child(popup, search, ItemSize::Intrinsic);
@@ -104,7 +103,7 @@ fn select_in(document: &mut Document, options: &[String], selected: Option<usize
 }
 
 fn add_row(document: &mut Document, select: NodeId, label: &str) {
-    let button = unstyled::ButtonBuilder::default().build();
+    let button = view! { <unstyled::button /> };
     unstyled::set_button_tab_stop(button, false);
     let text = document.create_text(label.to_owned(), FONT_SIZE, Color32::WHITE);
     unstyled::set_button_child(button, text);

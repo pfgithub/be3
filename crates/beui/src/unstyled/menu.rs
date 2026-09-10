@@ -87,7 +87,7 @@ fn build_menu_list(
     );
 
     for (index, item) in items.iter().enumerate() {
-        let button = unstyled::ButtonBuilder::default().build();
+        let button = view! { <unstyled::button /> };
         unstyled::set_button_tab_stop(button, false);
         document.append_child(column, button, ItemSize::Intrinsic);
 

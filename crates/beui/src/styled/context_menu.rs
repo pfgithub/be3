@@ -25,10 +25,7 @@ pub fn context_menu(
     on_select: Option<Handler<Vec<usize>>>,
 ) -> NodeId {
     let mut on_select = on_select;
-    let inner = unstyled::ContextMenuBuilder::default()
-        .region(region)
-        .items(Vec::new())
-        .build();
+    let inner = view! { <unstyled::context_menu region={region} items={Vec::new()} /> };
 
     unstyled::set_context_menu_on_select(inner, move |document, path| {
         if let Some(handler) = &mut on_select {

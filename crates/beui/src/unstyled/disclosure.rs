@@ -4,6 +4,7 @@ use crate::base::{Direction, ItemSize};
 use crate::document::Document;
 use crate::node::{Handler, NodeId};
 use crate::reactive::{create_signal, with_document, ReadSignal, WriteSignal};
+use beui_macros::view;
 
 struct State {
     visibility: NodeId,
@@ -17,7 +18,7 @@ struct State {
 pub fn disclosure(spacing: f32, open: bool) -> NodeId {
     with_document(|document| {
         let header = document.create_slot("header");
-        let button = unstyled::ButtonBuilder::default().build();
+        let button = view! { <unstyled::button /> };
         unstyled::set_button_child(button, header);
 
         let content = document.create_slot("content");

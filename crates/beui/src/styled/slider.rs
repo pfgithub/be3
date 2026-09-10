@@ -24,7 +24,7 @@ pub fn slider(value: Prop<f32>, on_change: Option<Handler<f32>>) -> NodeId {
     let shadow = current_component();
     let mut on_change = on_change;
 
-    let slider = unstyled::SliderBuilder::default().value(0.0).build();
+    let slider = view! { <unstyled::slider value={0.0} /> };
     let (slider_value, dragging, focused) = with_document(|document| {
         (
             unstyled::slider_value(document, slider),

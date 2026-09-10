@@ -351,7 +351,7 @@ where
 
 #[component]
 pub fn button(children: Children, disabled: Prop<bool>, on_click: Option<ClickHandler>) -> NodeId {
-    let button = unstyled::ButtonBuilder::default().build();
+    let button = view! { <unstyled::button /> };
     if let Some(child) = children.into_first() {
         unstyled::set_button_child(button, child);
     }

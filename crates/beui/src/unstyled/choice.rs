@@ -7,6 +7,7 @@ use crate::input::{Key, KeyPress};
 use crate::node::{Handler, NodeId};
 use crate::reactive::{bind, create_signal, with_document, ReadSignal, WriteSignal};
 use crate::unstyled;
+use beui_macros::view;
 
 const FONT_SIZE: f32 = 14.0;
 
@@ -65,7 +66,7 @@ fn choice_in(
     );
     let mut focused_signals = Vec::new();
     for (index, title) in labels.iter().enumerate() {
-        let button = unstyled::ButtonBuilder::default().build();
+        let button = view! { <unstyled::button /> };
         unstyled::set_button_tab_stop(button, index == selected.unwrap_or(0));
         let label = document.create_text(*title, FONT_SIZE, Color32::WHITE);
         unstyled::set_button_child(button, label);

@@ -309,15 +309,32 @@ impl Parse for ViewChild {
 }
 
 struct ViewNode {
-    tag: Ident,
+    tag_path: Vec<Ident>,
     props: Vec<ViewAttr>,
     children: Option<Vec<ViewChild>>,
+}
+
+fn parse_tag_path(input: ParseStream) -> syn::Result<Vec<Ident>> {
+    let mut segments = vec![input.parse::<Ident>()?];
+    while input.peek(Token![::]) {
+        input.parse::<Token![::]>()?;
+        segments.push(input.parse::<Ident>()?);
+    }
+    Ok(segments)
+}
+
+fn tag_path_string(tag_path: &[Ident]) -> String {
+    tag_path
+        .iter()
+        .map(|segment| segment.to_string())
+        .collect::<Vec<_>>()
+        .join("::")
 }
 
 impl Parse for ViewNode {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         input.parse::<Token![<]>()?;
-        let tag: Ident = input.parse()?;
+        let tag_path = parse_tag_path(input)?;
 
         let mut props = Vec::new();
         while !input.peek(Token![>]) && !input.peek(Token![/]) {
@@ -328,7 +345,7 @@ impl Parse for ViewNode {
             input.parse::<Token![/]>()?;
             input.parse::<Token![>]>()?;
             return Ok(ViewNode {
-                tag,
+                tag_path,
                 props,
                 children: None,
             });
@@ -342,17 +359,19 @@ impl Parse for ViewNode {
 
         input.parse::<Token![<]>()?;
         input.parse::<Token![/]>()?;
-        let close_tag: Ident = input.parse()?;
-        if close_tag != tag {
+        let close_tag_path = parse_tag_path(input)?;
+        if tag_path_string(&close_tag_path) != tag_path_string(&tag_path) {
+            let close_tag = tag_path_string(&close_tag_path);
+            let tag = tag_path_string(&tag_path);
             return Err(syn::Error::new(
-                close_tag.span(),
+                close_tag_path.last().unwrap().span(),
                 format!("mismatched closing tag `</{close_tag}>`, expected `</{tag}>`"),
             ));
         }
         input.parse::<Token![>]>()?;
 
         Ok(ViewNode {
-            tag,
+            tag_path,
             props,
             children: Some(children),
         })
@@ -360,11 +379,18 @@ impl Parse for ViewNode {
 }
 
 fn expand_view_node(node: &ViewNode) -> proc_macro2::TokenStream {
-    let builder_ident = format_ident!(
+    let mut segments = node.tag_path.clone();
+    let last = segments.pop().expect("tag path always has one segment");
+    let builder_name = format_ident!(
         "{}Builder",
-        pascal_case(&node.tag.to_string()),
-        span = node.tag.span()
+        pascal_case(&last.to_string()),
+        span = last.span()
     );
+    let builder_path = if segments.is_empty() {
+        quote! { #builder_name }
+    } else {
+        quote! { #(#segments::)* #builder_name }
+    };
     let setters = node.props.iter().map(|prop| {
         let key = &prop.key;
         let value = &prop.value;
@@ -372,7 +398,7 @@ fn expand_view_node(node: &ViewNode) -> proc_macro2::TokenStream {
     });
 
     match &node.children {
-        None => quote! { #builder_ident::default() #(#setters)* .build() },
+        None => quote! { #builder_path::default() #(#setters)* .build() },
         Some(children) => {
             let items = children.iter().map(|child| {
                 let node = match &child.kind {
@@ -392,7 +418,7 @@ fn expand_view_node(node: &ViewNode) -> proc_macro2::TokenStream {
                 }
             });
             quote! {
-                #builder_ident::default() #(#setters)* .children([#(#items),*]) .build()
+                #builder_path::default() #(#setters)* .children([#(#items),*]) .build()
             }
         }
     }

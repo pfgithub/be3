@@ -25,9 +25,7 @@ pub fn text_input(
     let mut on_change = on_change;
     let mut on_submit = on_submit;
 
-    let input = unstyled::TextInputBuilder::default()
-        .value(String::new())
-        .build();
+    let input = view! { <unstyled::text_input value={String::new()} /> };
     let (field, text, hovered, focused) = with_document(|document| {
         (
             unstyled::text_input_field(document, input),

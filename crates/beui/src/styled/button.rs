@@ -52,7 +52,7 @@ pub fn button(
     disabled: Prop<bool>,
     on_click: Option<ClickHandler>,
 ) -> NodeId {
-    let button = unstyled::ButtonBuilder::default().build();
+    let button = view! { <unstyled::button /> };
     let (hovered, active, focused) = with_document(|document| {
         (
             unstyled::button_hovered(document, button),
