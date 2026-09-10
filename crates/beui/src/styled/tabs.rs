@@ -2,9 +2,8 @@ use beui_macros::component;
 
 use crate::document::Document;
 use crate::node::{Handler, NodeId};
-use crate::reactive::{with_document, Prop};
+use crate::reactive::Prop;
 use crate::styled::choice::{self, Kind};
-use crate::unstyled;
 
 #[component]
 pub fn tabs(
@@ -15,18 +14,17 @@ pub fn tabs(
     let mut on_change = on_change;
     let option_count = labels.len();
     let label_refs: Vec<&str> = labels.iter().map(String::as_str).collect();
-    let tabs = choice::choice(&label_refs, None, Kind::Tabs, move |document, selected| {
-        if let (Some(selected), Some(handler)) = (selected, &mut on_change) {
-            handler(document, selected);
-        }
-    });
-
-    selected.apply(move |selected| {
-        let selected = selected.min(option_count.saturating_sub(1));
-        with_document(|document| unstyled::set_choice_selected(document, tabs, Some(selected)));
-    });
-
-    tabs
+    let selected = selected.map(move |selected| Some(selected.min(option_count.saturating_sub(1))));
+    choice::choice(
+        &label_refs,
+        selected,
+        Kind::Tabs,
+        move |document, selected| {
+            if let (Some(selected), Some(handler)) = (selected, &mut on_change) {
+                handler(document, selected);
+            }
+        },
+    )
 }
 
 pub fn tabs_selected(document: &Document, tabs: NodeId) -> usize {

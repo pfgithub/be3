@@ -2,9 +2,8 @@ use beui_macros::component;
 
 use crate::document::Document;
 use crate::node::{Handler, NodeId};
-use crate::reactive::{with_document, Prop};
+use crate::reactive::Prop;
 use crate::styled::choice::{self, Kind};
-use crate::unstyled;
 
 #[component]
 pub fn listbox(
@@ -14,22 +13,16 @@ pub fn listbox(
 ) -> NodeId {
     let mut on_change = on_change;
     let label_refs: Vec<&str> = labels.iter().map(String::as_str).collect();
-    let control = choice::choice(
+    choice::choice(
         &label_refs,
-        None,
+        selected,
         Kind::Listbox,
         move |document, selected| {
             if let Some(handler) = &mut on_change {
                 handler(document, selected);
             }
         },
-    );
-
-    selected.apply(move |selected| {
-        with_document(|document| unstyled::set_choice_selected(document, control, selected));
-    });
-
-    control
+    )
 }
 
 pub fn listbox_selected(document: &Document, control: NodeId) -> Option<usize> {

@@ -17,11 +17,11 @@ pub(super) use crate::unstyled::ChoiceKind as Kind;
 
 pub(super) fn choice(
     labels: &[&str],
-    selected: Option<usize>,
+    selected: Prop<Option<usize>>,
     kind: Kind,
     on_change: impl FnMut(&mut Document, Option<usize>) + 'static,
 ) -> NodeId {
-    let inner = unstyled::choice(labels, selected, kind);
+    let inner = unstyled::choice(labels, selected, kind, Some(Box::new(on_change)));
     let selected_signal =
         with_document(|document| unstyled::choice_selected_signal(document, inner));
 
@@ -91,8 +91,6 @@ pub(super) fn choice(
             unstyled::set_button_child(button, ring);
         }
     });
-
-    unstyled::set_choice_on_change(inner, on_change);
 
     inner
 }

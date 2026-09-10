@@ -7,7 +7,7 @@ use crate::input::{Key, KeyPress};
 use crate::node::{Handler, NodeId};
 use crate::reactive::{
     self, bind, create_signal, current_component, set_component_detail, set_component_state,
-    with_document, ReadSignal, WriteSignal,
+    with_document, Prop, ReadSignal, WriteSignal,
 };
 use crate::unstyled;
 use beui_macros::view;
@@ -36,16 +36,20 @@ struct State {
     on_change: Option<Handler<Option<usize>>>,
 }
 
-pub fn choice(labels: &[&str], selected: Option<usize>, kind: ChoiceKind) -> NodeId {
-    reactive::component(kind_name(kind), move || {
+pub fn choice(
+    labels: &[&str],
+    selected: Prop<Option<usize>>,
+    kind: ChoiceKind,
+    on_change: Option<Handler<Option<usize>>>,
+) -> NodeId {
+    let choice = reactive::component(kind_name(kind), move || {
         let choice = current_component();
-        let selected = selected.filter(|index| *index < labels.len());
         let line = if kind == ChoiceKind::Tabs {
             unstyled::row(6.0)
         } else {
             unstyled::column(6.0)
         };
-        let (selected_read, selected_write) = create_signal(selected);
+        let (selected_read, selected_write) = create_signal(None);
 
         let (options, focused_signals) = with_document(|document| {
             let mut options = Vec::new();
@@ -54,10 +58,10 @@ pub fn choice(labels: &[&str], selected: Option<usize>, kind: ChoiceKind) -> Nod
                 let label = document.create_text(*title, FONT_SIZE, Color32::WHITE);
                 let button =
                     view! { <unstyled::button content={Box::new(move |_handle| label)} /> };
-                unstyled::set_button_tab_stop(button, index == selected.unwrap_or(0));
+                unstyled::set_button_tab_stop(button, index == 0);
 
                 unstyled::set_button_on_click(button, move |document| {
-                    set_choice_selected(document, choice, Some(index));
+                    select(document, choice, Some(index));
                 });
                 focused_signals.push(unstyled::button_focused(document, button));
                 unstyled::set_button_on_key(button, move |document, press| {
@@ -76,11 +80,7 @@ pub fn choice(labels: &[&str], selected: Option<usize>, kind: ChoiceKind) -> Nod
         });
 
         with_document(|document| {
-            set_component_detail(
-                document,
-                choice,
-                selected.map_or(String::new(), |index| labels[index].to_owned()),
-            );
+            set_component_detail(document, choice, String::new());
             set_component_state(
                 document,
                 choice,
@@ -91,7 +91,7 @@ pub fn choice(labels: &[&str], selected: Option<usize>, kind: ChoiceKind) -> Nod
                     kind,
                     search: String::new(),
                     typed_at: None,
-                    on_change: None,
+                    on_change,
                 },
             );
         });
@@ -108,7 +108,13 @@ pub fn choice(labels: &[&str], selected: Option<usize>, kind: ChoiceKind) -> Nod
         }
 
         line
-    })
+    });
+
+    selected.apply(move |value| {
+        with_document(|document| sync_selected(document, choice, value));
+    });
+
+    choice
 }
 
 pub fn choice_selected(document: &Document, choice: NodeId) -> Option<usize> {
@@ -125,17 +131,11 @@ pub fn choice_selected_signal(document: &Document, choice: NodeId) -> ReadSignal
         .clone()
 }
 
-pub fn set_choice_selected(document: &mut Document, choice: NodeId, selected: Option<usize>) {
+fn sync_selected(document: &mut Document, choice: NodeId, selected: Option<usize>) {
     let state = document.component_state::<State>(choice);
-    if selected.is_some_and(|index| index >= state.options.len())
-        || state.selected_read.get() == selected
-    {
+    if selected.is_some_and(|index| index >= state.options.len()) {
         return;
     }
-    let focused = state
-        .options
-        .iter()
-        .any(|option| unstyled::button_focused(document, option.button).get());
     let buttons: Vec<NodeId> = state.options.iter().map(|option| option.button).collect();
     document
         .component_state::<State>(choice)
@@ -151,21 +151,27 @@ pub fn set_choice_selected(document: &mut Document, choice: NodeId, selected: Op
         None => String::new(),
     };
     document.set_component_detail(choice, detail);
+}
+
+fn select(document: &mut Document, choice: NodeId, selected: Option<usize>) {
+    let state = document.component_state::<State>(choice);
+    if selected.is_some_and(|index| index >= state.options.len())
+        || state.selected_read.get() == selected
+    {
+        return;
+    }
+    let focused = state
+        .options
+        .iter()
+        .any(|option| unstyled::button_focused(document, option.button).get());
+    let buttons: Vec<NodeId> = state.options.iter().map(|option| option.button).collect();
+    sync_selected(document, choice, selected);
     if focused {
         if let Some(&button) = buttons.get(selected.unwrap_or(0)) {
             unstyled::focus_button(button);
         }
     }
     document.call_component_handler(choice, selected, |state: &mut State| &mut state.on_change);
-}
-
-pub fn set_choice_on_change(
-    choice: NodeId,
-    handler: impl FnMut(&mut Document, Option<usize>) + 'static,
-) {
-    with_document(|document| {
-        document.component_state_mut::<State>(choice).on_change = Some(Box::new(handler));
-    });
 }
 
 pub fn focus_choice(choice: NodeId) {
@@ -210,7 +216,7 @@ fn key(document: &mut Document, choice: NodeId, index: usize, press: KeyPress) -
     if press.pressed {
         let button = state.options[next].button;
         unstyled::focus_button(button);
-        set_choice_selected(document, choice, Some(next));
+        select(document, choice, Some(next));
     }
     true
 }
@@ -256,7 +262,7 @@ fn typeahead(document: &mut Document, choice: NodeId, index: usize, text: &str) 
         });
     if let Some(next) = matched {
         unstyled::focus_button(labels[next].0);
-        set_choice_selected(document, choice, Some(next));
+        select(document, choice, Some(next));
         let state = document.component_state_mut::<State>(choice);
         state.search = search;
         state.typed_at = Some(now);
