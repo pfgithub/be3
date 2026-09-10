@@ -220,7 +220,7 @@ fn pick_toggle(state: &Rc<State>, picking: bool) -> (NodeId, NodeId, NodeId) {
     let bordered = view! { <bordered corner_radius={CHIP_RADIUS}>{fill}</bordered> };
     let picker = state.clone();
     let pressable = view! {
-        <unstyled::pressable on_click={Box::new(move |_document: &mut Document| picker.toggle_picking())}>
+        <unstyled::pressable on_click={move || picker.toggle_picking()}>
             {bordered}
         </unstyled::pressable>
     };
@@ -296,12 +296,8 @@ fn row(entry: &Entry, state: &Rc<State>) -> Row {
     let row = view! {
         <click_catcher
             cursor={CursorIcon::PointingHand}
-            on_click={Box::new(move |_document: &mut Document| {
-                selection.select(node)
-            })}
-            on_hover_change={Box::new(move |_document: &mut Document, hovered: bool| {
-                hover.hover(node, hovered);
-            })}
+            on_click={move || selection.select(node)}
+            on_hover_change={move |hovered| hover.hover(node, hovered)}
         >
             {outline}
         </click_catcher>
@@ -333,9 +329,7 @@ fn marker(entry: &Entry, state: &Rc<State>) -> NodeId {
     let key = entry.key;
     let expanded = entry.expanded;
     view! {
-        <unstyled::pressable on_click={Box::new(move |_document: &mut Document| {
-            expansion.set_expanded(key, !expanded);
-        })}>
+        <unstyled::pressable on_click={move || expansion.set_expanded(key, !expanded)}>
             {glyph_node}
         </unstyled::pressable>
     }

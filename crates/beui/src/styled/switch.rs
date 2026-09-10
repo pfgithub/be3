@@ -3,10 +3,11 @@ use beui_macros::{component, view};
 use crate::color::Color32;
 
 use crate::document::Document;
-use crate::node::{Handler, NodeId};
+use crate::node::NodeId;
 use crate::reactive::{
-    create_effect, current_component, set_component_detail, with_document, CenteredRowBuilder,
-    FillBuilder, OutlineBuilder, PaddingBuilder, Prop, SizedBuilder, SpacerBuilder,
+    create_effect, current_component, set_component_detail, with_document, Callback,
+    CenteredRowBuilder, FillBuilder, OutlineBuilder, PaddingBuilder, Prop, SizedBuilder,
+    SpacerBuilder,
 };
 use crate::styled::theme::{ACCENT, ACCENT_HOVER, BORDER, KNOB, RADIUS, SURFACE_RAISED};
 use crate::unstyled;
@@ -22,18 +23,13 @@ const FOCUS_RING_WIDTH: f32 = 2.0;
 const FOCUS_RING_OFFSET: f32 = 4.0;
 
 #[component]
-pub fn switch(on: Prop<bool>, on_change: Option<Handler<bool>>) -> NodeId {
+pub fn switch(on: Prop<bool>, on_change: Callback<bool>) -> NodeId {
     let shadow = current_component();
-    let mut on_change = on_change;
 
-    let toggle = view! {
+    view! {
         <toggle
             checked={on}
-            on_change={Box::new(move |document: &mut Document, on| {
-                if let Some(handler) = &mut on_change {
-                    handler(document, on);
-                }
-            })}
+            on_change={move |on| on_change.call(on)}
             content={Box::new(move |handle: unstyled::ToggleHandle| {
             let before_percent = {
                 let checked = handle.checked.clone();
@@ -75,9 +71,7 @@ pub fn switch(on: Prop<bool>, on_change: Option<Handler<bool>>) -> NodeId {
                 </outline>
             }
         })} />
-    };
-
-    toggle
+    }
 }
 
 pub fn switch_on(document: &Document, switch: NodeId) -> bool {

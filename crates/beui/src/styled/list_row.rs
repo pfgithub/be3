@@ -2,8 +2,8 @@ use beui_macros::{component, view};
 
 use crate::color::Color32;
 
-use crate::node::{ClickHandler, NodeId};
-use crate::reactive::{Children, FillBuilder, OutlineBuilder, PaddingBuilder, Prop};
+use crate::node::NodeId;
+use crate::reactive::{Children, ClickCallback, FillBuilder, OutlineBuilder, PaddingBuilder, Prop};
 use crate::styled::theme::{ACCENT, BORDER, RADIUS, SURFACE_RAISED};
 use crate::unstyled;
 use crate::unstyled::ButtonBuilder;
@@ -12,13 +12,13 @@ const PADDING_HORIZONTAL: f32 = 8.0;
 const PADDING_VERTICAL: f32 = 4.0;
 
 #[component]
-pub fn list_row(children: Children, on_click: Option<ClickHandler>) -> NodeId {
+pub fn list_row(children: Children, on_click: ClickCallback) -> NodeId {
     let child = children
         .into_first()
         .expect("list_row requires a child, e.g. <list_row>{content}</list_row>");
 
-    let row = view! {
-        <button content={Box::new(move |handle: unstyled::ButtonHandle| {
+    view! {
+        <button on_click={move || on_click.call()} content={Box::new(move |handle: unstyled::ButtonHandle| {
             let fill_color = Prop::Dynamic(Box::new(move || {
                 background(handle.hovered.get(), handle.active.get())
             }));
@@ -30,13 +30,7 @@ pub fn list_row(children: Children, on_click: Option<ClickHandler>) -> NodeId {
                 </outline>
             }
         })} />
-    };
-
-    if let Some(on_click) = on_click {
-        unstyled::set_button_on_click(row, on_click);
     }
-
-    row
 }
 
 fn background(hovered: bool, active: bool) -> Color32 {

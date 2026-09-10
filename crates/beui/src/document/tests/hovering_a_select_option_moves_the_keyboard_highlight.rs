@@ -18,7 +18,7 @@ fn hovering_a_select_option_moves_the_keyboard_highlight() {
 
     let inner = harness.document().shadow_root(select);
     let trigger = unstyled::select_trigger(harness.document(), inner);
-    with_installed(harness.document_mut(), |_document| {
+    with_installed(harness.document_mut(), |_| {
         unstyled::focus_button(trigger);
     });
     harness.frame(Vec::new());

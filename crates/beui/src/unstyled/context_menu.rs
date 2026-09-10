@@ -5,19 +5,25 @@ use crate::base::ItemSize;
 use crate::document::Document;
 use crate::geometry::Pos2;
 use crate::input::{CursorIcon, PointerPress};
-use crate::node::{Handler, NodeId};
-use crate::reactive::{current_component, set_component_state, with_document, ClickCatcherBuilder};
+use crate::node::NodeId;
+use crate::reactive::{
+    current_component, set_component_state, with_document, Callback, ClickCatcherBuilder,
+};
 use crate::unstyled;
 use crate::unstyled::menu::{self, MenuItem};
 
 struct State {
     overlay: NodeId,
     content: NodeId,
-    on_select: Option<Handler<Vec<usize>>>,
+    on_select: Callback<Vec<usize>>,
 }
 
 #[component]
-pub fn context_menu(region: NodeId, items: Vec<MenuItem>) -> NodeId {
+pub fn context_menu(
+    region: NodeId,
+    items: Vec<MenuItem>,
+    on_select: Callback<Vec<usize>>,
+) -> NodeId {
     let context_menu = current_component();
     let (overlay, content) = with_document(|document| {
         let overlay =
@@ -36,14 +42,14 @@ pub fn context_menu(region: NodeId, items: Vec<MenuItem>) -> NodeId {
     let catcher = view! {
         <click_catcher
             cursor={CursorIcon::Default}
-            on_secondary_press={Box::new(
-                move |document: &mut Document, press: PointerPress| {
+            on_secondary_press={move |press: PointerPress| {
+                with_document(|document| {
                     document.set_overlay_anchor(overlay, OverlayAnchor::Point(press.pos));
                     document.open_overlay(overlay);
                     let content = document.component_state::<State>(context_menu).content;
                     menu::focus_menu_list_root(document, content);
-                },
-            )}
+                });
+            }}
         >
             {root}
         </click_catcher>
@@ -56,7 +62,7 @@ pub fn context_menu(region: NodeId, items: Vec<MenuItem>) -> NodeId {
             State {
                 overlay,
                 content,
-                on_select: None,
+                on_select,
             },
         );
         wire_on_select(document, context_menu, overlay, content);
@@ -85,21 +91,13 @@ pub fn context_menu_overlay(document: &Document, context_menu: NodeId) -> NodeId
     document.component_state::<State>(context_menu).overlay
 }
 
-pub fn set_context_menu_on_select(
-    context_menu: NodeId,
-    handler: impl FnMut(&mut Document, Vec<usize>) + 'static,
-) {
-    with_document(|document| {
-        document
-            .component_state_mut::<State>(context_menu)
-            .on_select = Some(Box::new(handler));
-    });
-}
-
 fn wire_on_select(document: &mut Document, context_menu: NodeId, overlay: NodeId, content: NodeId) {
-    menu::set_menu_list_on_select(document, content, move |document, path| {
-        document
-            .call_component_handler(context_menu, path, |state: &mut State| &mut state.on_select);
-        document.close_overlay(overlay);
+    let on_select = document
+        .component_state::<State>(context_menu)
+        .on_select
+        .clone();
+    menu::menu_list_on_select(document, content).set(move |path: Vec<usize>| {
+        on_select.call(path);
+        with_document(|document| document.close_overlay(overlay));
     });
 }

@@ -12,9 +12,9 @@ fn enter_confirms_the_highlighted_select_option_and_closes_the_popup() {
     let changes = Rc::new(RefCell::new(Vec::new()));
     let sink = changes.clone();
     let select = with_reactive_scope(&mut document, || {
-        view! { <select options={options} selected={None} on_change={Box::new(move |_document: &mut Document, selected| {
+        view! { <select options={options} selected={None} on_change={move |selected| {
             sink.borrow_mut().push(selected);
-        })} /> }
+        }} /> }
     });
     toolbar(&mut document, &[select]);
     let mut harness = Harness::new(document);

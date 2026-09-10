@@ -3,10 +3,10 @@ use beui_macros::{component, view};
 use crate::color::Color32;
 
 use crate::document::Document;
-use crate::node::{Handler, NodeId};
+use crate::node::NodeId;
 use crate::reactive::{
-    create_effect, current_component, set_component_detail, with_document, CenteredRowBuilder,
-    FillBuilder, OutlineBuilder, Prop, SizedBuilder,
+    create_effect, current_component, set_component_detail, with_document, Callback,
+    CenteredRowBuilder, FillBuilder, OutlineBuilder, Prop, SizedBuilder,
 };
 use crate::styled::theme::{ACCENT, ACCENT_HOVER, KNOB, RADIUS, TRACK};
 use crate::unstyled;
@@ -20,18 +20,13 @@ const FOCUS_RING_WIDTH: f32 = 2.0;
 const FOCUS_RING_OFFSET: f32 = 3.0;
 
 #[component]
-pub fn slider(value: Prop<f32>, on_change: Option<Handler<f32>>) -> NodeId {
+pub fn slider(value: Prop<f32>, on_change: Callback<f32>) -> NodeId {
     let shadow = current_component();
-    let mut on_change = on_change;
 
-    let slider = view! {
+    view! {
         <unstyled::slider
             value={value}
-            on_change={Box::new(move |document: &mut Document, value| {
-                if let Some(handler) = &mut on_change {
-                    handler(document, value);
-                }
-            })}
+            on_change={move |value| on_change.call(value)}
             content={Box::new(move |handle: unstyled::SliderHandle| {
             let filled_percent = {
                 let slider_value = handle.value.clone();
@@ -63,9 +58,7 @@ pub fn slider(value: Prop<f32>, on_change: Option<Handler<f32>>) -> NodeId {
                 </outline>
             }
         })} />
-    };
-
-    slider
+    }
 }
 
 pub fn slider_value(document: &Document, slider: NodeId) -> f32 {

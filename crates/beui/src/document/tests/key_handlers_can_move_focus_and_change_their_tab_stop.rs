@@ -1,20 +1,30 @@
 use super::*;
+use crate::reactive::create_signal;
+use crate::KeyPress;
 
 #[test]
 fn key_handlers_can_move_focus_and_change_their_tab_stop() {
     let mut document = Document::new();
-    let first = labelled_button(&mut document, "First");
+    let (skipped, set_skipped) = create_signal(false);
     let second = labelled_button(&mut document, "Second");
     let flag = unstyled::button_focused(&document, second);
-    with_installed(&mut document, |_document| {
-        unstyled::set_button_on_key(first, move |_document, press| {
-            if press.key != Key::ArrowRight || !press.pressed {
-                return false;
-            }
-            unstyled::set_button_tab_stop(first, false);
-            unstyled::focus_button(second);
-            true
-        });
+    let first = with_installed(&mut document, |document| {
+        let face = button_face(document, "First");
+        view! {
+            <unstyled::button
+                tab_stop={Prop::Dynamic(Box::new(move || !skipped.get()))}
+                on_key={move |press: KeyPress| {
+                    if press.key != Key::ArrowRight || !press.pressed {
+                        return false;
+                    }
+                    set_skipped.set(true);
+                    unstyled::focus_button(second);
+                    true
+                }}
+            >
+                {face}
+            </unstyled::button>
+        }
     });
     toolbar(&mut document, &[first, second]);
     let mut harness = Harness::new(document);

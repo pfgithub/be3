@@ -9,7 +9,7 @@ fn a_virtual_scroll_row_can_build_reactive_content_during_dispatch() {
         scroll,
         VIRTUAL_ITEM_COUNT,
         VIRTUAL_ITEM_HEIGHT,
-        move |_document, index| view! { <text string={format!("Row {index}")} /> },
+        move |index| view! { <text string={format!("Row {index}")} /> },
     );
     document.set_root(scroll);
 

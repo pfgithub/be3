@@ -21,9 +21,8 @@ pub(crate) struct InteractInput {
     pub(crate) modifiers: Modifiers,
 }
 
-pub type Handler<V> = Box<dyn FnMut(&mut Document, V)>;
-pub type ClickHandler = Box<dyn FnMut(&mut Document)>;
-pub(crate) type ChangeHandler = Handler<bool>;
+pub type Handler<V, R = ()> = Box<dyn FnMut(V) -> R>;
+pub type ClickHandler = Box<dyn FnMut()>;
 
 pub(crate) trait Element: Any {
     fn measure(&self, doc: &Document, painter: &Painter, available: Vec2) -> Vec2;

@@ -18,7 +18,7 @@ fn arrow_down_on_a_closed_select_trigger_opens_it_and_highlights_the_first_optio
 
     let inner = harness.document().shadow_root(select);
     let trigger = unstyled::select_trigger(harness.document(), inner);
-    with_installed(harness.document_mut(), |_document| {
+    with_installed(harness.document_mut(), |_| {
         unstyled::focus_button(trigger);
     });
     harness.frame(Vec::new());

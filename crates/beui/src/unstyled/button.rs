@@ -1,15 +1,12 @@
-use std::cell::Cell;
-use std::rc::Rc;
-
 use beui_macros::{component, view};
 
-use crate::input::CursorIcon;
+use crate::input::{CursorIcon, KeyPress};
 
 use crate::document::Document;
-use crate::node::{ClickHandler, NodeId};
+use crate::node::NodeId;
 use crate::reactive::{
-    self, create_signal, current_component, set_component_state, with_document,
-    ClickCatcherBuilder, FocusableBuilder, Prop, ReadSignal, WriteSignal,
+    self, create_signal, current_component, set_component_state, untrack, with_document, Callback,
+    Children, ClickCallback, ClickCatcherBuilder, FocusableBuilder, Prop, ReadSignal,
 };
 
 pub struct ButtonHandle {
@@ -23,79 +20,73 @@ pub type ButtonContent = Box<dyn FnOnce(ButtonHandle) -> NodeId>;
 struct State {
     click_catcher: NodeId,
     focusable: NodeId,
-    hovered_read: ReadSignal<bool>,
-    hovered_write: WriteSignal<bool>,
-    active_read: ReadSignal<bool>,
-    active_write: WriteSignal<bool>,
-    focused_read: ReadSignal<bool>,
-    focused_write: WriteSignal<bool>,
-    on_click: Option<ClickHandler>,
+    hovered: ReadSignal<bool>,
+    active: ReadSignal<bool>,
+    focused: ReadSignal<bool>,
+    on_click: ClickCallback,
 }
 
 #[component]
-pub fn button(content: Option<ButtonContent>, disabled: Prop<bool>) -> NodeId {
+pub fn button(
+    children: Children,
+    content: Option<ButtonContent>,
+    disabled: Prop<bool>,
+    #[prop(default = true)] tab_stop: Prop<bool>,
+    on_click: ClickCallback,
+    on_key: Callback<KeyPress, bool>,
+    on_text: Callback<String>,
+) -> NodeId {
     let button = current_component();
-    let (hovered_read, hovered_write) = create_signal(false);
-    let (active_read, active_write) = create_signal(false);
-    let (focused_read, focused_write) = create_signal(false);
-    let disabled_cell: Rc<Cell<bool>> = Rc::new(Cell::new(false));
+    let (hovered, set_hovered) = create_signal(false);
+    let (active, set_active) = create_signal(false);
+    let (focused, set_focused) = create_signal(false);
+    let (key_active, set_key_active) = create_signal(false);
+    let (disabled_read, set_disabled) = create_signal(false);
+    disabled.apply(move |disabled| set_disabled.set(disabled));
 
-    let content_node = content.map(|build| {
-        build(ButtonHandle {
-            hovered: hovered_read.clone(),
-            active: active_read.clone(),
-            focused: focused_read.clone(),
-        })
-    });
+    let content_node = match content {
+        Some(build) => Some(build(ButtonHandle {
+            hovered: hovered.clone(),
+            active: active.clone(),
+            focused: focused.clone(),
+        })),
+        None => children.into_first(),
+    };
 
-    let click_catcher_cell: Rc<Cell<Option<NodeId>>> = Rc::new(Cell::new(None));
-    let on_activate_change_cell = click_catcher_cell.clone();
-    let on_activate_cell = click_catcher_cell.clone();
-    let on_click_disabled_cell = disabled_cell.clone();
+    let click = {
+        let on_click = on_click.clone();
+        let disabled = disabled_read.clone();
+        move || {
+            if untrack(|| disabled.get()) {
+                return;
+            }
+            on_click.call();
+        }
+    };
+    let key_click = click.clone();
+    let tab_stop = {
+        let disabled = disabled_read.clone();
+        tab_stop.map(move |tab_stop| tab_stop && !disabled.get())
+    };
 
+    let click_catcher_cell = std::cell::Cell::new(None);
     let focusable = view! {
         <focusable
-            on_focus_change={Box::new(move |document: &mut Document, focused: bool| {
-                document
-                    .component_state::<State>(button)
-                    .focused_write
-                    .set(focused);
-            })}
-            on_activate_change={Box::new(move |document: &mut Document, pressed: bool| {
-                let click_catcher = on_activate_change_cell
-                    .get()
-                    .expect("button click catcher not yet built");
-                document.set_click_catcher_key_active(click_catcher, pressed);
-            })}
-            on_activate={Box::new(move |document: &mut Document| {
-                let click_catcher = on_activate_cell
-                    .get()
-                    .expect("button click catcher not yet built");
-                document.click_click_catcher(click_catcher);
-            })}
+            tab_stop={tab_stop}
+            on_key={move |press| on_key.call(press)}
+            on_text={move |text| on_text.call(text)}
+            on_focus_change={move |focused: bool| set_focused.set(focused)}
+            on_activate_change={move |pressed: bool| set_key_active.set(pressed)}
+            on_activate={key_click}
         >
             {{
                 let click_catcher = view! {
                     <click_catcher
                         cursor={CursorIcon::PointingHand}
-                        on_click={Box::new(move |document: &mut Document| {
-                            if on_click_disabled_cell.get() {
-                                return;
-                            }
-                            document.call_component_click::<State>(button, |state| &mut state.on_click);
-                        })}
-                        on_hover_change={Box::new(move |document: &mut Document, hovered: bool| {
-                            document
-                                .component_state::<State>(button)
-                                .hovered_write
-                                .set(hovered);
-                        })}
-                        on_active_change={Box::new(move |document: &mut Document, active: bool| {
-                            document
-                                .component_state::<State>(button)
-                                .active_write
-                                .set(active);
-                        })}
+                        key_active={key_active}
+                        on_click={click}
+                        on_hover_change={move |hovered: bool| set_hovered.set(hovered)}
+                        on_active_change={move |active: bool| set_active.set(active)}
                         children={content_node.map(reactive::intrinsic)}
                     />
                 };
@@ -114,20 +105,12 @@ pub fn button(content: Option<ButtonContent>, disabled: Prop<bool>) -> NodeId {
                     .get()
                     .expect("button click catcher not yet built"),
                 focusable,
-                hovered_read,
-                hovered_write,
-                active_read,
-                active_write,
-                focused_read,
-                focused_write,
-                on_click: None,
+                hovered,
+                active,
+                focused,
+                on_click,
             },
         );
-    });
-
-    disabled.apply(move |disabled| {
-        disabled_cell.set(disabled);
-        with_document(|document| document.set_focusable_tab_stop(focusable, !disabled));
     });
 
     focusable
@@ -141,29 +124,23 @@ pub fn set_button_child(button: NodeId, child: NodeId) {
 }
 
 pub fn button_hovered(document: &Document, button: NodeId) -> ReadSignal<bool> {
-    document
-        .component_state::<State>(button)
-        .hovered_read
-        .clone()
+    document.component_state::<State>(button).hovered.clone()
 }
 
 pub fn button_active(document: &Document, button: NodeId) -> ReadSignal<bool> {
-    document
-        .component_state::<State>(button)
-        .active_read
-        .clone()
+    document.component_state::<State>(button).active.clone()
 }
 
 pub fn button_focused(document: &Document, button: NodeId) -> ReadSignal<bool> {
-    document
-        .component_state::<State>(button)
-        .focused_read
-        .clone()
+    document.component_state::<State>(button).focused.clone()
 }
 
-pub fn set_button_on_click(button: NodeId, handler: impl FnMut(&mut Document) + 'static) {
+pub fn set_button_on_click(button: NodeId, handler: impl FnMut() + 'static) {
     with_document(|document| {
-        document.component_state_mut::<State>(button).on_click = Some(Box::new(handler));
+        document
+            .component_state::<State>(button)
+            .on_click
+            .set(handler);
     });
 }
 
@@ -176,21 +153,4 @@ pub fn focus_button(button: NodeId) {
 
 pub fn button_focusable(document: &Document, button: NodeId) -> NodeId {
     document.component_state::<State>(button).focusable
-}
-
-pub fn set_button_on_key(
-    button: NodeId,
-    handler: impl FnMut(&mut Document, crate::input::KeyPress) -> bool + 'static,
-) {
-    with_document(|document| {
-        let focusable = button_focusable(document, button);
-        document.set_focusable_on_key(focusable, handler);
-    });
-}
-
-pub fn set_button_tab_stop(button: NodeId, tab_stop: bool) {
-    with_document(|document| {
-        let focusable = button_focusable(document, button);
-        document.set_focusable_tab_stop(focusable, tab_stop);
-    });
 }

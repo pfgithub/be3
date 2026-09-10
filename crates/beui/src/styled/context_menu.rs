@@ -3,9 +3,10 @@ use beui_macros::{component, view};
 use crate::base::TextAlign;
 use crate::color::Color32;
 use crate::document::Document;
-use crate::node::{Handler, NodeId};
+use crate::node::NodeId;
 use crate::reactive::{
-    with_document, FillBuilder, OutlineBuilder, PaddingBuilder, Prop, SizedBuilder, TextBuilder,
+    with_document, Callback, FillBuilder, OutlineBuilder, PaddingBuilder, Prop, SizedBuilder,
+    TextBuilder,
 };
 use crate::styled::theme::{
     ACCENT_SOFT, BORDER, BORDER_WIDTH, FONT_BODY, RADIUS, SURFACE_RAISED, TEXT, TEXT_MUTED,
@@ -22,16 +23,15 @@ const MENU_WIDTH: f32 = 200.0;
 pub fn context_menu(
     region: NodeId,
     items: Prop<Vec<MenuItem>>,
-    on_select: Option<Handler<Vec<usize>>>,
+    on_select: Callback<Vec<usize>>,
 ) -> NodeId {
-    let mut on_select = on_select;
-    let inner = view! { <unstyled::context_menu region={region} items={Vec::new()} /> };
-
-    unstyled::set_context_menu_on_select(inner, move |document, path| {
-        if let Some(handler) = &mut on_select {
-            handler(document, path);
-        }
-    });
+    let inner = view! {
+        <unstyled::context_menu
+            region={region}
+            items={Vec::new()}
+            on_select={move |path| on_select.call(path)}
+        />
+    };
 
     items.apply(move |items| {
         let styling_items = items.clone();

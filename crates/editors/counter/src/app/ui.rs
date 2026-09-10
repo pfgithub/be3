@@ -11,6 +11,19 @@ use block_editor_plugin::beui::{Color32, Context, Document, Rect};
 const PADDING: f32 = 20.0;
 const BUTTON_WIDTH: f32 = 44.0;
 
+fn step(
+    counter: &Rc<dyn Counter>,
+    set_count: &WriteSignal<i64>,
+    action: fn(&(dyn Counter + 'static)),
+) -> impl FnMut() + 'static {
+    let counter = counter.clone();
+    let set_count = set_count.clone();
+    move || {
+        action(counter.as_ref());
+        set_count.set(counter.value());
+    }
+}
+
 pub trait Counter {
     fn value(&self) -> i64;
     fn increment(&self);
@@ -29,51 +42,42 @@ impl CounterUi {
         let (count, set_count) = create_signal(counter.value());
 
         let root = with_reactive_scope(&mut document, || {
-            let reset_counter = counter.clone();
-            let reset_set_count = set_count.clone();
-            let decrement_counter = counter.clone();
-            let decrement_set_count = set_count.clone();
-            let increment_counter = counter.clone();
-            let increment_set_count = set_count.clone();
+            let reset = step(&counter, &set_count, Counter::reset);
+            let decrement = step(&counter, &set_count, Counter::decrement);
+            let increment = step(&counter, &set_count, Counter::increment);
 
-            let value = view! {
-                <display content={create_memo(move || count.get().to_string())} test_id={"counter.value"} />
-            };
-            let reset = view! {
-                <button label={"Reset".to_string()} variant={ButtonVariant::Secondary} test_id={"counter.reset"} on_click={Box::new(move |_document| {
-                    reset_counter.reset();
-                    reset_set_count.set(reset_counter.value());
-                })} />
-            };
-            let decrement = view! {
-                <button label={"-".to_string()} variant={ButtonVariant::Primary} test_id={"counter.decrement"} on_click={Box::new(move |_document| {
-                    decrement_counter.decrement();
-                    decrement_set_count.set(decrement_counter.value());
-                })} />
-            };
-            let increment = view! {
-                <button label={"+".to_string()} variant={ButtonVariant::Primary} test_id={"counter.increment"} on_click={Box::new(move |_document| {
-                    increment_counter.increment();
-                    increment_set_count.set(increment_counter.value());
-                })} />
-            };
-
-            let root = view! {
+            view! {
                 <fill color={BACKGROUND} radius={0}>
                     <padding horizontal={PADDING} vertical={PADDING}>
                         <column spacing={16.0}>
-                            {value}
+                            <display
+                                content={create_memo(move || count.get().to_string())}
+                                test_id={"counter.value"}
+                            />
                             <centered_row spacing={10.0}>
-                                @fixed(BUTTON_WIDTH) {decrement}
-                                @fixed(BUTTON_WIDTH) {increment}
-                                {reset}
+                                @fixed(BUTTON_WIDTH) <button
+                                    label={"-".to_string()}
+                                    variant={ButtonVariant::Primary}
+                                    test_id={"counter.decrement"}
+                                    on_click={decrement}
+                                />
+                                @fixed(BUTTON_WIDTH) <button
+                                    label={"+".to_string()}
+                                    variant={ButtonVariant::Primary}
+                                    test_id={"counter.increment"}
+                                    on_click={increment}
+                                />
+                                <button
+                                    label={"Reset".to_string()}
+                                    variant={ButtonVariant::Secondary}
+                                    test_id={"counter.reset"}
+                                    on_click={reset}
+                                />
                             </centered_row>
                         </column>
                     </padding>
                 </fill>
-            };
-
-            root
+            }
         });
 
         document.set_root(root);

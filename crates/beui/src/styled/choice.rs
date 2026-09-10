@@ -5,8 +5,8 @@ use crate::node::NodeId;
 use beui_macros::view;
 
 use crate::reactive::{
-    create_effect, with_document, CenteredRowBuilder, FillBuilder, OutlineBuilder, PaddingBuilder,
-    Prop, SizedBuilder, SpacerBuilder, VisibilityBuilder,
+    create_effect, with_document, Callback, CenteredRowBuilder, FillBuilder, OutlineBuilder,
+    PaddingBuilder, Prop, SizedBuilder, SpacerBuilder, VisibilityBuilder,
 };
 use crate::styled::theme::{
     ACCENT, ACCENT_SOFT, BORDER, FONT_BODY, RADIUS, SURFACE_RAISED, TEXT, TEXT_MUTED,
@@ -19,9 +19,9 @@ pub(super) fn choice(
     labels: &[&str],
     selected: Prop<Option<usize>>,
     kind: Kind,
-    on_change: impl FnMut(&mut Document, Option<usize>) + 'static,
+    on_change: Callback<Option<usize>>,
 ) -> NodeId {
-    let inner = unstyled::choice(labels, selected, kind, Some(Box::new(on_change)));
+    let inner = unstyled::choice(labels, selected, kind, on_change);
     let selected_signal =
         with_document(|document| unstyled::choice_selected_signal(document, inner));
 

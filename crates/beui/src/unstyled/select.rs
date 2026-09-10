@@ -2,9 +2,9 @@ use crate::base::overlay::{OverlayAnchor, Placement};
 use crate::color::Color32;
 use crate::document::Document;
 use crate::input::{Key, KeyPress};
-use crate::node::{Handler, NodeId};
+use crate::node::NodeId;
 use crate::reactive::{
-    create_signal, current_component, set_component_state, with_document, ColumnBuilder,
+    create_signal, current_component, set_component_state, with_document, Callback, ColumnBuilder,
     ReadSignal, WriteSignal,
 };
 use crate::unstyled;
@@ -31,32 +31,45 @@ struct State {
     highlighted: Option<usize>,
     highlighted_read: ReadSignal<Option<usize>>,
     highlighted_write: WriteSignal<Option<usize>>,
-    on_change: Option<Handler<Option<usize>>>,
+    on_change: Callback<Option<usize>>,
 }
 
 #[component]
-pub fn select(options: Vec<String>, selected: Option<usize>) -> NodeId {
+pub fn select(
+    options: Vec<String>,
+    selected: Option<usize>,
+    on_change: Callback<Option<usize>>,
+) -> NodeId {
     let select = current_component();
     let selected = selected.filter(|index| *index < options.len());
 
-    let trigger = view! { <unstyled::button /> };
+    let trigger = view! {
+        <unstyled::button
+            on_click={move || with_document(|document| open(document, select))}
+            on_key={move |press: KeyPress| {
+                with_document(|document| trigger_key(document, select, press))
+            }}
+        />
+    };
     let search = view! {
         <unstyled::text_input
             value={String::new()}
-            on_change={Box::new(move |document: &mut Document, text| {
-                filter(document, select, &text);
-            })}
-            on_submit={Box::new(move |document: &mut Document, _text| {
-                let highlighted = document.component_state::<State>(select).highlighted;
-                if let Some(index) = highlighted {
-                    confirm(document, select, index);
-                }
-            })}
+            on_change={move |text: String| {
+                with_document(|document| filter(document, select, &text));
+            }}
+            on_submit={move |_text: String| {
+                with_document(|document| {
+                    let highlighted = document.component_state::<State>(select).highlighted;
+                    if let Some(index) = highlighted {
+                        confirm(document, select, index);
+                    }
+                });
+            }}
+            on_key_override={move |press: KeyPress| {
+                with_document(|document| navigate(document, select, press))
+            }}
         />
     };
-    unstyled::set_text_input_on_key_override(search, move |document, press| {
-        navigate(document, select, press)
-    });
     let list = with_document(Document::create_scroll);
 
     let popup = view! {
@@ -105,21 +118,13 @@ pub fn select(options: Vec<String>, selected: Option<usize>) -> NodeId {
                 highlighted: selected,
                 highlighted_read,
                 highlighted_write,
-                on_change: None,
+                on_change,
             },
         );
     });
 
-    unstyled::set_button_on_click(trigger, move |document| {
-        open(document, select);
-    });
-    unstyled::set_button_on_key(trigger, move |document, press| {
-        trigger_key(document, select, press)
-    });
     with_document(|document| {
-        document.set_overlay_on_dismiss(overlay, move |_document| {
-            unstyled::focus_button(trigger);
-        });
+        document.set_overlay_on_dismiss(overlay, move || unstyled::focus_button(trigger));
     });
 
     root
@@ -127,22 +132,33 @@ pub fn select(options: Vec<String>, selected: Option<usize>) -> NodeId {
 
 fn add_row(document: &mut Document, select: NodeId, list: NodeId, label: &str) -> Row {
     let text = document.create_text(label.to_owned(), FONT_SIZE, Color32::WHITE);
-    let button = view! { <unstyled::button content={Box::new(move |_handle| text)} /> };
-    unstyled::set_button_tab_stop(button, false);
+    let button_cell: std::rc::Rc<std::cell::Cell<Option<NodeId>>> = std::rc::Rc::default();
+    let button = view! {
+        <unstyled::button
+            tab_stop={false}
+            content={Box::new(move |_handle| text)}
+            on_click={{
+                let button_cell = button_cell.clone();
+                move || {
+                    let button = button_cell.get().expect("select option not yet built");
+                    with_document(|document| {
+                        let index = document
+                            .component_state::<State>(select)
+                            .rows
+                            .iter()
+                            .position(|row| row.button == button);
+                        if let Some(index) = index {
+                            confirm(document, select, index);
+                        }
+                    });
+                }
+            }}
+        />
+    };
+    button_cell.set(Some(button));
     let visibility = document.create_visibility(true);
     document.set_visibility_child(visibility, button);
     document.append_scroll_item(list, visibility);
-
-    unstyled::set_button_on_click(button, move |document| {
-        let index = document
-            .component_state::<State>(select)
-            .rows
-            .iter()
-            .position(|row| row.button == button);
-        if let Some(index) = index {
-            confirm(document, select, index);
-        }
-    });
 
     Row {
         button,
@@ -211,14 +227,6 @@ pub fn set_select_options(document: &mut Document, select: NodeId, options: &[St
     state.selected_write.set(None);
     state.highlighted = None;
     state.highlighted_write.set(None);
-}
-
-pub fn set_select_on_change(
-    document: &mut Document,
-    select: NodeId,
-    handler: impl FnMut(&mut Document, Option<usize>) + 'static,
-) {
-    document.component_state_mut::<State>(select).on_change = Some(Box::new(handler));
 }
 
 pub fn focus_select(select: NodeId) {
@@ -319,11 +327,10 @@ fn confirm(document: &mut Document, select: NodeId, index: usize) {
 }
 
 fn apply_selection(document: &mut Document, select: NodeId, selected: Option<usize>) {
-    document
-        .component_state::<State>(select)
-        .selected_write
-        .set(selected);
-    document.call_component_handler(select, selected, |state: &mut State| &mut state.on_change);
+    let state = document.component_state::<State>(select);
+    let on_change = state.on_change.clone();
+    state.selected_write.set(selected);
+    on_change.call(selected);
 }
 
 fn filter(document: &mut Document, select: NodeId, text: &str) {

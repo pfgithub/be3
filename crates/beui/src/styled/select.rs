@@ -3,9 +3,9 @@ use beui_macros::{component, view};
 use crate::base::TextAlign;
 use crate::color::Color32;
 use crate::document::Document;
-use crate::node::{Handler, NodeId};
+use crate::node::NodeId;
 use crate::reactive::{
-    bind, with_document, FillBuilder, OutlineBuilder, PaddingBuilder, Prop, SizedBuilder,
+    bind, with_document, Callback, FillBuilder, OutlineBuilder, PaddingBuilder, Prop, SizedBuilder,
     TextBuilder,
 };
 use crate::styled::theme::{
@@ -27,11 +27,14 @@ const FOCUS_RING_OFFSET: f32 = 3.0;
 pub fn select(
     options: Vec<String>,
     selected: Prop<Option<usize>>,
-    on_change: Option<Handler<Option<usize>>>,
+    on_change: Callback<Option<usize>>,
 ) -> NodeId {
-    let mut on_change = on_change;
-
-    let inner = view! { <unstyled::select options={options.clone()} /> };
+    let inner = view! {
+        <unstyled::select
+            options={options.clone()}
+            on_change={move |selected| on_change.call(selected)}
+        />
+    };
     let selected_signal =
         with_document(|document| unstyled::select_selected_signal(document, inner));
     with_document(|document| {
@@ -148,12 +151,6 @@ pub fn select(
                 </sized>
             },
         );
-
-        unstyled::set_select_on_change(document, inner, move |document, selected| {
-            if let Some(handler) = &mut on_change {
-                handler(document, selected);
-            }
-        });
     });
 
     selected.apply(move |selected| {

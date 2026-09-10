@@ -9,9 +9,9 @@ fn clicking_a_tab_selects_the_panel_it_names() {
     let sink = reported.clone();
     let tabs = with_reactive_scope(&mut document, || {
         view! {
-            <tabs labels={vec!["List".to_string(), "Load".to_string()]} selected={0} on_change={Box::new(move |_document: &mut Document, selected| {
+            <tabs labels={vec!["List".to_string(), "Load".to_string()]} selected={0} on_change={move |selected| {
                 sink.set(selected);
-            })} />
+            }} />
         }
     });
     toolbar(&mut document, &[tabs]);

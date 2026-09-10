@@ -13,7 +13,7 @@ fn compacting_virtual_rows_clamps_the_scroll_anchor_at_the_end() {
         scroll,
         VIRTUAL_ITEM_COUNT,
         compact_height,
-        move |document, _| document.create_padding(0.0, compact_height / 2.0),
+        move |_| with_document(|document| document.create_padding(0.0, compact_height / 2.0)),
     );
     harness.frame(Vec::new());
 
@@ -26,7 +26,7 @@ fn compacting_virtual_rows_clamps_the_scroll_anchor_at_the_end() {
 
     harness
         .document
-        .set_scroll_virtual_items(scroll, 0, compact_height, |_, _| {
+        .set_scroll_virtual_items(scroll, 0, compact_height, |_| {
             panic!("an empty scroll must not build any items")
         });
     harness.frame(Vec::new());

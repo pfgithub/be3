@@ -6,8 +6,8 @@ use crate::input::{CursorIcon, PointerPress};
 use crate::painter::Painter;
 
 use crate::document::Document;
-use crate::node::{ChangeHandler, ClickHandler, Element, Handler, InteractInput, NodeId};
-use crate::reactive::{with_document, Children};
+use crate::node::{Element, InteractInput, NodeId};
+use crate::reactive::{with_document, Callback, Children, ClickCallback, Prop};
 
 use beui_macros::component;
 
@@ -19,12 +19,12 @@ pub(crate) struct ClickCatcherNode {
     pub(crate) hovered: bool,
     pub(crate) active: bool,
     pub(crate) dragged: Option<Pos2>,
-    pub(crate) on_click: Option<ClickHandler>,
-    pub(crate) on_hover_change: Option<ChangeHandler>,
-    pub(crate) on_active_change: Option<ChangeHandler>,
-    pub(crate) on_press: Option<Handler<PointerPress>>,
-    pub(crate) on_secondary_press: Option<Handler<PointerPress>>,
-    pub(crate) on_drag: Option<Handler<PointerPress>>,
+    pub(crate) on_click: ClickCallback,
+    pub(crate) on_hover_change: Callback<bool>,
+    pub(crate) on_active_change: Callback<bool>,
+    pub(crate) on_press: Callback<PointerPress>,
+    pub(crate) on_secondary_press: Callback<PointerPress>,
+    pub(crate) on_drag: Callback<PointerPress>,
 }
 
 impl ClickCatcherNode {
@@ -37,12 +37,12 @@ impl ClickCatcherNode {
             hovered: false,
             active: false,
             dragged: None,
-            on_click: None,
-            on_hover_change: None,
-            on_active_change: None,
-            on_press: None,
-            on_secondary_press: None,
-            on_drag: None,
+            on_click: ClickCallback::empty(),
+            on_hover_change: Callback::empty(),
+            on_active_change: Callback::empty(),
+            on_press: Callback::empty(),
+            on_secondary_press: Callback::empty(),
+            on_drag: Callback::empty(),
         }
     }
 
@@ -102,7 +102,7 @@ impl Element for ClickCatcherNode {
 
     fn interact(
         &mut self,
-        doc: &mut Document,
+        _doc: &mut Document,
         painter: &Painter,
         input: &InteractInput,
         _id: NodeId,
@@ -118,27 +118,18 @@ impl Element for ClickCatcherNode {
             self.armed = true;
             if let Some(pos) = input.pointer_pos {
                 let press = self.press(input, rect, pos);
-                if let Some(mut handler) = self.on_press.take() {
-                    handler(doc, press);
-                    self.on_press = Some(handler);
-                }
+                self.on_press.call(press);
             }
         }
         if hovered && input.secondary_pressed_this_frame {
             if let Some(pos) = input.pointer_pos {
                 let press = self.press(input, rect, pos);
-                if let Some(mut handler) = self.on_secondary_press.take() {
-                    handler(doc, press);
-                    self.on_secondary_press = Some(handler);
-                }
+                self.on_secondary_press.call(press);
             }
         }
         if input.released_this_frame {
             if hovered && self.armed {
-                if let Some(mut handler) = self.on_click.take() {
-                    handler(doc);
-                    self.on_click = Some(handler);
-                }
+                self.on_click.call();
             }
             self.armed = false;
             self.dragged = None;
@@ -148,28 +139,19 @@ impl Element for ClickCatcherNode {
         }
         if hovered != self.hovered {
             self.hovered = hovered;
-            if let Some(mut handler) = self.on_hover_change.take() {
-                handler(doc, hovered);
-                self.on_hover_change = Some(handler);
-            }
+            self.on_hover_change.call(hovered);
         }
         let active = self.is_active();
         if active != self.active {
             self.active = active;
-            if let Some(mut handler) = self.on_active_change.take() {
-                handler(doc, active);
-                self.on_active_change = Some(handler);
-            }
+            self.on_active_change.call(active);
         }
         if self.armed && input.pointer_down {
             if let Some(pos) = input.pointer_pos {
                 if self.dragged != Some(pos) {
                     self.dragged = Some(pos);
                     let press = self.press(input, rect, pos);
-                    if let Some(mut handler) = self.on_drag.take() {
-                        handler(doc, press);
-                        self.on_drag = Some(handler);
-                    }
+                    self.on_drag.call(press);
                 }
             }
         }
@@ -208,142 +190,47 @@ impl Document {
             .child = Some(child);
     }
 
-    pub(crate) fn set_click_catcher_on_click(
-        &mut self,
-        click_catcher: NodeId,
-        handler: impl FnMut(&mut Document) + 'static,
-    ) {
-        self.arena
-            .get_mut_as::<ClickCatcherNode>(click_catcher)
-            .on_click = Some(Box::new(handler));
-    }
-
-    pub(crate) fn set_click_catcher_on_hover_change(
-        &mut self,
-        click_catcher: NodeId,
-        handler: impl FnMut(&mut Document, bool) + 'static,
-    ) {
-        self.arena
-            .get_mut_as::<ClickCatcherNode>(click_catcher)
-            .on_hover_change = Some(Box::new(handler));
-    }
-
-    pub(crate) fn set_click_catcher_on_press(
-        &mut self,
-        click_catcher: NodeId,
-        handler: impl FnMut(&mut Document, PointerPress) + 'static,
-    ) {
-        self.arena
-            .get_mut_as::<ClickCatcherNode>(click_catcher)
-            .on_press = Some(Box::new(handler));
-    }
-
-    pub(crate) fn set_click_catcher_on_secondary_press(
-        &mut self,
-        click_catcher: NodeId,
-        handler: impl FnMut(&mut Document, PointerPress) + 'static,
-    ) {
-        self.arena
-            .get_mut_as::<ClickCatcherNode>(click_catcher)
-            .on_secondary_press = Some(Box::new(handler));
-    }
-
-    pub(crate) fn set_click_catcher_on_drag(
-        &mut self,
-        click_catcher: NodeId,
-        handler: impl FnMut(&mut Document, PointerPress) + 'static,
-    ) {
-        self.arena
-            .get_mut_as::<ClickCatcherNode>(click_catcher)
-            .on_drag = Some(Box::new(handler));
-    }
-
-    pub(crate) fn set_click_catcher_on_active_change(
-        &mut self,
-        click_catcher: NodeId,
-        handler: impl FnMut(&mut Document, bool) + 'static,
-    ) {
-        self.arena
-            .get_mut_as::<ClickCatcherNode>(click_catcher)
-            .on_active_change = Some(Box::new(handler));
-    }
-
-    pub fn set_click_catcher_key_active(&mut self, id: NodeId, key_active: bool) {
-        let mut element = self.arena.take(id);
-        let changed = element
-            .as_any_mut()
-            .downcast_mut::<ClickCatcherNode>()
-            .and_then(|click_catcher| {
-                click_catcher.key_active = key_active;
-                let active = click_catcher.is_active();
-                if active == click_catcher.active {
-                    return None;
-                }
-                click_catcher.active = active;
-                click_catcher
-                    .on_active_change
-                    .take()
-                    .map(|handler| (handler, active))
-            });
-        if let Some((mut handler, active)) = changed {
-            handler(self, active);
-            if let Some(click_catcher) = element.as_any_mut().downcast_mut::<ClickCatcherNode>() {
-                click_catcher.on_active_change = Some(handler);
-            }
+    pub(crate) fn set_click_catcher_key_active(&mut self, id: NodeId, key_active: bool) {
+        let click_catcher = self.arena.get_mut_as::<ClickCatcherNode>(id);
+        click_catcher.key_active = key_active;
+        let active = click_catcher.is_active();
+        if active == click_catcher.active {
+            return;
         }
-        self.arena.put_back(id, element);
-    }
-
-    pub fn click_click_catcher(&mut self, id: NodeId) {
-        let mut element = self.arena.take(id);
-        let click = element
-            .as_any_mut()
-            .downcast_mut::<ClickCatcherNode>()
-            .and_then(|click_catcher| click_catcher.on_click.take());
-        if let Some(mut handler) = click {
-            handler(self);
-            if let Some(click_catcher) = element.as_any_mut().downcast_mut::<ClickCatcherNode>() {
-                click_catcher.on_click = Some(handler);
-            }
-        }
-        self.arena.put_back(id, element);
+        click_catcher.active = active;
+        let on_active_change = click_catcher.on_active_change.clone();
+        on_active_change.call(active);
     }
 }
 
 #[component(base)]
 pub fn click_catcher(
     cursor: CursorIcon,
-    on_click: Option<ClickHandler>,
-    on_hover_change: Option<Handler<bool>>,
-    on_active_change: Option<Handler<bool>>,
-    on_press: Option<Handler<PointerPress>>,
-    on_secondary_press: Option<Handler<PointerPress>>,
-    on_drag: Option<Handler<PointerPress>>,
+    key_active: Prop<bool>,
+    on_click: ClickCallback,
+    on_hover_change: Callback<bool>,
+    on_active_change: Callback<bool>,
+    on_press: Callback<PointerPress>,
+    on_secondary_press: Callback<PointerPress>,
+    on_drag: Callback<PointerPress>,
     children: Children,
 ) -> NodeId {
-    with_document(|document| {
+    let click_catcher = with_document(|document| {
         let click_catcher = document.create_click_catcher(cursor);
+        let node = document.arena.get_mut_as::<ClickCatcherNode>(click_catcher);
+        node.on_click = on_click;
+        node.on_hover_change = on_hover_change;
+        node.on_active_change = on_active_change;
+        node.on_press = on_press;
+        node.on_secondary_press = on_secondary_press;
+        node.on_drag = on_drag;
         if let Some(child) = children.into_first() {
             document.set_click_catcher_child(click_catcher, child);
         }
-        if let Some(on_click) = on_click {
-            document.set_click_catcher_on_click(click_catcher, on_click);
-        }
-        if let Some(on_hover_change) = on_hover_change {
-            document.set_click_catcher_on_hover_change(click_catcher, on_hover_change);
-        }
-        if let Some(on_active_change) = on_active_change {
-            document.set_click_catcher_on_active_change(click_catcher, on_active_change);
-        }
-        if let Some(on_press) = on_press {
-            document.set_click_catcher_on_press(click_catcher, on_press);
-        }
-        if let Some(on_secondary_press) = on_secondary_press {
-            document.set_click_catcher_on_secondary_press(click_catcher, on_secondary_press);
-        }
-        if let Some(on_drag) = on_drag {
-            document.set_click_catcher_on_drag(click_catcher, on_drag);
-        }
         click_catcher
-    })
+    });
+    key_active.apply(move |active| {
+        with_document(|document| document.set_click_catcher_key_active(click_catcher, active));
+    });
+    click_catcher
 }

@@ -19,7 +19,7 @@ pub mod theme;
 
 pub use accordion::{accordion_open, AccordionBuilder};
 pub use border::{BorderedBuilder, SeparatorBuilder};
-pub use button::{focus_button, set_button_on_click, ButtonBuilder, ButtonVariant};
+pub use button::{focus_button, ButtonBuilder, ButtonVariant};
 pub use card::CardBuilder;
 pub use checkbox::{checkbox_checked, CheckboxBuilder};
 pub use chip::ChipBuilder;

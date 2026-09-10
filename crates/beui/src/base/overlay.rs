@@ -11,7 +11,7 @@ use beui_macros::view;
 
 use crate::document::Document;
 use crate::node::{ClickHandler, Element, InteractInput, NodeId};
-use crate::reactive::{with_reactive_scope, ClickCatcherBuilder};
+use crate::reactive::{with_document, with_reactive_scope, ClickCatcherBuilder};
 
 #[derive(Clone, Copy)]
 pub(crate) enum OverlayAnchor {
@@ -164,10 +164,10 @@ impl Document {
             view! {
                 <click_catcher
                     cursor={CursorIcon::Default}
-                    on_press={Box::new(move |doc: &mut Document, press: PointerPress| {
+                    on_press={move |press: PointerPress| {
                         let id = press_cell.get().expect("overlay not yet initialized");
-                        doc.dismiss_overlay_if_outside(id, press.pos);
-                    })}
+                        with_document(|document| document.dismiss_overlay_if_outside(id, press.pos));
+                    }}
                 ></click_catcher>
             }
         });
@@ -189,7 +189,7 @@ impl Document {
     pub(crate) fn set_overlay_on_dismiss(
         &mut self,
         overlay: NodeId,
-        handler: impl FnMut(&mut Document) + 'static,
+        handler: impl FnMut() + 'static,
     ) {
         self.arena.get_mut_as::<OverlayNode>(overlay).on_dismiss = Some(Box::new(handler));
     }
@@ -245,7 +245,7 @@ impl Document {
             .and_then(|node| node.on_dismiss.take());
         self.arena.put_back(id, element);
         if let Some(mut handler) = handler {
-            handler(self);
+            handler();
             if self.contains(id) {
                 let node = self.arena.get_mut_as::<OverlayNode>(id);
                 if node.on_dismiss.is_none() {

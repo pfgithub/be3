@@ -3,8 +3,8 @@ use beui_macros::{component, view};
 use crate::color::Color32;
 
 use crate::document::Document;
-use crate::node::{Handler, NodeId};
-use crate::reactive::{with_document, FillBuilder, OutlineBuilder, Prop, SizedBuilder};
+use crate::node::NodeId;
+use crate::reactive::{with_document, Callback, FillBuilder, OutlineBuilder, Prop, SizedBuilder};
 use crate::styled::theme::{
     ACCENT, ACCENT_SOFT, BORDER, BORDER_WIDTH, FONT_BODY, RADIUS, SURFACE_RAISED, TEXT, TEXT_MUTED,
 };
@@ -19,25 +19,14 @@ const FOCUS_RING_OFFSET: f32 = 3.0;
 pub fn text_input(
     value: Prop<String>,
     placeholder: Prop<String>,
-    on_change: Option<Handler<String>>,
-    on_submit: Option<Handler<String>>,
+    on_change: Callback<String>,
+    on_submit: Callback<String>,
 ) -> NodeId {
-    let mut on_change_forward = on_change;
-    let mut on_submit_forward = on_submit;
-
     let input = view! {
         <unstyled::text_input
             value={String::new()}
-            on_change={Box::new(move |document: &mut Document, value| {
-                if let Some(handler) = &mut on_change_forward {
-                    handler(document, value);
-                }
-            })}
-            on_submit={Box::new(move |document: &mut Document, value| {
-                if let Some(handler) = &mut on_submit_forward {
-                    handler(document, value);
-                }
-            })}
+            on_change={move |value| on_change.call(value)}
+            on_submit={move |value| on_submit.call(value)}
             content={Box::new(move |handle: unstyled::TextInputHandle| {
             let border_color = {
                 let focused = handle.focused.clone();

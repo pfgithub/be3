@@ -4,9 +4,9 @@ use crate::color::Color32;
 
 use crate::base::TextAlign;
 use crate::document::Document;
-use crate::node::{Handler, NodeId};
+use crate::node::NodeId;
 use crate::reactive::{
-    create_effect, create_signal, current_component, set_component_detail, with_document,
+    create_effect, create_signal, current_component, set_component_detail, with_document, Callback,
     CenteredRowBuilder, Children, FillBuilder, OutlineBuilder, PaddingBuilder, Prop, SizedBuilder,
     TextBuilder,
 };
@@ -25,14 +25,13 @@ const PADDING_VERTICAL: f32 = 4.0;
 pub fn accordion(
     title: Prop<String>,
     open: Prop<bool>,
-    on_toggle: Option<Handler<bool>>,
+    on_toggle: Callback<bool>,
     children: Children,
 ) -> NodeId {
     let child = children
         .into_first()
         .expect("accordion requires a child, e.g. <accordion>{content}</accordion>");
     let shadow = current_component();
-    let mut on_toggle = on_toggle;
 
     let (title_text, set_title_text) = create_signal(String::new());
     title.apply(move |value| set_title_text.set(value));
@@ -44,9 +43,10 @@ pub fn accordion(
         }
     });
 
-    let disclosure = view! {
+    view! {
         <unstyled::disclosure
             spacing={SPACING}
+            on_toggle={move |open| on_toggle.call(open)}
             header={Box::new(move |handle: DisclosureHandle| {
                 let header_color = Prop::Dynamic(Box::new(move || header_fill(handle.hovered.get())));
                 let marker_glyph = Prop::Dynamic(Box::new(move || glyph(handle.open.get()).to_owned()));
@@ -75,15 +75,7 @@ pub fn accordion(
         >
             {child}
         </unstyled::disclosure>
-    };
-
-    unstyled::set_disclosure_on_toggle(disclosure, move |document, open| {
-        if let Some(handler) = &mut on_toggle {
-            handler(document, open);
-        }
-    });
-
-    disclosure
+    }
 }
 
 pub fn accordion_open(document: &Document, accordion: NodeId) -> bool {

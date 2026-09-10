@@ -3,10 +3,9 @@ use beui_macros::{component, view};
 use crate::color::Color32;
 
 use crate::base::TextAlign;
-use crate::document::Document;
-use crate::node::{ClickHandler, NodeId};
+use crate::node::NodeId;
 use crate::reactive::{
-    with_document, FillBuilder, OutlineBuilder, PaddingBuilder, Prop, TextBuilder,
+    with_document, ClickCallback, FillBuilder, OutlineBuilder, PaddingBuilder, Prop, TextBuilder,
 };
 use crate::styled::theme::{
     ACCENT, ACCENT_ACTIVE, ACCENT_HOVER, BORDER, BORDER_WIDTH, FONT_BODY, ON_ACCENT, RADIUS,
@@ -50,10 +49,10 @@ pub fn button(
     label: Prop<String>,
     variant: ButtonVariant,
     disabled: Prop<bool>,
-    on_click: Option<ClickHandler>,
+    on_click: ClickCallback,
 ) -> NodeId {
-    let button = view! {
-        <unstyled::button disabled={disabled} content={Box::new(move |handle: unstyled::ButtonHandle| {
+    view! {
+        <unstyled::button disabled={disabled} on_click={move || on_click.call()} content={Box::new(move |handle: unstyled::ButtonHandle| {
             let fill_color = Prop::Dynamic(Box::new(move || {
                 variant.fill(handle.hovered.get(), handle.active.get())
             }));
@@ -69,20 +68,7 @@ pub fn button(
                 </outline>
             }
         })} />
-    };
-
-    if let Some(on_click) = on_click {
-        unstyled::set_button_on_click(button, on_click);
     }
-
-    button
-}
-
-pub fn set_button_on_click(button: NodeId, handler: impl FnMut(&mut Document) + 'static) {
-    with_document(|document| {
-        let inner = document.shadow_root(button);
-        unstyled::set_button_on_click(inner, handler);
-    });
 }
 
 pub fn focus_button(button: NodeId) {

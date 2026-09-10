@@ -34,7 +34,7 @@ fn app() -> NodeId {
         let count = count.clone();
         let next_id = next_id.clone();
         let set_next_id = set_next_id.clone();
-        move |_document| {
+        move || {
             set_count.update(|value| *value -= 1);
             let id = next_id.get();
             set_next_id.set(id + 1);
@@ -48,7 +48,7 @@ fn app() -> NodeId {
         let count = count.clone();
         let next_id = next_id.clone();
         let set_next_id = set_next_id.clone();
-        move |_document| {
+        move || {
             set_count.update(|value| *value += 1);
             let id = next_id.get();
             set_next_id.set(id + 1);
@@ -56,7 +56,7 @@ fn app() -> NodeId {
         }
     });
 
-    let reset_click: ClickHandler = Box::new(move |_document| {
+    let reset_click: ClickHandler = Box::new(move || {
         set_count.set(0);
         set_history.set(Vec::new());
     });

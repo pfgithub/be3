@@ -5,10 +5,13 @@ use crate::base::overlay::{OverlayAnchor, Placement};
 use crate::base::ItemSize;
 use crate::document::Document;
 use crate::input::{Key, KeyPress};
-use crate::node::{Handler, NodeId};
+use crate::node::NodeId;
 use beui_macros::view;
 
-use crate::reactive::{bind, with_reactive_scope, FocusableBuilder};
+use crate::reactive::{
+    bind, create_signal, with_document, with_reactive_scope, Callback, FocusableBuilder, Prop,
+    WriteSignal,
+};
 use crate::unstyled;
 
 #[derive(Clone)]
@@ -46,7 +49,8 @@ struct Row {
 struct State {
     rows: Vec<Row>,
     root: NodeId,
-    on_select: Option<Handler<Vec<usize>>>,
+    set_active: WriteSignal<Option<usize>>,
+    on_select: Callback<Vec<usize>>,
 }
 
 pub(crate) fn menu_list(document: &mut Document, items: &[MenuItem]) -> NodeId {
@@ -61,14 +65,19 @@ fn build_menu_list(
     let column = unstyled::column(2.0);
     let menu_cell: Rc<Cell<Option<NodeId>>> = Rc::new(Cell::new(None));
     let key_cell = menu_cell.clone();
+    let (active, set_active) = create_signal(None);
+    let root_tab_stop = {
+        let active = active.clone();
+        Prop::Dynamic(Box::new(move || active.get().is_none()))
+    };
     let root = with_reactive_scope(document, || {
         view! {
             <focusable
-                tab_stop={true}
-                on_key={Box::new(move |document: &mut Document, press: KeyPress| {
+                tab_stop={root_tab_stop}
+                on_key={move |press: KeyPress| {
                     let menu = key_cell.get().expect("menu not yet initialized");
-                    root_key(document, menu, press)
-                })}
+                    with_document(|document| root_key(document, menu, press))
+                }}
             ></focusable>
         }
     });
@@ -82,13 +91,35 @@ fn build_menu_list(
         State {
             rows: Vec::new(),
             root,
-            on_select: None,
+            set_active,
+            on_select: Callback::empty(),
         },
     );
 
     for (index, item) in items.iter().enumerate() {
-        let button = view! { <unstyled::button /> };
-        unstyled::set_button_tab_stop(button, false);
+        let disabled = item.disabled;
+        let tab_stop = {
+            let active = active.clone();
+            Prop::Dynamic(Box::new(move || active.get() == Some(index)))
+        };
+        let button = view! {
+            <unstyled::button
+                tab_stop={tab_stop}
+                on_click={move || {
+                    if disabled {
+                        return;
+                    }
+                    with_document(|document| {
+                        if !open_submenu(document, menu, index) {
+                            select(document, menu, vec![index]);
+                        }
+                    });
+                }}
+                on_key={move |press: KeyPress| {
+                    with_document(|document| key(document, menu, index, parent, press))
+                }}
+            />
+        };
         document.append_child(column, button, ItemSize::Intrinsic);
 
         let (submenu, submenu_content) = if item.children.is_empty() {
@@ -99,10 +130,9 @@ fn build_menu_list(
             document.append_child(column, overlay, ItemSize::Intrinsic);
             let content = build_menu_list(document, &item.children, Some((overlay, button)));
             document.set_overlay_content(overlay, content);
-            set_menu_list_on_select(document, content, move |document, mut path| {
+            menu_list_on_select(document, content).set(move |mut path: Vec<usize>| {
                 path.insert(0, index);
-                document
-                    .call_component_handler(menu, path, |state: &mut State| &mut state.on_select);
+                with_document(|document| select(document, menu, path));
             });
             (Some(overlay), Some(content))
         };
@@ -114,37 +144,24 @@ fn build_menu_list(
             submenu_content,
         });
 
-        let disabled = item.disabled;
-        unstyled::set_button_on_click(button, move |document| {
-            if disabled {
-                return;
-            }
-            if !open_submenu(document, menu, index) {
-                let path = vec![index];
-                document
-                    .call_component_handler(menu, path, |state: &mut State| &mut state.on_select);
-            }
-        });
         let hovered = unstyled::button_hovered(document, button);
         bind(move |document| {
             if hovered.get() {
                 hover_menu_list_row(document, menu, index);
             }
         });
-        unstyled::set_button_on_key(button, move |document, press| {
-            key(document, menu, index, parent, press)
-        });
     }
 
     menu
 }
 
-pub(crate) fn set_menu_list_on_select(
-    document: &mut Document,
-    menu: NodeId,
-    handler: impl FnMut(&mut Document, Vec<usize>) + 'static,
-) {
-    document.component_state_mut::<State>(menu).on_select = Some(Box::new(handler));
+pub(crate) fn menu_list_on_select(document: &Document, menu: NodeId) -> Callback<Vec<usize>> {
+    document.component_state::<State>(menu).on_select.clone()
+}
+
+fn select(document: &mut Document, menu: NodeId, path: Vec<usize>) {
+    let on_select = document.component_state::<State>(menu).on_select.clone();
+    on_select.call(path);
 }
 
 pub fn menu_list_len(document: &Document, menu: NodeId) -> usize {
@@ -178,7 +195,10 @@ pub(crate) fn focus_menu_list(document: &mut Document, menu: NodeId) {
 }
 
 pub(crate) fn focus_menu_list_root(document: &mut Document, menu: NodeId) {
-    let root = document.component_state::<State>(menu).root;
+    let state = document.component_state::<State>(menu);
+    let root = state.root;
+    let set_active = state.set_active.clone();
+    set_active.set(None);
     document.focus_focusable(root);
 }
 
@@ -225,18 +245,11 @@ pub fn hover_menu_list_row(document: &mut Document, menu: NodeId, index: usize) 
 
 fn focus_row(document: &mut Document, menu: NodeId, index: usize) {
     close_sibling_submenus(document, menu, index);
-    let root = document.component_state::<State>(menu).root;
-    document.set_focusable_tab_stop(root, false);
-    let buttons: Vec<NodeId> = document
-        .component_state::<State>(menu)
-        .rows
-        .iter()
-        .map(|row| row.button)
-        .collect();
-    for (i, &button) in buttons.iter().enumerate() {
-        unstyled::set_button_tab_stop(button, i == index);
-    }
-    unstyled::focus_button(buttons[index]);
+    let state = document.component_state::<State>(menu);
+    let button = state.rows[index].button;
+    let set_active = state.set_active.clone();
+    set_active.set(Some(index));
+    unstyled::focus_button(button);
 }
 
 fn root_key(document: &mut Document, menu: NodeId, press: KeyPress) -> bool {

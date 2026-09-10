@@ -27,7 +27,7 @@ fn for_each_reuses_nodes_for_keys_that_persist_across_an_update() {
         sink_list.set(Some(list));
 
         let shuffle = view! {
-            <button on_click={Box::new(move |_document| set_items.set(vec![3, 2, 4]))}>
+            <button on_click={move || set_items.set(vec![3, 2, 4])}>
                 <text string={"shuffle".to_string()} />
             </button>
         };

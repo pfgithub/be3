@@ -10,7 +10,7 @@ fn the_scroll_position_is_reported_to_its_listener() {
     }
     let reported = Rc::new(Cell::new(None));
     let sink = reported.clone();
-    document.set_scroll_on_change(scroll, move |_document, position| sink.set(Some(position)));
+    document.set_scroll_on_change(scroll, move |position| sink.set(Some(position)));
     let list = document.create_list(Direction::Vertical, 0.0);
     document.append_child(list, scroll, ItemSize::Percent(100.0));
     document.set_root(list);

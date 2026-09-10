@@ -5,7 +5,7 @@ use crate::geometry::{Rect, Vec2};
 use crate::painter::Painter;
 
 use crate::document::Document;
-use crate::node::{ClickHandler, Element, Handler, InteractInput, NodeId};
+use crate::node::{Element, InteractInput, NodeId};
 
 pub(crate) struct ShadowNode {
     pub(crate) name: &'static str,
@@ -226,37 +226,6 @@ impl Document {
             .as_mut()
             .and_then(|state| state.downcast_mut::<T>())
             .unwrap_or_else(|| panic!("component has no {} state", std::any::type_name::<T>()))
-    }
-
-    pub fn call_component_handler<T: 'static, V>(
-        &mut self,
-        shadow: NodeId,
-        value: V,
-        pick: fn(&mut T) -> &mut Option<Handler<V>>,
-    ) {
-        let Some(mut handler) = pick(self.component_state_mut::<T>(shadow)).take() else {
-            return;
-        };
-        handler(self, value);
-        let slot = pick(self.component_state_mut::<T>(shadow));
-        if slot.is_none() {
-            *slot = Some(handler);
-        }
-    }
-
-    pub fn call_component_click<T: 'static>(
-        &mut self,
-        shadow: NodeId,
-        pick: fn(&mut T) -> &mut Option<ClickHandler>,
-    ) {
-        let Some(mut handler) = pick(self.component_state_mut::<T>(shadow)).take() else {
-            return;
-        };
-        handler(self);
-        let slot = pick(self.component_state_mut::<T>(shadow));
-        if slot.is_none() {
-            *slot = Some(handler);
-        }
     }
 
     pub(crate) fn as_shadow(&self, id: NodeId) -> Option<&ShadowNode> {

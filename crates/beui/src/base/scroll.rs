@@ -8,6 +8,7 @@ use crate::painter::Painter;
 
 use crate::document::Document;
 use crate::node::{Element, InteractInput, NodeId};
+use crate::reactive::Callback;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct ScrollPosition {
@@ -22,8 +23,7 @@ impl ScrollPosition {
     }
 }
 
-pub(crate) type ScrollHandler = Box<dyn FnMut(&mut Document, ScrollPosition)>;
-pub(crate) type ItemBuilder = Box<dyn FnMut(&mut Document, usize) -> NodeId>;
+pub(crate) type ItemBuilder = Box<dyn FnMut(usize) -> NodeId>;
 
 pub(crate) struct VirtualItems {
     pub(crate) count: usize,
@@ -45,7 +45,7 @@ pub(crate) struct ScrollNode {
     focus_color: Color32,
     position: Option<ScrollPosition>,
     anchor: Option<ScrollAnchor>,
-    pub(crate) on_change: Option<ScrollHandler>,
+    pub(crate) on_change: Callback<ScrollPosition>,
     pub(crate) reported: Option<ScrollPosition>,
 }
 
@@ -59,7 +59,7 @@ impl ScrollNode {
             focus_color: Color32::WHITE,
             position: None,
             anchor: None,
-            on_change: None,
+            on_change: Callback::empty(),
             reported: None,
         }
     }
@@ -190,7 +190,7 @@ impl ScrollNode {
 
 fn build_item(doc: &mut Document, build: &mut ItemBuilder, index: usize) -> NodeId {
     let scope = ::reactive::Scope::new();
-    let item = scope.context().run(|| build(doc, index));
+    let item = scope.context().run(|| build(index));
     doc.register_node_scope(item, scope);
     item
 }
@@ -266,12 +266,9 @@ impl Element for ScrollNode {
             self.remember_anchor(doc, painter, rect.width());
         }
         self.position = Some(position);
-        if self.on_change.is_some() && self.reported != Some(position) {
+        if !self.on_change.is_empty() && self.reported != Some(position) {
             self.reported = Some(position);
-            if let Some(mut handler) = self.on_change.take() {
-                handler(doc, position);
-                self.on_change = Some(handler);
-            }
+            self.on_change.call(position);
         }
 
         self.items.clone()
@@ -325,7 +322,7 @@ impl Document {
         scroll: NodeId,
         count: usize,
         estimated_height: f32,
-        build: impl FnMut(&mut Document, usize) -> NodeId + 'static,
+        build: impl FnMut(usize) -> NodeId + 'static,
     ) {
         let node = self.arena.get_mut_as::<ScrollNode>(scroll);
         if matches!(node.anchor, Some(ScrollAnchor::Node { .. })) {
@@ -360,9 +357,12 @@ impl Document {
     pub fn set_scroll_on_change(
         &mut self,
         scroll: NodeId,
-        handler: impl FnMut(&mut Document, ScrollPosition) + 'static,
+        handler: impl FnMut(ScrollPosition) + 'static,
     ) {
-        self.arena.get_mut_as::<ScrollNode>(scroll).on_change = Some(Box::new(handler));
+        self.arena
+            .get_mut_as::<ScrollNode>(scroll)
+            .on_change
+            .set(handler);
     }
 }
 
@@ -413,7 +413,7 @@ impl Document {
             .get(focused)
             .as_any()
             .downcast_ref::<crate::base::focusable::FocusableNode>()
-            .is_some_and(|node| node.on_step.is_some())
+            .is_some_and(|node| !node.on_step.is_empty())
         {
             return false;
         }

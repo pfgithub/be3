@@ -7,7 +7,7 @@ fn evicting_a_virtual_scroll_row_disposes_its_effects() {
     let scroll = document.create_scroll();
     let (shown, set_shown) = with_reactive_scope(&mut document, || create_signal(true));
 
-    document.set_scroll_virtual_items(scroll, 100, 20.0, move |_document, index| {
+    document.set_scroll_virtual_items(scroll, 100, 20.0, move |index| {
         let shown = shown.clone();
         view! {
             <visibility visible={shown}>

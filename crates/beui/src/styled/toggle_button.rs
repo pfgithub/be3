@@ -2,9 +2,9 @@ use beui_macros::{component, view};
 
 use crate::color::Color32;
 use crate::document::Document;
-use crate::node::{Handler, NodeId};
+use crate::node::NodeId;
 use crate::reactive::{
-    create_effect, create_signal, current_component, set_component_detail, with_document,
+    create_effect, create_signal, current_component, set_component_detail, with_document, Callback,
     FillBuilder, OutlineBuilder, PaddingBuilder, Prop, TextBuilder,
 };
 use crate::styled::theme::{
@@ -17,10 +17,9 @@ use crate::unstyled::ToggleBuilder;
 pub fn toggle_button(
     label: Prop<String>,
     pressed: Prop<bool>,
-    on_change: Option<Handler<bool>>,
+    on_change: Callback<bool>,
 ) -> NodeId {
     let shadow = current_component();
-    let mut on_change = on_change;
 
     let (label_text, set_label_text) = create_signal(String::new());
     label.apply(move |value| set_label_text.set(value));
@@ -32,14 +31,10 @@ pub fn toggle_button(
         }
     });
 
-    let toggle = view! {
+    view! {
         <toggle
             checked={pressed}
-            on_change={Box::new(move |document: &mut Document, pressed| {
-                if let Some(handler) = &mut on_change {
-                    handler(document, pressed);
-                }
-            })}
+            on_change={move |pressed| on_change.call(pressed)}
             content={Box::new(move |handle: unstyled::ToggleHandle| {
             let fill_color = {
                 let checked = handle.checked.clone();
@@ -66,9 +61,7 @@ pub fn toggle_button(
                 </outline>
             }
         })} />
-    };
-
-    toggle
+    }
 }
 
 fn fill_for(pressed: bool, hovered: bool) -> Color32 {

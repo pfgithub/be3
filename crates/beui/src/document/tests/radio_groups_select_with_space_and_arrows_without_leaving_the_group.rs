@@ -9,9 +9,9 @@ fn radio_groups_select_with_space_and_arrows_without_leaving_the_group() {
     let sink = changes.clone();
     let group = with_reactive_scope(&mut document, || {
         view! {
-            <radio_group labels={vec!["One".to_string(), "Two".to_string(), "Three".to_string()]} selected={None} on_change={Box::new(move |_document: &mut Document, value| {
+            <radio_group labels={vec!["One".to_string(), "Two".to_string(), "Three".to_string()]} selected={None} on_change={move |value| {
                 sink.borrow_mut().push(value)
-            })} />
+            }} />
         }
     });
     let after = labelled_button(&mut document, "After");

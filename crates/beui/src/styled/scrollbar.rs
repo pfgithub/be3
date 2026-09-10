@@ -22,7 +22,7 @@ pub fn scrollbar(scroll: NodeId) -> NodeId {
         viewport: 0.0,
     });
     with_document(|document| {
-        document.set_scroll_on_change(scroll, move |_document, new_position| {
+        document.set_scroll_on_change(scroll, move |new_position| {
             set_position.set(new_position);
         });
     });

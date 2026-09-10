@@ -14,16 +14,16 @@ fn a_disabled_button_prop_tracks_a_signal_and_blocks_clicks_while_true() {
         let (disabled, set_disabled) = create_signal(true);
 
         let toggle = view! {
-            <button on_click={Box::new(move |_document| {
+            <button on_click={move || {
                 set_disabled.update(|disabled| *disabled = !*disabled)
-            })}>
+            }}>
                 <text string={"toggle".to_string()} />
             </button>
         };
         sink_toggle.set(Some(toggle));
 
         let go = view! {
-            <button disabled={disabled} on_click={Box::new(move |_document| sink.set(sink.get() + 1))}>
+            <button disabled={disabled} on_click={move || sink.set(sink.get() + 1)}>
                 <text string={"go".to_string()} />
             </button>
         };

@@ -81,6 +81,7 @@ use crate::input::{Event, Key, Modifiers, PointerButton, RawInput};
 
 use crate::base::list::{Direction, ItemSize};
 use crate::inspector::Inspector;
+use crate::reactive::{with_document, Prop};
 use crate::styled;
 use crate::unstyled;
 use beui_macros::view;
@@ -257,18 +258,22 @@ fn key_event(key: Key, pressed: bool, modifiers: Modifiers) -> Event {
 }
 
 pub(crate) fn with_installed<R>(document: &mut Document, f: impl FnOnce(&mut Document) -> R) -> R {
-    let _guard = crate::reactive::install(document);
-    crate::reactive::with_document(f)
+    crate::reactive::with_reactive_scope(document, || crate::reactive::with_document(f))
+}
+
+pub(crate) fn button_face(document: &mut Document, label: &str) -> NodeId {
+    let text = document.create_text(label, 14.0, Color32::WHITE);
+    let padding = document.create_padding(20.0, 12.0);
+    document.set_padding_child(padding, text);
+    let fill = document.create_fill(Color32::from_gray(60), 4);
+    document.set_fill_child(fill, padding);
+    fill
 }
 
 pub(crate) fn labelled_button(document: &mut Document, label: &str) -> NodeId {
     with_installed(document, |document| {
-        let text = document.create_text(label, 14.0, Color32::WHITE);
-        let padding = document.create_padding(20.0, 12.0);
-        document.set_padding_child(padding, text);
-        let fill = document.create_fill(Color32::from_gray(60), 4);
-        document.set_fill_child(fill, padding);
-        view! { <unstyled::button content={Box::new(move |_handle| fill)} /> }
+        let face = button_face(document, label);
+        view! { <unstyled::button>{face}</unstyled::button> }
     })
 }
 
@@ -276,8 +281,8 @@ pub(crate) fn counting_button(document: &mut Document, label: &str) -> (NodeId, 
     let button = labelled_button(document, label);
     let clicks = Rc::new(Cell::new(0));
     let counter = clicks.clone();
-    with_installed(document, |_document| {
-        unstyled::set_button_on_click(button, move |_document| counter.set(counter.get() + 1));
+    with_installed(document, |_| {
+        unstyled::set_button_on_click(button, move || counter.set(counter.get() + 1));
     });
     (button, clicks)
 }
@@ -290,9 +295,9 @@ pub(crate) fn virtual_list(built: &Rc<RefCell<Vec<usize>>>) -> (Document, NodeId
         scroll,
         VIRTUAL_ITEM_COUNT,
         VIRTUAL_ITEM_HEIGHT,
-        move |document, index| {
+        move |index| {
             sink.borrow_mut().push(index);
-            document.create_padding(0.0, VIRTUAL_ITEM_HEIGHT / 2.0)
+            with_document(|document| document.create_padding(0.0, VIRTUAL_ITEM_HEIGHT / 2.0))
         },
     );
     let list = document.create_list(Direction::Vertical, 0.0);

@@ -158,7 +158,7 @@ fn scroll_row(index: usize, rows: Rows, compact: bool) -> NodeId {
     };
 
     unstyled::set_button_child(button, ring);
-    unstyled::set_button_on_click(button, move |_document| rows.select(index));
+    unstyled::set_button_on_click(button, move || rows.select(index));
 
     button
 }
@@ -170,7 +170,7 @@ fn install_rows(document: &mut Document, scroll: NodeId, rows: &Rows, compact: b
         ROW_HEIGHT
     };
     let rows = rows.clone();
-    document.set_scroll_virtual_items(scroll, ROW_COUNT, height, move |_document, index| {
+    document.set_scroll_virtual_items(scroll, ROW_COUNT, height, move |index| {
         let rows = rows.clone();
         view! { <scroll_row index={index} rows={rows} compact={compact} /> }
     });
@@ -189,15 +189,15 @@ fn build_header(set_count: WriteSignal<i64>) -> NodeId {
                         <caption content={"retained mode ui".to_string()} />
                     </centered_row>
                     @percent(100.0) <spacer />
-                    <button label={"Reset".to_string()} variant={ButtonVariant::Secondary} on_click={Box::new(move |_document| {
+                    <button label={"Reset".to_string()} variant={ButtonVariant::Secondary} on_click={move || {
                         reset_count.set(0);
-                    })} />
-                    @fixed(ICON_BUTTON_WIDTH) <button label={"-".to_string()} variant={ButtonVariant::Primary} on_click={Box::new(move |_document| {
+                    }} />
+                    @fixed(ICON_BUTTON_WIDTH) <button label={"-".to_string()} variant={ButtonVariant::Primary} on_click={move || {
                         decrement_count.update(|value| *value = value.saturating_sub(1));
-                    })} />
-                    @fixed(ICON_BUTTON_WIDTH) <button label={"+".to_string()} variant={ButtonVariant::Primary} on_click={Box::new(move |_document| {
+                    }} />
+                    @fixed(ICON_BUTTON_WIDTH) <button label={"+".to_string()} variant={ButtonVariant::Primary} on_click={move || {
                         set_count.update(|value| *value = value.saturating_add(1));
-                    })} />
+                    }} />
                 </centered_row>
             </padding>
         </fill>
@@ -295,9 +295,9 @@ fn build_controls(scroll: NodeId, rows: Rows) -> NodeId {
     view! {
         <card>
             <column spacing={16.0}>
-                <tabs labels={vec!["List".to_string(), "Load".to_string(), "Name".to_string(), "Choices".to_string(), "Menus".to_string()]} selected={0} on_change={Box::new(move |_document: &mut Document, selected| {
+                <tabs labels={vec!["List".to_string(), "Load".to_string(), "Name".to_string(), "Choices".to_string(), "Menus".to_string()]} selected={0} on_change={move |selected| {
                     set_selected_tab.set(selected);
-                })} />
+                }} />
                 <column spacing={0.0}>
                     <show condition={list_condition} then={Box::new(move || view! { <build_list_controls scroll={scroll} rows={list_rows} /> })} />
                     <show condition={load_condition} then={Box::new(|| view! { <build_load_controls /> })} />
@@ -316,13 +316,13 @@ fn build_list_controls(scroll: NodeId, rows: Rows) -> NodeId {
     let compact_rows = rows.clone();
     view! {
         <column spacing={12.0}>
-            <checkbox label={"Show timings".to_string()} checked={true} on_change={Box::new(move |_document: &mut Document, checked| {
+            <checkbox label={"Show timings".to_string()} checked={true} on_change={move |checked| {
                 timing_rows.show_timings(checked);
-            })} />
+            }} />
             <centered_row spacing={12.0}>
-                <switch on={false} on_change={Box::new(move |document: &mut Document, on| {
-                    install_rows(document, scroll, &compact_rows, on);
-                })} />
+                <switch on={false} on_change={move |on| {
+                    with_document(|document| install_rows(document, scroll, &compact_rows, on));
+                }} />
                 @percent(100.0) <body content={"Compact rows".to_string()} />
             </centered_row>
         </column>
@@ -340,9 +340,9 @@ fn build_load_controls() -> NodeId {
                 <caption content={"Simulated load".to_string()} />
                 @percent(100.0) <caption content={create_memo(move || percent_label(readout_value.get()))} align={TextAlign::End} />
             </centered_row>
-            <slider value={0.4} on_change={Box::new(move |_document: &mut Document, value| {
+            <slider value={0.4} on_change={move |value| {
                 set_progress_value.set(value);
-            })} />
+            }} />
             <progress value={progress_value} />
         </column>
     }
@@ -358,9 +358,9 @@ fn build_name_controls() -> NodeId {
                 <caption content={"Display name".to_string()} />
                 @percent(100.0) <caption content={greeting_text} align={TextAlign::End} />
             </centered_row>
-            <text_input value={String::new()} placeholder={"Type a name".to_string()} on_change={Box::new(move |_document: &mut Document, value| {
+            <text_input value={String::new()} placeholder={"Type a name".to_string()} on_change={move |value| {
                 set_greeting_text.set(greeting_label(&value));
-            })} />
+            }} />
             <paragraph content={"Click to place the caret, drag to select, and Ctrl+Z to undo.".to_string()} />
         </column>
     }
@@ -390,14 +390,14 @@ fn build_choice_controls() -> NodeId {
         <row spacing={20.0}>
             @percent(50.0) <column spacing={8.0}>
                 <caption content={"Update mode".to_string()} />
-                <radio_group labels={vec!["Automatic".to_string(), "Manual".to_string(), "Scheduled".to_string()]} selected={Some(0)} on_change={Box::new(move |_document: &mut Document, selected| {
+                <radio_group labels={vec!["Automatic".to_string(), "Manual".to_string(), "Scheduled".to_string()]} selected={Some(0)} on_change={move |selected| {
                     if let Some(index) = selected {
                         let text = format!("{} updates", modes[index]);
                         set_mode_status_text.set(text);
                     }
-                })} />
+                }} />
                 <caption content={mode_status_text} />
-                <toggle_button label={"Pin selection".to_string()} pressed={false} on_change={Box::new(move |_document: &mut Document, pressed| {
+                <toggle_button label={"Pin selection".to_string()} pressed={false} on_change={move |pressed| {
                     let text = if pressed {
                         "Selection is pinned"
                     } else {
@@ -405,17 +405,17 @@ fn build_choice_controls() -> NodeId {
                     }
                     .to_string();
                     set_pin_status_text.set(text);
-                })} />
+                }} />
                 <caption content={pin_status_text} />
             </column>
             @percent(50.0) <column spacing={8.0}>
                 <caption content={"Highlight color (type to search)".to_string()} />
-                <listbox labels={vec!["Amber".to_string(), "Blue".to_string(), "Green".to_string(), "Purple".to_string()]} selected={Some(1)} on_change={Box::new(move |_document: &mut Document, selected| {
+                <listbox labels={vec!["Amber".to_string(), "Blue".to_string(), "Green".to_string(), "Purple".to_string()]} selected={Some(1)} on_change={move |selected| {
                     if let Some(index) = selected {
                         let text = format!("{} selected", colors[index]);
                         set_color_status_text.set(text);
                     }
-                })} />
+                }} />
                 <caption content={color_status_text} />
             </column>
         </row>
@@ -448,7 +448,7 @@ fn build_menu_controls() -> NodeId {
         <row spacing={20.0}>
             @percent(50.0) <column spacing={8.0}>
                 <caption content={"Favorite fruit (type to search)".to_string()} />
-                <select options={fruits} selected={Some(0)} on_change={Box::new(move |_document: &mut Document, selected| {
+                <select options={fruits} selected={Some(0)} on_change={move |selected| {
                     let text = selected
                         .and_then(|index| fruit_names.get(index))
                         .map_or_else(
@@ -456,7 +456,7 @@ fn build_menu_controls() -> NodeId {
                             |label| format!("{label} selected"),
                         );
                     set_fruit_status_text.set(text);
-                })} />
+                }} />
                 <caption content={fruit_status_text} />
             </column>
             @percent(50.0) <column spacing={8.0}>
@@ -469,7 +469,7 @@ fn build_menu_controls() -> NodeId {
                             </column>
                         </card>
                     }
-                } items={items} on_select={Box::new(move |_document: &mut Document, path: Vec<usize>| {
+                } items={items} on_select={move |path: Vec<usize>| {
                     let label = match path.as_slice() {
                         [0] => "Copy".to_owned(),
                         [1] => "Paste".to_owned(),
@@ -478,7 +478,7 @@ fn build_menu_controls() -> NodeId {
                         other => format!("{other:?}"),
                     };
                     set_menu_status_text.set(format!("Chose: {label}"));
-                })} />
+                }} />
                 <caption content={menu_status_text} />
             </column>
         </row>

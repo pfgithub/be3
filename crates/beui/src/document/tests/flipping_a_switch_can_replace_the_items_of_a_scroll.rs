@@ -17,14 +17,14 @@ fn check_compact_rows(inset: f32) {
     let rebuilt = built.clone();
     let switch = with_reactive_scope(&mut document, || {
         view! {
-            <switch on={false} on_change={Box::new(move |document: &mut Document, on| {
+            <switch on={false} on_change={move |on: bool| {
                 let height = if on {
                     VIRTUAL_ITEM_HEIGHT / 2.0
                 } else {
                     VIRTUAL_ITEM_HEIGHT
                 };
-                install_scroll_items(document, scroll, height, &rebuilt);
-            })} />
+                with_document(|document| install_scroll_items(document, scroll, height, &rebuilt));
+            }} />
         }
     });
     let column = document.create_list(Direction::Vertical, 0.0);
@@ -82,13 +82,8 @@ fn install_scroll_items(
     built: &Rc<RefCell<Vec<usize>>>,
 ) {
     let sink = built.clone();
-    document.set_scroll_virtual_items(
-        scroll,
-        VIRTUAL_ITEM_COUNT,
-        height,
-        move |document, index| {
-            sink.borrow_mut().push(index);
-            document.create_padding(0.0, height / 2.0)
-        },
-    );
+    document.set_scroll_virtual_items(scroll, VIRTUAL_ITEM_COUNT, height, move |index| {
+        sink.borrow_mut().push(index);
+        with_document(|document| document.create_padding(0.0, height / 2.0))
+    });
 }

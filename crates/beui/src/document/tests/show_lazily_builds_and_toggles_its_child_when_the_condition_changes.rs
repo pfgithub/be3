@@ -16,9 +16,9 @@ fn show_lazily_builds_and_toggles_its_child_when_the_condition_changes() {
         let (visible, set_visible) = create_signal(false);
 
         let toggle = view! {
-            <button on_click={Box::new(move |_document| {
+            <button on_click={move || {
                 set_visible.update(|visible| *visible = !*visible)
-            })}>
+            }}>
                 <text string={"toggle".to_string()} />
             </button>
         };

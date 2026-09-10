@@ -8,9 +8,9 @@ fn a_signal_write_from_a_click_handler_updates_its_bound_text_in_the_same_frame(
     let (count, set_count) = create_signal(0i64);
     let (increment, value) = reactive::enter(&mut document, || {
         let increment = view! {
-            <button on_click={Box::new(move |_document| {
+            <button on_click={move || {
                 set_count.update(|count| *count += 1)
-            })}>
+            }}>
                 <text string={"+".to_string()} />
             </button>
         };

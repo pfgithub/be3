@@ -4,8 +4,8 @@ use syn::braced;
 use syn::parenthesized;
 use syn::parse::{Parse, ParseStream};
 use syn::{
-    parse_macro_input, Expr, ExprLit, FnArg, GenericArgument, Ident, ItemFn, Lit, Pat, PatType,
-    PathArguments, Token, Type,
+    parse_macro_input, Attribute, Expr, ExprLit, FnArg, GenericArgument, Ident, ItemFn, Lit, Pat,
+    PatType, PathArguments, Token, Type,
 };
 
 struct Prop {
@@ -14,6 +14,24 @@ struct Prop {
     inner_ty: Option<Type>,
     reactive_inner_ty: Option<Type>,
     is_children: bool,
+    callback_args: Option<Vec<Type>>,
+    is_click_callback: bool,
+    default: Option<Expr>,
+}
+
+fn take_prop_default(attrs: &mut Vec<Attribute>) -> Option<Expr> {
+    let position = attrs.iter().position(|attr| attr.path().is_ident("prop"))?;
+    let attr = attrs.remove(position);
+    let mut default = None;
+    attr.parse_nested_meta(|meta| {
+        if !meta.path.is_ident("default") {
+            return Err(meta.error("expected `default = <expr>`"));
+        }
+        default = Some(meta.value()?.parse::<Expr>()?);
+        Ok(())
+    })
+    .expect("#[prop(...)] expects `default = <expr>`");
+    Some(default.expect("#[prop(...)] expects `default = <expr>`"))
 }
 
 struct ComponentAttr {
@@ -65,6 +83,28 @@ fn generic_inner(ty: &Type, name: &str) -> Option<Type> {
     })
 }
 
+fn generic_args(ty: &Type, name: &str) -> Option<Vec<Type>> {
+    let Type::Path(path) = ty else {
+        return None;
+    };
+    let segment = path.path.segments.last()?;
+    if segment.ident != name {
+        return None;
+    }
+    let PathArguments::AngleBracketed(args) = &segment.arguments else {
+        return Some(Vec::new());
+    };
+    Some(
+        args.args
+            .iter()
+            .filter_map(|arg| match arg {
+                GenericArgument::Type(ty) => Some(ty.clone()),
+                _ => None,
+            })
+            .collect(),
+    )
+}
+
 fn is_named_type(ty: &Type, name: &str) -> bool {
     let Type::Path(path) = ty else {
         return false;
@@ -92,13 +132,14 @@ pub fn component(attr: TokenStream, item: TokenStream) -> TokenStream {
         .inputs
         .iter_mut()
         .map(|arg| {
-            let FnArg::Typed(PatType { pat, ty, .. }) = arg else {
+            let FnArg::Typed(PatType { attrs, pat, ty, .. }) = arg else {
                 panic!("#[component] functions cannot take `self`");
             };
             let ident = match pat.as_ref() {
                 Pat::Ident(pat_ident) => pat_ident.ident.clone(),
                 _ => panic!("#[component] props must be simple identifiers"),
             };
+            let default = take_prop_default(attrs);
             let inner_ty = generic_inner(ty, "Option");
             let reactive_inner_ty = generic_inner(ty, "Prop");
             let is_children = is_named_type(ty, "Children");
@@ -108,6 +149,9 @@ pub fn component(attr: TokenStream, item: TokenStream) -> TokenStream {
                 inner_ty,
                 reactive_inner_ty,
                 is_children,
+                callback_args: generic_args(ty, "Callback"),
+                is_click_callback: is_named_type(ty, "ClickCallback"),
+                default,
             }
         })
         .collect();
@@ -134,6 +178,25 @@ pub fn component(attr: TokenStream, item: TokenStream) -> TokenStream {
                     self
                 }
             }
+        } else if prop.is_click_callback {
+            quote! {
+                pub fn #ident(mut self, value: impl ::core::ops::FnMut() + 'static) -> Self {
+                    self.#ident = Some(::beui::reactive::ClickCallback::new(value));
+                    self
+                }
+            }
+        } else if let Some(args) = &prop.callback_args {
+            let signature = match args.as_slice() {
+                [value] => quote! { ::core::ops::FnMut(#value) },
+                [value, result] => quote! { ::core::ops::FnMut(#value) -> #result },
+                _ => panic!("`Callback` props take one or two type arguments"),
+            };
+            quote! {
+                pub fn #ident(mut self, value: impl #signature + 'static) -> Self {
+                    self.#ident = Some(::beui::reactive::Callback::new(value));
+                    self
+                }
+            }
         } else if let Some(inner_ty) = &prop.reactive_inner_ty {
             quote! {
                 pub fn #ident(mut self, value: impl ::beui::reactive::IntoProp<#inner_ty>) -> Self {
@@ -157,12 +220,25 @@ pub fn component(attr: TokenStream, item: TokenStream) -> TokenStream {
         let ident_str = ident.to_string();
         let value = if prop.inner_ty.is_some() {
             quote! { self.#ident.unwrap_or(None) }
+        } else if prop.is_children {
+            quote! { self.#ident.unwrap_or_default() }
+        } else if let Some(default) = &prop.default {
+            if prop.reactive_inner_ty.is_some() {
+                quote! {
+                    self.#ident
+                        .unwrap_or_else(|| ::beui::reactive::IntoProp::into_prop(#default))
+                }
+            } else {
+                quote! { self.#ident.unwrap_or_else(|| #default) }
+            }
         } else if prop.reactive_inner_ty.is_some() {
             quote! {
                 self.#ident.unwrap_or_else(|| {
                     ::beui::reactive::Prop::Static(::core::default::Default::default())
                 })
             }
+        } else if prop.callback_args.is_some() || prop.is_click_callback {
+            quote! { self.#ident.unwrap_or_default() }
         } else {
             quote! {
                 self.#ident.unwrap_or_else(|| {

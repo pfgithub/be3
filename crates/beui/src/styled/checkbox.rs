@@ -4,10 +4,11 @@ use crate::base::TextAlign;
 use crate::color::Color32;
 
 use crate::document::Document;
-use crate::node::{Handler, NodeId};
+use crate::node::NodeId;
 use crate::reactive::{
-    create_effect, current_component, set_component_detail, with_document, CenteredRowBuilder,
-    FillBuilder, OutlineBuilder, Prop, SizedBuilder, SpacerBuilder, TextBuilder, VisibilityBuilder,
+    create_effect, current_component, set_component_detail, with_document, Callback,
+    CenteredRowBuilder, FillBuilder, OutlineBuilder, Prop, SizedBuilder, SpacerBuilder,
+    TextBuilder, VisibilityBuilder,
 };
 use crate::styled::theme::{
     ACCENT, ACCENT_HOVER, BORDER, BORDER_WIDTH, CHIP_RADIUS, FONT_BODY, ON_ACCENT, RADIUS,
@@ -24,22 +25,13 @@ const FOCUS_RING_WIDTH: f32 = 2.0;
 const FOCUS_RING_OFFSET: f32 = 4.0;
 
 #[component]
-pub fn checkbox(
-    label: Prop<String>,
-    checked: Prop<bool>,
-    on_change: Option<Handler<bool>>,
-) -> NodeId {
+pub fn checkbox(label: Prop<String>, checked: Prop<bool>, on_change: Callback<bool>) -> NodeId {
     let shadow = current_component();
-    let mut on_change = on_change;
 
-    let toggle = view! {
+    view! {
         <toggle
             checked={checked}
-            on_change={Box::new(move |document: &mut Document, checked| {
-                if let Some(handler) = &mut on_change {
-                    handler(document, checked);
-                }
-            })}
+            on_change={move |checked| on_change.call(checked)}
             content={Box::new(move |handle: unstyled::ToggleHandle| {
             let fill_color = {
                 let checked = handle.checked.clone();
@@ -82,9 +74,7 @@ pub fn checkbox(
                 </outline>
             }
         })} />
-    };
-
-    toggle
+    }
 }
 
 pub fn checkbox_checked(document: &Document, checkbox: NodeId) -> bool {

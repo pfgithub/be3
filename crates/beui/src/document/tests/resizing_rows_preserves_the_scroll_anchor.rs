@@ -14,7 +14,7 @@ fn resizing_rows_preserves_the_scroll_anchor() {
     document.set_root(scroll);
     let reported = Rc::new(Cell::new(None));
     let sink = reported.clone();
-    document.set_scroll_on_change(scroll, move |_, position| sink.set(Some(position)));
+    document.set_scroll_on_change(scroll, move |position| sink.set(Some(position)));
     let mut harness = Harness::new(document);
     harness.document.set_scroll_offset(scroll, 227.0);
     harness.frame(Vec::new());

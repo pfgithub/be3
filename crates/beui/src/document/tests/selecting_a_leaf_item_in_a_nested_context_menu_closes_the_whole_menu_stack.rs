@@ -18,9 +18,9 @@ fn selecting_a_leaf_item_in_a_nested_context_menu_closes_the_whole_menu_stack() 
     let selected = Rc::new(RefCell::new(Vec::new()));
     let sink = selected.clone();
     let menu = with_reactive_scope(&mut document, || {
-        view! { <context_menu region={region} items={items} on_select={Box::new(move |_document: &mut Document, path| {
+        view! { <context_menu region={region} items={items} on_select={move |path| {
             sink.borrow_mut().push(path);
-        })} /> }
+        }} /> }
     });
     toolbar(&mut document, &[menu]);
     let mut harness = Harness::new(document);

@@ -9,9 +9,9 @@ fn clicking_a_checkbox_toggles_it() {
     let sink = changes.clone();
     let checkbox = with_reactive_scope(&mut document, || {
         view! {
-            <checkbox label={"Show timings".to_string()} checked={false} on_change={Box::new(move |_document: &mut Document, checked| {
+            <checkbox label={"Show timings".to_string()} checked={false} on_change={move |checked| {
                 sink.borrow_mut().push(checked);
-            })} />
+            }} />
         }
     });
     toolbar(&mut document, &[checkbox]);

@@ -8,7 +8,7 @@ fn dragging_a_slider_moves_its_value() {
     let reported = Rc::new(Cell::new(0.0));
     let sink = reported.clone();
     let slider = with_reactive_scope(&mut document, || {
-        view! { <slider value={0.0} on_change={Box::new(move |_document: &mut Document, value| sink.set(value))} /> }
+        view! { <slider value={0.0} on_change={move |value| sink.set(value)} /> }
     });
     toolbar(&mut document, &[slider]);
     let mut harness = Harness::new(document);

@@ -1,10 +1,10 @@
 use beui_macros::{component, view};
 
 use crate::document::Document;
-use crate::node::{Handler, NodeId};
+use crate::node::NodeId;
 use crate::reactive::{
     create_effect, create_signal, current_component, set_component_detail, set_component_state,
-    with_document, Children, ColumnBuilder, Prop, ReadSignal, VisibilityBuilder,
+    untrack, with_document, Callback, Children, ColumnBuilder, Prop, ReadSignal, VisibilityBuilder,
 };
 use crate::unstyled;
 use crate::unstyled::button::ButtonHandle;
@@ -20,8 +20,7 @@ pub type DisclosureHeader = Box<dyn FnOnce(DisclosureHandle) -> NodeId>;
 
 struct State {
     button: NodeId,
-    open_read: ReadSignal<bool>,
-    on_toggle: Option<Handler<bool>>,
+    open: ReadSignal<bool>,
 }
 
 #[component]
@@ -30,22 +29,23 @@ pub fn disclosure(
     header: DisclosureHeader,
     children: Children,
     open: Prop<bool>,
+    on_toggle: Callback<bool>,
 ) -> NodeId {
     let disclosure = current_component();
     let content = children
         .into_first()
         .expect("disclosure requires content, e.g. <unstyled::disclosure>{intrinsic(node)}</unstyled::disclosure>");
 
-    let (open_read, open_write) = create_signal(false);
+    let (open_read, set_open) = create_signal(false);
     open.apply({
-        let open_write = open_write.clone();
-        move |value| open_write.set(value)
+        let set_open = set_open.clone();
+        move |value| set_open.set(value)
     });
 
     create_effect({
-        let open_read = open_read.clone();
+        let open = open_read.clone();
         move || {
-            let value = open_read.get();
+            let value = open.get();
             with_document(|document| {
                 set_component_detail(document, disclosure, if value { "open" } else { "closed" });
             });
@@ -53,20 +53,32 @@ pub fn disclosure(
     });
 
     let open_for_header = open_read.clone();
-    let button = view! {
-        <unstyled::button content={Box::new(move |handle: ButtonHandle| {
-            header(DisclosureHandle {
-                hovered: handle.hovered,
-                active: handle.active,
-                focused: handle.focused,
-                open: open_for_header,
-            })
-        })} />
-    };
+    let open_for_click = open_read.clone();
+
+    let button_cell = std::cell::Cell::new(None);
 
     let root = view! {
         <column spacing={spacing}>
-            {button}
+            {{
+                let button = view! {
+                    <unstyled::button
+                        on_click={move || {
+                            let next = !untrack(|| open_for_click.get());
+                            set_open.set(next);
+                            on_toggle.call(next);
+                        }}
+                        content={Box::new(move |handle: ButtonHandle| {
+                            header(DisclosureHandle {
+                                hovered: handle.hovered,
+                                active: handle.active,
+                                focused: handle.focused,
+                                open: open_for_header,
+                            })
+                        })} />
+                };
+                button_cell.set(Some(button));
+                button
+            }}
             <visibility visible={open_read.clone()}>{content}</visibility>
         </column>
     };
@@ -76,34 +88,21 @@ pub fn disclosure(
             document,
             disclosure,
             State {
-                button,
-                open_read: open_read.clone(),
-                on_toggle: None,
+                button: button_cell.get().expect("disclosure button not yet built"),
+                open: open_read,
             },
         );
-    });
-
-    unstyled::set_button_on_click(button, move |document| {
-        let next = !open_read.get();
-        open_write.set(next);
-        document.call_component_handler(disclosure, next, |state: &mut State| &mut state.on_toggle);
     });
 
     root
 }
 
 pub fn disclosure_open(document: &Document, disclosure: NodeId) -> bool {
-    document
-        .component_state::<State>(disclosure)
-        .open_read
-        .get()
+    document.component_state::<State>(disclosure).open.get()
 }
 
 pub fn disclosure_open_signal(document: &Document, disclosure: NodeId) -> ReadSignal<bool> {
-    document
-        .component_state::<State>(disclosure)
-        .open_read
-        .clone()
+    document.component_state::<State>(disclosure).open.clone()
 }
 
 pub fn disclosure_hovered(document: &Document, disclosure: NodeId) -> ReadSignal<bool> {
@@ -114,15 +113,6 @@ pub fn disclosure_hovered(document: &Document, disclosure: NodeId) -> ReadSignal
 pub fn disclosure_focused(document: &Document, disclosure: NodeId) -> ReadSignal<bool> {
     let button = document.component_state::<State>(disclosure).button;
     unstyled::button_focused(document, button)
-}
-
-pub fn set_disclosure_on_toggle(
-    disclosure: NodeId,
-    handler: impl FnMut(&mut Document, bool) + 'static,
-) {
-    with_document(|document| {
-        document.component_state_mut::<State>(disclosure).on_toggle = Some(Box::new(handler));
-    });
 }
 
 pub fn focus_disclosure(disclosure: NodeId) {
