@@ -114,13 +114,13 @@ impl Document {
         }
     }
 
-    pub fn set_outline_color(&mut self, outline: NodeId, color: Color32) {
+    pub(crate) fn set_outline_color(&mut self, outline: NodeId, color: Color32) {
         if self.arena.get_as::<OutlineNode>(outline).color != color {
             self.arena.get_mut_as::<OutlineNode>(outline).color = color;
         }
     }
 
-    pub fn set_outline_visible(&mut self, outline: NodeId, visible: bool) {
+    pub(crate) fn set_outline_visible(&mut self, outline: NodeId, visible: bool) {
         if self.arena.get_as::<OutlineNode>(outline).visible != visible {
             self.arena.get_mut_as::<OutlineNode>(outline).visible = visible;
         }

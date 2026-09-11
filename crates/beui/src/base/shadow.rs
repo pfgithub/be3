@@ -133,14 +133,16 @@ pub(crate) fn shadow_root(shadow: NodeId) -> NodeId {
 }
 
 impl Document {
-    pub fn create_slot(&mut self, name: &'static str) -> NodeId {
+    #[cfg(test)]
+    pub(crate) fn create_slot(&mut self, name: &'static str) -> NodeId {
         self.arena.insert(SlotNode {
             name,
             content: None,
         })
     }
 
-    pub fn create_shadow(
+    #[cfg(test)]
+    pub(crate) fn create_shadow(
         &mut self,
         name: &'static str,
         shadow_root: NodeId,
@@ -178,18 +180,11 @@ impl Document {
         );
     }
 
-    pub fn set_slot_child(&mut self, slot: NodeId, child: NodeId) {
+    #[cfg(test)]
+    pub(crate) fn set_slot_child(&mut self, slot: NodeId, child: NodeId) {
         if self.arena.get_as::<SlotNode>(slot).content != Some(child) {
             self.arena.get_mut_as::<SlotNode>(slot).content = Some(child);
         }
-    }
-
-    pub fn set_shadow_child(&mut self, shadow: NodeId, child: NodeId) {
-        let slots = &self.arena.get_as::<ShadowNode>(shadow).slots;
-        let [slot] = slots[..] else {
-            panic!("shadow has more than one slot, use set_slot_child");
-        };
-        self.set_slot_child(slot, child);
     }
 
     pub fn shadow_root(&self, shadow: NodeId) -> NodeId {
@@ -208,7 +203,7 @@ impl Document {
         self.arena.get_mut_as::<ShadowNode>(shadow).state = Some(state);
     }
 
-    pub fn set_component_detail(&mut self, shadow: NodeId, detail: impl Into<String>) {
+    pub(crate) fn set_component_detail(&mut self, shadow: NodeId, detail: impl Into<String>) {
         let value = Some(detail.into());
         if self.arena.get_as::<ShadowNode>(shadow).detail != value {
             self.arena.get_mut_as::<ShadowNode>(shadow).detail = value;

@@ -181,7 +181,7 @@ impl Document {
         self.arena.insert(ClickCatcherNode::new(cursor))
     }
 
-    pub fn set_click_catcher_child(&mut self, click_catcher: NodeId, child: NodeId) {
+    pub(crate) fn set_click_catcher_child(&mut self, click_catcher: NodeId, child: NodeId) {
         if self.arena.get_as::<ClickCatcherNode>(click_catcher).child == Some(child) {
             return;
         }

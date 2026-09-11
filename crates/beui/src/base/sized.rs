@@ -6,7 +6,7 @@ use crate::painter::Painter;
 
 use crate::document::Document;
 use crate::node::{Element, InteractInput, NodeId};
-use crate::reactive::{with_document, Children};
+use crate::reactive::{with_document, Children, Prop};
 
 use beui_macros::component;
 
@@ -120,13 +120,13 @@ impl Document {
         }
     }
 
-    pub fn set_sized_width(&mut self, sized: NodeId, width: Option<f32>) {
+    pub(crate) fn set_sized_width(&mut self, sized: NodeId, width: Option<f32>) {
         if self.arena.get_as::<SizedNode>(sized).width != width {
             self.arena.get_mut_as::<SizedNode>(sized).width = width;
         }
     }
 
-    pub fn set_sized_height(&mut self, sized: NodeId, height: Option<f32>) {
+    pub(crate) fn set_sized_height(&mut self, sized: NodeId, height: Option<f32>) {
         if self.arena.get_as::<SizedNode>(sized).height != height {
             self.arena.get_mut_as::<SizedNode>(sized).height = height;
         }
@@ -134,13 +134,24 @@ impl Document {
 }
 
 #[component(base)]
-pub fn sized(width: Option<f32>, height: Option<f32>, children: Children) -> NodeId {
+pub fn sized(width: Option<Prop<f32>>, height: Option<Prop<f32>>, children: Children) -> NodeId {
     let child = children
         .into_first()
         .expect("sized requires a child, e.g. <sized>{content}</sized>");
-    with_document(|document| {
-        let sized = document.create_sized(width, height);
+    let sized = with_document(|document| {
+        let sized = document.create_sized(None, None);
         document.set_sized_child(sized, child);
         sized
-    })
+    });
+    if let Some(width) = width {
+        width.apply(move |width| {
+            with_document(|document| document.set_sized_width(sized, Some(width)));
+        });
+    }
+    if let Some(height) = height {
+        height.apply(move |height| {
+            with_document(|document| document.set_sized_height(sized, Some(height)));
+        });
+    }
+    sized
 }

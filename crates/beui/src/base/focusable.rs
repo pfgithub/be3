@@ -114,7 +114,7 @@ impl Document {
         }
     }
 
-    pub fn set_focusable_tab_stop(&mut self, focusable: NodeId, tab_stop: bool) {
+    pub(crate) fn set_focusable_tab_stop(&mut self, focusable: NodeId, tab_stop: bool) {
         if !self.contains(focusable) {
             return;
         }
@@ -152,21 +152,21 @@ impl Document {
         on_key.call(press)
     }
 
-    pub fn step_focused(&mut self, delta: f32) {
+    pub(crate) fn step_focused(&mut self, delta: f32) {
         if let Some(focused) = self.focused {
             self.call_focusable_handler(focused, delta, |node| &node.on_step);
         }
     }
 
-    pub fn focus_focusable(&mut self, focusable: NodeId) {
+    pub(crate) fn focus_focusable(&mut self, focusable: NodeId) {
         self.update_focus(Some(focusable));
     }
 
-    pub fn focus_next(&mut self) {
+    pub(crate) fn focus_next(&mut self) {
         self.move_focus(1);
     }
 
-    pub fn focus_previous(&mut self) {
+    pub(crate) fn focus_previous(&mut self) {
         self.move_focus(-1);
     }
 

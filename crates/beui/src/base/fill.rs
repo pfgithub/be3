@@ -102,7 +102,7 @@ impl Document {
         }
     }
 
-    pub fn set_fill_color(&mut self, fill: NodeId, color: Color32) {
+    pub(crate) fn set_fill_color(&mut self, fill: NodeId, color: Color32) {
         if self.arena.get_as::<FillNode>(fill).color != color {
             self.arena.get_mut_as::<FillNode>(fill).color = color;
         }

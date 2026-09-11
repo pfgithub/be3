@@ -104,7 +104,7 @@ impl Document {
         }
     }
 
-    pub fn set_padding(&mut self, padding: NodeId, horizontal: f32, vertical: f32) {
+    pub(crate) fn set_padding(&mut self, padding: NodeId, horizontal: f32, vertical: f32) {
         let node = self.arena.get_as::<PaddingNode>(padding);
         if node.horizontal == horizontal && node.vertical == vertical {
             return;

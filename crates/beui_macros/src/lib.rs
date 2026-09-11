@@ -12,6 +12,7 @@ struct Prop {
     ident: Ident,
     ty: Type,
     inner_ty: Option<Type>,
+    optional_reactive_inner_ty: Option<Type>,
     reactive_inner_ty: Option<Type>,
     is_children: bool,
     callback_args: Option<Vec<Type>>,
@@ -141,12 +142,16 @@ pub fn component(attr: TokenStream, item: TokenStream) -> TokenStream {
             };
             let default = take_prop_default(attrs);
             let inner_ty = generic_inner(ty, "Option");
+            let optional_reactive_inner_ty = inner_ty
+                .as_ref()
+                .and_then(|inner| generic_inner(inner, "Prop"));
             let reactive_inner_ty = generic_inner(ty, "Prop");
             let is_children = is_named_type(ty, "Children");
             Prop {
                 ident,
                 ty: (**ty).clone(),
                 inner_ty,
+                optional_reactive_inner_ty,
                 reactive_inner_ty,
                 is_children,
                 callback_args: generic_args(ty, "Callback"),
@@ -168,6 +173,13 @@ pub fn component(attr: TokenStream, item: TokenStream) -> TokenStream {
             quote! {
                 pub fn #ident(mut self, children: impl Into<::beui::reactive::Children>) -> Self {
                     self.#ident = Some(children.into());
+                    self
+                }
+            }
+        } else if let Some(inner_ty) = &prop.optional_reactive_inner_ty {
+            quote! {
+                pub fn #ident(mut self, value: impl ::beui::reactive::IntoProp<#inner_ty>) -> Self {
+                    self.#ident = Some(Some(::beui::reactive::IntoProp::into_prop(value)));
                     self
                 }
             }

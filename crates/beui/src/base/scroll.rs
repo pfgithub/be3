@@ -336,18 +336,18 @@ fn height(doc: &Document, painter: &Painter, item: NodeId, width: f32) -> f32 {
 }
 
 impl Document {
-    pub fn create_scroll(&mut self) -> NodeId {
+    pub(crate) fn create_scroll(&mut self) -> NodeId {
         self.arena.insert(ScrollNode::new())
     }
 
-    pub fn append_scroll_item(&mut self, scroll: NodeId, child: NodeId) {
+    pub(crate) fn append_scroll_item(&mut self, scroll: NodeId, child: NodeId) {
         self.arena
             .get_mut_as::<ScrollNode>(scroll)
             .items
             .push(child);
     }
 
-    pub fn set_scroll_virtual_items(
+    pub(crate) fn set_scroll_virtual_items(
         &mut self,
         scroll: NodeId,
         count: usize,
@@ -376,7 +376,7 @@ impl Document {
         self.arena.get_as::<ScrollNode>(scroll).offset
     }
 
-    pub fn set_scroll_offset(&mut self, scroll: NodeId, offset: f32) {
+    pub(crate) fn set_scroll_offset(&mut self, scroll: NodeId, offset: f32) {
         let node = self.arena.get_as::<ScrollNode>(scroll);
         if node.offset == offset && node.anchor.is_none() {
             return;
@@ -386,7 +386,7 @@ impl Document {
         node.anchor = None;
     }
 
-    pub fn set_scroll_on_change(
+    pub(crate) fn set_scroll_on_change(
         &mut self,
         scroll: NodeId,
         handler: impl FnMut(ScrollPosition) + 'static,
@@ -420,7 +420,7 @@ impl Document {
         self.set_scroll_offset(scroll, revealed.max(0.0));
     }
 
-    pub fn set_scroll_focus_color(&mut self, scroll: NodeId, color: Color32) {
+    pub(crate) fn set_scroll_focus_color(&mut self, scroll: NodeId, color: Color32) {
         self.arena.get_mut_as::<ScrollNode>(scroll).focus_color = color;
     }
 

@@ -105,7 +105,7 @@ impl Document {
         self.arena.contains(id)
     }
 
-    pub fn copy_text(&mut self, text: impl Into<String>) {
+    pub(crate) fn copy_text(&mut self, text: impl Into<String>) {
         self.copied_text = Some(text.into());
     }
 

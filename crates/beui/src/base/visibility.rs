@@ -102,7 +102,7 @@ impl Document {
         self.arena.get_as::<VisibilityNode>(visibility).visible
     }
 
-    pub fn set_visible(&mut self, visibility: NodeId, visible: bool) {
+    pub(crate) fn set_visible(&mut self, visibility: NodeId, visible: bool) {
         if self.arena.get_as::<VisibilityNode>(visibility).visible != visible {
             self.arena.get_mut_as::<VisibilityNode>(visibility).visible = visible;
         }
