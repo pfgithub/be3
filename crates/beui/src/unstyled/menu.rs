@@ -1,4 +1,3 @@
-use crate::base::focusable::focus;
 use crate::base::overlay::{OverlayAnchor, OverlayBuilder, Placement};
 use crate::document::Document;
 use crate::input::{Key, KeyPress};
@@ -6,9 +5,9 @@ use crate::node::NodeId;
 use beui_macros::{component, view};
 
 use crate::reactive::{
-    component_state, create_effect, create_memo, create_selector, create_signal, intrinsic,
-    set_component_state, Callback, ColumnBuilder, FocusableBuilder, NodeRef, ReadSignal, RenderFn,
-    Selector, WriteSignal,
+    create_effect, create_memo, create_selector, create_signal, intrinsic, set_component_state,
+    Callback, ColumnBuilder, FocusableBuilder, NodeRef, Prop, ReadSignal, RenderFn, Selector,
+    ShowBuilder, WriteSignal,
 };
 use crate::unstyled;
 use crate::unstyled::button::ButtonHandle;
@@ -45,19 +44,46 @@ impl MenuItem {
     }
 }
 
-pub(crate) type MenuParent = Option<(NodeRef, NodeRef)>;
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum Focus {
+    Away,
+    Root,
+    Row(usize),
+}
+
+#[derive(Clone, Default)]
+pub(crate) struct MenuParent(Option<Rc<dyn Fn()>>);
+
+impl MenuParent {
+    fn is_some(&self) -> bool {
+        self.0.is_some()
+    }
+
+    fn leave(&self) {
+        if let Some(leave) = &self.0 {
+            leave();
+        }
+    }
+}
+
+struct Submenu {
+    open: ReadSignal<bool>,
+    set_open: WriteSignal<bool>,
+    overlay: NodeRef,
+    content: NodeRef,
+}
 
 struct Row {
     button: NodeRef,
     disabled: bool,
-    submenu: Option<NodeRef>,
-    submenu_content: Option<NodeRef>,
+    submenu: Option<Submenu>,
 }
 
 struct State {
     rows: Vec<Row>,
     root: NodeRef,
-    set_active: WriteSignal<Option<usize>>,
+    focus: ReadSignal<Focus>,
+    set_focus: WriteSignal<Focus>,
     on_select: Callback<Vec<usize>>,
 }
 
@@ -68,17 +94,22 @@ pub(crate) fn menu_list(
     items: Vec<MenuItem>,
     row: Option<RenderFn<MenuRowHandle>>,
     panel: Option<RenderFn<NodeId>>,
-    parent: Option<(NodeRef, NodeRef)>,
+    #[prop(default = MenuParent::default())] parent: MenuParent,
+    active: Prop<bool>,
+    #[prop(default = false)] focus_first: bool,
     on_select: Callback<Vec<usize>>,
 ) -> NodeId {
     let row = row.expect("menu_list requires a `row` builder");
     let panel = panel.expect("menu_list requires a `panel` builder");
-    let (active, set_active) = create_signal(None);
-    let activation = create_selector({
-        let active = active.clone();
-        move || active.get()
+    let (focus, set_focus) = create_signal(Focus::Away);
+    let focused = create_selector({
+        let focus = focus.clone();
+        move || focus.get()
     });
-    let root_tab_stop = create_memo(move || active.get().is_none());
+    let root_tab_stop = create_memo({
+        let focus = focus.clone();
+        move || !matches!(focus.get(), Focus::Row(_))
+    });
 
     let state: Handle = Rc::new(State {
         rows: items
@@ -86,31 +117,64 @@ pub(crate) fn menu_list(
             .map(|item| Row {
                 button: NodeRef::new(),
                 disabled: item.disabled,
-                submenu: (!item.children.is_empty()).then(NodeRef::new),
-                submenu_content: (!item.children.is_empty()).then(NodeRef::new),
+                submenu: (!item.children.is_empty()).then(|| {
+                    let (open, set_open) = create_signal(false);
+                    Submenu {
+                        open,
+                        set_open,
+                        overlay: NodeRef::new(),
+                        content: NodeRef::new(),
+                    }
+                }),
             })
             .collect(),
         root: NodeRef::new(),
-        set_active,
+        focus: focus.clone(),
+        set_focus: set_focus.clone(),
         on_select,
     });
     set_component_state(state.clone());
 
+    let entry = if focus_first && !state.rows.is_empty() {
+        Focus::Row(0)
+    } else {
+        Focus::Root
+    };
+    active.apply({
+        let set_focus = set_focus.clone();
+        move |active| set_focus.set(if active { entry } else { Focus::Away })
+    });
+
     let lines: Vec<_> = items
         .iter()
         .enumerate()
-        .flat_map(|(index, item)| {
-            build_row(&state, index, item, &activation, &row, &panel, &parent)
+        .map(|(index, item)| {
+            intrinsic(view! {
+                <menu_row
+                    state={state.clone()}
+                    index={index}
+                    item={item.clone()}
+                    focused={focused.clone()}
+                    row={row.clone()}
+                    panel={panel.clone()}
+                    parent={parent.clone()}
+                />
+            })
         })
-        .map(intrinsic)
         .collect();
 
-    let key_state = state.clone();
+    let (key_state, blur_focus) = (state.clone(), focus);
     view! {
         <column spacing={0.0}>
             <focusable
                 node_ref={&state.root}
                 tab_stop={root_tab_stop}
+                focused={focused.memo(Focus::Root)}
+                on_focus_change={move |has_focus: bool| {
+                    if !has_focus && blur_focus.get_untracked() == Focus::Root {
+                        set_focus.set(Focus::Away);
+                    }
+                }}
                 on_key={move |press: KeyPress| root_key(&key_state, press)}
             />
             <column spacing={2.0} children={lines} />
@@ -118,20 +182,24 @@ pub(crate) fn menu_list(
     }
 }
 
-fn build_row(
-    state: &Handle,
+#[component]
+fn menu_row(
+    state: Handle,
     index: usize,
-    item: &MenuItem,
-    activation: &Selector<Option<usize>>,
-    row: &RenderFn<MenuRowHandle>,
-    panel: &RenderFn<NodeId>,
-    parent: &MenuParent,
-) -> Vec<NodeId> {
+    item: MenuItem,
+    focused: Selector<Focus>,
+    row: RenderFn<MenuRowHandle>,
+    panel: RenderFn<NodeId>,
+    #[prop(default = MenuParent::default())] parent: MenuParent,
+) -> NodeId {
     let disabled = item.disabled;
+    let children = item.children.clone();
+    let has_children = !children.is_empty();
+    let button = state.rows[index].button.clone();
     let content = {
-        let (row, item, state) = (row.clone(), item.clone(), state.clone());
-        move |button: ButtonHandle| {
-            let hovered = button.hovered.clone();
+        let (row, state) = (row.clone(), state.clone());
+        move |handle: ButtonHandle| {
+            let hovered = handle.hovered.clone();
             create_effect(move || {
                 if hovered.get() {
                     hover_row(&state, index);
@@ -139,63 +207,80 @@ fn build_row(
             });
             row.call(MenuRowHandle {
                 item,
-                hovered: button.hovered,
-                focused: button.focused,
+                hovered: handle.hovered,
+                focused: handle.focused,
             })
         }
     };
-    let parent = parent.clone();
-    let (click_state, key_state) = (state.clone(), state.clone());
-    let button = view! {
-        <unstyled::button
-            node_ref={&state.rows[index].button}
-            tab_stop={activation.memo(Some(index))}
-            content={content}
-            on_click={move || {
-                if disabled {
-                    return;
+    let (click_state, key_state, blur_state, submenu_state) =
+        (state.clone(), state.clone(), state.clone(), state);
+
+    view! {
+        <column spacing={0.0}>
+            <unstyled::button
+                node_ref={&button}
+                tab_stop={focused.memo(Focus::Row(index))}
+                focused={focused.memo(Focus::Row(index))}
+                on_focus_change={move |has_focus: bool| {
+                    if !has_focus && blur_state.focus.get_untracked() == Focus::Row(index) {
+                        blur_state.set_focus.set(Focus::Away);
+                    }
+                }}
+                content={content}
+                on_click={move || {
+                    if disabled {
+                        return;
+                    }
+                    if !open_submenu(&click_state, index) {
+                        select(&click_state, vec![index]);
+                    }
+                }}
+                on_key={move |press: KeyPress| key(&key_state, index, parent.clone(), press)}
+            />
+            <show condition={has_children} then={move || {
+                let select_state = submenu_state.clone();
+                let leave_state = submenu_state.clone();
+                let submenu = submenu_state.rows[index]
+                    .submenu
+                    .as_ref()
+                    .expect("a row with children owns a submenu");
+                let dismiss = submenu.set_open.clone();
+                let leave = MenuParent(Some(Rc::new(move || {
+                    let submenu = leave_state.rows[index]
+                        .submenu
+                        .as_ref()
+                        .expect("a row with children owns a submenu");
+                    submenu.set_open.set(false);
+                    leave_state.set_focus.set(Focus::Row(index));
+                })));
+                view! {
+                    <overlay
+                        node_ref={&submenu.overlay}
+                        anchor={OverlayAnchor::Node(button.get())}
+                        placement={Placement::RightStart}
+                        open={submenu.open.clone()}
+                        on_dismiss={move || dismiss.set(false)}
+                    >
+                        {panel.call(view! {
+                            <menu_list
+                                node_ref={&submenu.content}
+                                items={children}
+                                row={row}
+                                panel={panel.clone()}
+                                parent={leave}
+                                active={submenu.open.clone()}
+                                focus_first={true}
+                                on_select={move |mut path: Vec<usize>| {
+                                    path.insert(0, index);
+                                    select(&select_state, path);
+                                }}
+                            />
+                        })}
+                    </overlay>
                 }
-                if !open_submenu(&click_state, index) {
-                    select(&click_state, vec![index]);
-                }
-            }}
-            on_key={move |press: KeyPress| key(&key_state, index, parent.clone(), press)}
-        />
-    };
-
-    let (Some(submenu), Some(content_ref)) = (
-        state.rows[index].submenu.clone(),
-        state.rows[index].submenu_content.clone(),
-    ) else {
-        return vec![button];
-    };
-
-    let (row, panel) = (row.clone(), panel.clone());
-    let select_state = state.clone();
-    let submenu_parent = (submenu.clone(), state.rows[index].button.clone());
-    let overlay = view! {
-        <overlay
-            node_ref={&submenu}
-            anchor={OverlayAnchor::Node(button)}
-            placement={Placement::RightStart}
-        >
-            {panel.call(view! {
-                <menu_list
-                    node_ref={&content_ref}
-                    items={item.children.clone()}
-                    row={row}
-                    panel={panel.clone()}
-                    parent={submenu_parent}
-                    on_select={move |mut path: Vec<usize>| {
-                        path.insert(0, index);
-                        select(&select_state, path);
-                    }}
-                />
-            })}
-        </overlay>
-    };
-
-    vec![button, overlay]
+            }} />
+        </column>
+    }
 }
 
 fn select(state: &State, path: Vec<usize>) {
@@ -218,9 +303,9 @@ pub fn menu_list_row_submenu_content(
     index: usize,
 ) -> Option<NodeId> {
     document.component_state::<Handle>(menu).rows[index]
-        .submenu_content
+        .submenu
         .as_ref()
-        .map(NodeRef::get)
+        .map(|submenu| submenu.content.get())
 }
 
 pub fn menu_list_row_submenu_overlay(
@@ -231,24 +316,7 @@ pub fn menu_list_row_submenu_overlay(
     document.component_state::<Handle>(menu).rows[index]
         .submenu
         .as_ref()
-        .map(NodeRef::get)
-}
-
-fn menu(node: NodeId) -> Handle {
-    component_state::<Handle, _>(node, Rc::clone)
-}
-
-pub(crate) fn focus_menu_list(node: NodeId) {
-    let state = menu(node);
-    if !state.rows.is_empty() {
-        focus_row(&state, 0);
-    }
-}
-
-pub(crate) fn focus_menu_list_root(node: NodeId) {
-    let state = menu(node);
-    state.set_active.set(None);
-    focus(state.root.get());
+        .map(|submenu| submenu.overlay.get())
 }
 
 pub fn menu_list_root_focusable(document: &Document, menu: NodeId) -> NodeId {
@@ -257,15 +325,11 @@ pub fn menu_list_root_focusable(document: &Document, menu: NodeId) -> NodeId {
 
 fn open_submenu(state: &State, index: usize) -> bool {
     let row = &state.rows[index];
-    let Some(overlay) = &row.submenu else {
+    let Some(submenu) = &row.submenu else {
         return false;
     };
-    if row.disabled {
-        return true;
-    }
-    crate::base::overlay::open_overlay(overlay.get());
-    if let Some(content) = &row.submenu_content {
-        focus_menu_list(content.get());
+    if !row.disabled {
+        submenu.set_open.set(true);
     }
     true
 }
@@ -275,8 +339,8 @@ fn close_sibling_submenus(state: &State, index: usize) {
         if other == index {
             continue;
         }
-        if let Some(overlay) = &row.submenu {
-            crate::base::overlay::close_overlay(overlay.get());
+        if let Some(submenu) = &row.submenu {
+            submenu.set_open.set(false);
         }
     }
 }
@@ -291,8 +355,7 @@ fn hover_row(state: &State, index: usize) {
 
 fn focus_row(state: &State, index: usize) {
     close_sibling_submenus(state, index);
-    state.set_active.set(Some(index));
-    unstyled::focus_button(state.rows[index].button.get());
+    state.set_focus.set(Focus::Row(index));
 }
 
 fn root_key(state: &State, press: KeyPress) -> bool {
@@ -358,9 +421,7 @@ fn key(state: &State, index: usize, parent: MenuParent, press: KeyPress) -> bool
         }
         Key::ArrowLeft if parent.is_some() => {
             if press.pressed {
-                let (overlay, trigger) = parent.expect("checked above");
-                crate::base::overlay::close_overlay(overlay.get());
-                unstyled::focus_button(trigger.get());
+                parent.leave();
             }
             true
         }

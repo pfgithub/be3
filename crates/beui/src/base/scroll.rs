@@ -396,11 +396,14 @@ impl Document {
     }
 }
 
-pub(crate) fn reveal_scroll_item(scroll: NodeId, item: NodeId) {
-    with_document(|document| document.reveal_scroll_item(scroll, item));
-}
-
 impl Document {
+    fn reveal_scroll_index(&mut self, scroll: NodeId, index: usize) {
+        let Some(&item) = self.arena.get_as::<ScrollNode>(scroll).items.get(index) else {
+            return;
+        };
+        self.reveal_scroll_item(scroll, item);
+    }
+
     fn reveal_scroll_item(&mut self, scroll: NodeId, item: NodeId) {
         let (Some(viewport), Some(item)) = (self.node_rect(scroll), self.node_rect(item)) else {
             return;
@@ -563,6 +566,7 @@ pub fn virtual_list(
 #[component(base)]
 pub fn scroll(
     offset: Prop<f32>,
+    reveal: Prop<Option<usize>>,
     focus_color: Prop<Color32>,
     on_change: Callback<ScrollPosition>,
     children: Children,
@@ -571,6 +575,12 @@ pub fn scroll(
     children.mount_scroll_items(scroll);
     offset.apply(move |offset| {
         with_document(|document| document.set_scroll_offset(scroll, offset));
+    });
+    reveal.apply(move |index| {
+        let Some(index) = index else {
+            return;
+        };
+        with_document(|document| document.reveal_scroll_index(scroll, index));
     });
     scroll
 }

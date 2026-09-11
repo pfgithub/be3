@@ -12,13 +12,19 @@ use beui_macros::{component, view};
 use crate::document::Document;
 use crate::node::{ClickHandler, Element, InteractInput, NodeId};
 use crate::reactive::{
-    with_document, with_reactive_scope, Children, ClickCallback, ClickCatcherBuilder,
+    with_document, with_reactive_scope, Children, ClickCallback, ClickCatcherBuilder, Prop,
 };
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub(crate) enum OverlayAnchor {
     Node(NodeId),
     Point(Pos2),
+}
+
+impl Default for OverlayAnchor {
+    fn default() -> Self {
+        OverlayAnchor::Point(Pos2::ZERO)
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -160,14 +166,15 @@ impl Element for OverlayNode {
 
 #[component(base)]
 pub(crate) fn overlay(
-    anchor: OverlayAnchor,
+    anchor: Prop<OverlayAnchor>,
     placement: Placement,
+    open: Prop<bool>,
     on_dismiss: ClickCallback,
     children: Children,
 ) -> NodeId {
     let content = children.into_first();
-    with_document(|document| {
-        let overlay = document.create_overlay(anchor, placement);
+    let overlay = with_document(|document| {
+        let overlay = document.create_overlay(anchor.peek(), placement);
         if let Some(content) = content {
             document.set_overlay_content(overlay, content);
         }
@@ -175,32 +182,17 @@ pub(crate) fn overlay(
             document.set_overlay_on_dismiss(overlay, move || on_dismiss.call());
         }
         overlay
-    })
-}
-
-pub(crate) fn open_overlay(overlay: NodeId) {
-    with_document(|document| document.open_overlay(overlay));
-}
-
-pub(crate) fn close_overlay(overlay: NodeId) {
-    with_document(|document| document.close_overlay(overlay));
-}
-
-pub(crate) fn overlay_is_open(overlay: NodeId) -> bool {
-    with_document(|document| document.is_overlay_open(overlay))
-}
-
-pub(crate) fn move_overlay_to(overlay: NodeId, pos: Pos2) {
-    with_document(|document| document.set_overlay_anchor(overlay, OverlayAnchor::Point(pos)));
-}
-
-pub(crate) fn replace_overlay_content(overlay: NodeId, content: NodeId) {
-    with_document(|document| {
-        if let Some(previous) = document.overlay_content(overlay) {
-            document.remove_node(previous);
-        }
-        document.set_overlay_content(overlay, content);
     });
+    anchor.apply(move |anchor| {
+        with_document(|document| document.set_overlay_anchor(overlay, anchor));
+    });
+    open.apply(move |open| {
+        with_document(|document| match open {
+            true => document.open_overlay(overlay),
+            false => document.close_overlay(overlay),
+        });
+    });
+    overlay
 }
 
 impl Document {
@@ -241,6 +233,7 @@ impl Document {
         self.arena.get_mut_as::<OverlayNode>(overlay).on_dismiss = Some(Box::new(handler));
     }
 
+    #[cfg(test)]
     pub(crate) fn is_overlay_open(&self, overlay: NodeId) -> bool {
         self.arena.get_as::<OverlayNode>(overlay).open
     }

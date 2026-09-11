@@ -29,10 +29,13 @@ pub fn button(
     content: Option<Render<ButtonHandle>>,
     disabled: Prop<bool>,
     #[prop(default = true)] tab_stop: Prop<bool>,
+    focused: Prop<bool>,
     on_click: ClickCallback,
     on_key: Callback<KeyPress, bool>,
     on_text: Callback<String>,
+    on_focus_change: Callback<bool>,
 ) -> NodeId {
+    let focus_request = focused;
     let (hovered, set_hovered) = create_signal(false);
     let (active, set_active) = create_signal(false);
     let (focused, set_focused) = create_signal(false);
@@ -67,9 +70,13 @@ pub fn button(
     let focusable = view! {
         <focusable
             tab_stop={tab_stop}
+            focused={focus_request}
             on_key={move |press| on_key.call(press)}
             on_text={move |text| on_text.call(text)}
-            on_focus_change={move |focused: bool| set_focused.set(focused)}
+            on_focus_change={move |has_focus: bool| {
+                set_focused.set(has_focus);
+                on_focus_change.call(has_focus);
+            }}
             on_activate_change={move |pressed: bool| set_key_active.set(pressed)}
             on_activate={key_click}
         >

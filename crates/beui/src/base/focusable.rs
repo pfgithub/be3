@@ -350,6 +350,7 @@ pub(crate) fn focus(focusable: NodeId) {
 #[component(base)]
 pub fn focusable(
     #[prop(default = true)] tab_stop: Prop<bool>,
+    focused: Prop<bool>,
     on_focus_change: Callback<bool>,
     on_activate_change: Callback<bool>,
     on_activate: ClickCallback,
@@ -374,6 +375,13 @@ pub fn focusable(
     });
     tab_stop.apply(move |tab_stop| {
         with_document(|document| document.set_focusable_tab_stop(focusable, tab_stop));
+    });
+    focused.apply(move |wanted| {
+        with_document(|document| match wanted {
+            true => document.focus_focusable(focusable),
+            false if document.focused_node() == Some(focusable) => document.update_focus(None),
+            false => {}
+        });
     });
     focusable
 }

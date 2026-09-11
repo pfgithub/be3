@@ -56,6 +56,7 @@ type Handle = Rc<RefCell<Editor>>;
 #[component]
 pub fn text_input(
     value: Prop<String>,
+    focused: Prop<bool>,
     content: Option<Render<TextInputHandle>>,
     placeholder: Prop<String>,
     #[prop(default = FONT_SIZE)] font_size: Prop<f32>,
@@ -72,6 +73,7 @@ pub fn text_input(
     on_key_override: Callback<KeyPress, bool>,
 ) -> NodeId {
     let initial = value.peek();
+    let focus_request = focused;
     let (hovered, set_hovered) = create_signal(false);
     let (focused, set_focused) = create_signal(false);
     let (text_value, set_value) = create_signal(initial.clone());
@@ -105,6 +107,7 @@ pub fn text_input(
     let root = view! {
         <focusable
             node_ref={&focusable}
+            focused={focus_request}
             on_focus_change={{
                 let editor = editor.clone();
                 move |is_focused: bool| {
@@ -172,7 +175,11 @@ pub fn text_input(
 
     value.apply({
         let editor = editor.clone();
-        move |value| replace_all(&editor, value)
+        move |value| {
+            if text_of(&editor.borrow().core) != value {
+                replace_all(&editor, value);
+            }
+        }
     });
 
     root
@@ -215,7 +222,7 @@ pub fn text_input_text(document: &Document, input: NodeId) -> NodeId {
 }
 
 pub fn text_input_value(document: &Document, input: NodeId) -> String {
-    content(&handle(document, input).borrow().core)
+    text_of(&handle(document, input).borrow().core)
 }
 
 pub fn text_input_hovered(document: &Document, input: NodeId) -> ReadSignal<bool> {
@@ -250,7 +257,7 @@ fn core(value: &str) -> Core {
     core
 }
 
-fn content(core: &Core) -> String {
+fn text_of(core: &Core) -> String {
     let Some(read) = core.document().read() else {
         return String::new();
     };
@@ -280,7 +287,7 @@ fn command(editor: &Handle, command: EditorCommand<'_>) {
 fn show(editor: &Handle) {
     let (on_change, value) = {
         let editor = editor.borrow();
-        let value = content(&editor.core);
+        let value = text_of(&editor.core);
         editor
             .set_caret
             .set(editor.focused.get_untracked().then(|| caret(&editor.core)));
@@ -423,7 +430,7 @@ fn submit(editor: &Handle) {
     let (on_submit, value) = {
         let mut state = editor.borrow_mut();
         state.core.external_edit();
-        (state.on_submit.clone(), content(&state.core))
+        (state.on_submit.clone(), text_of(&state.core))
     };
     on_submit.call(value);
 }

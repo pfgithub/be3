@@ -645,6 +645,28 @@ pub fn show(condition: Prop<bool>, then: Option<Render>) -> NodeId {
 }
 
 #[component]
+pub fn dynamic<T>(value: Prop<T>, view: Option<RenderFn<T>>) -> NodeId
+where
+    T: Clone + Default + 'static,
+{
+    let view = view.expect("dynamic requires a `view` callback");
+    let parent = view! { <column spacing={0.0} /> };
+    let built: Rc<Cell<Option<NodeId>>> = Rc::new(Cell::new(None));
+    value.apply(move |value| {
+        let child = in_new_scope(|| view.call(value));
+        let previous = built.replace(Some(child));
+        with_document(|document| {
+            if let Some(previous) = previous {
+                document.remove_child(parent, previous);
+                document.remove_node(previous);
+            }
+            document.append_child(parent, child, ItemSize::Intrinsic);
+        });
+    });
+    parent
+}
+
+#[component]
 pub fn for_each<T, K>(
     spacing: f32,
     items: Prop<Vec<T>>,

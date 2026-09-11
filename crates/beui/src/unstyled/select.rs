@@ -1,7 +1,4 @@
-use crate::base::overlay::{
-    close_overlay, open_overlay, overlay_is_open, OverlayAnchor, OverlayBuilder, Placement,
-};
-use crate::base::scroll::reveal_scroll_item;
+use crate::base::overlay::{OverlayAnchor, OverlayBuilder, Placement};
 use crate::color::Color32;
 use crate::document::Document;
 use crate::input::{Key, KeyPress};
@@ -34,9 +31,15 @@ pub struct SelectOptionHandle {
     pub focused: ReadSignal<bool>,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum Focus {
+    Away,
+    Trigger,
+    Search,
+}
+
 struct Row {
     button: NodeRef,
-    visibility: NodeRef,
     label: String,
     visible: ReadSignal<bool>,
     set_visible: WriteSignal<bool>,
@@ -44,10 +47,13 @@ struct Row {
 
 struct State {
     trigger: NodeRef,
-    overlay: NodeRef,
     search: NodeRef,
-    list: NodeRef,
     rows: Vec<Row>,
+    open: ReadSignal<bool>,
+    set_open: WriteSignal<bool>,
+    focus: ReadSignal<Focus>,
+    set_focus: WriteSignal<Focus>,
+    set_search_text: WriteSignal<String>,
     selected: ReadSignal<Option<usize>>,
     set_selected: WriteSignal<Option<usize>>,
     highlighted: ReadSignal<Option<usize>>,
@@ -85,25 +91,34 @@ pub fn select(
         move || highlighted.get()
     });
     let (selected, set_selected) = create_signal(initial);
+    let (is_open, set_open) = create_signal(false);
+    let (focus, set_focus) = create_signal(Focus::Away);
+    let focused = create_selector({
+        let focus = focus.clone();
+        move || focus.get()
+    });
+    let (search_text, set_search_text) = create_signal(String::new());
 
     let state: Handle = Rc::new(State {
         trigger: NodeRef::new(),
-        overlay: NodeRef::new(),
         search: NodeRef::new(),
-        list: NodeRef::new(),
         rows: options
             .iter()
             .map(|label| {
                 let (visible, set_visible) = create_signal(true);
                 Row {
                     button: NodeRef::new(),
-                    visibility: NodeRef::new(),
                     label: label.clone(),
                     visible,
                     set_visible,
                 }
             })
             .collect(),
+        open: is_open.clone(),
+        set_open: set_open.clone(),
+        focus: focus.clone(),
+        set_focus: set_focus.clone(),
+        set_search_text,
         selected: selected.clone(),
         set_selected,
         highlighted,
@@ -130,69 +145,71 @@ pub fn select(
         .map(|(index, row)| {
             intrinsic(view! {
                 <select_row
-                    node_ref={&row.visibility}
                     state={state.clone()}
                     index={index}
                     label={row.label.clone()}
                     option={option.clone()}
                     highlight={highlight.clone()}
-                    visible={row.visible.clone()}
-                    button_ref={row.button.clone()}
                 />
             })
         })
         .collect();
 
-    let root = {
-        let (open_state, key_state, filter_state, submit_state, navigate_state) = (
-            state.clone(),
-            state.clone(),
-            state.clone(),
-            state.clone(),
-            state.clone(),
-        );
-        let dismiss_trigger = state.trigger.clone();
-        view! {
-            <column spacing={0.0}>
-                <unstyled::button
-                    node_ref={&state.trigger}
-                    content={trigger_content}
-                    on_click={move || open(&open_state)}
-                    on_key={move |press: KeyPress| trigger_key(&key_state, press)}
-                />
-                <overlay
-                    node_ref={&state.overlay}
-                    anchor={OverlayAnchor::Node(state.trigger.get())}
-                    placement={Placement::BelowStart}
-                    on_dismiss={move || unstyled::focus_button(dismiss_trigger.get())}
-                >
-                    {popup.call(view! {
-                        <column spacing={6.0}>
-                            <unstyled::text_input
-                                node_ref={&state.search}
-                                value={String::new()}
-                                placeholder={search_placeholder}
-                                font_size={search_font_size}
-                                color={search_color}
-                                placeholder_color={search_placeholder_color}
-                                selection_color={search_selection_color}
-                                caret_color={search_caret_color}
-                                padding_horizontal={search_padding_horizontal}
-                                content={search_content.unwrap_or_else(|| Render::new(|handle: TextInputHandle| handle.field))}
-                                on_change={move |text: String| filter(&filter_state, &text)}
-                                on_submit={move |_text: String| {
-                                    if let Some(index) = submit_state.highlighted.get_untracked() {
-                                        confirm(&submit_state, index);
-                                    }
-                                }}
-                                on_key_override={move |press: KeyPress| navigate(&navigate_state, press)}
-                            />
-                            @fixed(OPTIONS_MAX_HEIGHT) <scroll node_ref={&state.list} children={items} />
-                        </column>
-                    })}
-                </overlay>
-            </column>
-        }
+    let reveal = reveal_reader(&state);
+    let (open_state, key_state, filter_state, submit_state, navigate_state, dismiss_state) = (
+        state.clone(),
+        state.clone(),
+        state.clone(),
+        state.clone(),
+        state.clone(),
+        state.clone(),
+    );
+    let (trigger_blur, search_blur) = (state.clone(), state.clone());
+
+    let root = view! {
+        <column spacing={0.0}>
+            <unstyled::button
+                node_ref={&state.trigger}
+                focused={focused.memo(Focus::Trigger)}
+                on_focus_change={move |has_focus: bool| blur(&trigger_blur, has_focus, Focus::Trigger)}
+                content={trigger_content}
+                on_click={move || open(&open_state)}
+                on_key={move |press: KeyPress| trigger_key(&key_state, press)}
+            />
+            <overlay
+                anchor={OverlayAnchor::Node(state.trigger.get())}
+                placement={Placement::BelowStart}
+                open={is_open.clone()}
+                on_dismiss={move || dismiss(&dismiss_state)}
+            >
+                {popup.call(view! {
+                    <column spacing={6.0}>
+                        <unstyled::text_input
+                            node_ref={&state.search}
+                            value={search_text}
+                            focused={focused.memo(Focus::Search)}
+                            placeholder={search_placeholder}
+                            font_size={search_font_size}
+                            color={search_color}
+                            placeholder_color={search_placeholder_color}
+                            selection_color={search_selection_color}
+                            caret_color={search_caret_color}
+                            padding_horizontal={search_padding_horizontal}
+                            content={search_content.unwrap_or_else(|| Render::new(|handle: TextInputHandle| handle.field))}
+                            on_focus_change={move |has_focus: bool| blur(&search_blur, has_focus, Focus::Search)}
+                            on_change={move |text: String| filter(&filter_state, &text)}
+                            on_submit={move |_text: String| {
+                                if let Some(index) = submit_state.highlighted.get_untracked() {
+                                    confirm(&submit_state, index);
+                                }
+                            }}
+                            on_key_override={move |press: KeyPress| navigate(&navigate_state, press)}
+                        />
+                        @fixed(OPTIONS_MAX_HEIGHT) <scroll reveal={reveal} children={items} />
+                    </column>
+                })}
+            </overlay>
+        </column>
     };
 
     selected_prop.apply({
@@ -210,15 +227,13 @@ fn select_row(
     label: String,
     option: RenderFn<SelectOptionHandle>,
     highlight: Selector<Option<usize>>,
-    visible: ReadSignal<bool>,
-    button_ref: Option<NodeRef>,
 ) -> NodeId {
-    let button_ref = button_ref.unwrap_or_default();
-    let (hover_state, click_state) = (state.clone(), state);
+    let (hover_state, click_state) = (state.clone(), state.clone());
+    let visible = state.rows[index].visible.clone();
     view! {
         <visibility visible={visible}>
             <unstyled::button
-                node_ref={&button_ref}
+                node_ref={&state.rows[index].button}
                 tab_stop={false}
                 content={move |button: ButtonHandle| {
                     let hovered = button.hovered.clone();
@@ -241,6 +256,22 @@ fn select_row(
     }
 }
 
+fn reveal_reader(state: &Handle) -> Prop<Option<usize>> {
+    let state = state.clone();
+    Prop::Dynamic(Box::new(move || {
+        for row in &state.rows {
+            row.visible.get();
+        }
+        state.highlighted.get()
+    }))
+}
+
+fn blur(state: &State, has_focus: bool, target: Focus) {
+    if !has_focus && state.focus.get_untracked() == target {
+        state.set_focus.set(Focus::Away);
+    }
+}
+
 pub fn select_selected(document: &Document, select: NodeId) -> Option<usize> {
     document.component_state::<Handle>(select).selected.get()
 }
@@ -250,8 +281,7 @@ pub fn select_selected_signal(document: &Document, select: NodeId) -> ReadSignal
 }
 
 pub fn select_open(document: &Document, select: NodeId) -> bool {
-    let overlay = document.component_state::<Handle>(select).overlay.get();
-    document.is_overlay_open(overlay)
+    document.component_state::<Handle>(select).open.get()
 }
 
 pub fn set_select_open(select: NodeId, opened: bool) {
@@ -259,14 +289,12 @@ pub fn set_select_open(select: NodeId, opened: bool) {
     if opened {
         open(&state);
     } else {
-        close_overlay(state.overlay.get());
+        state.set_open.set(false);
     }
 }
 
 pub fn focus_select(select: NodeId) {
-    unstyled::focus_button(component_state::<Handle, _>(select, |state| {
-        state.trigger.get()
-    }));
+    component_state::<Handle, _>(select, |state| state.set_focus.set(Focus::Trigger));
 }
 
 pub fn select_trigger(document: &Document, select: NodeId) -> NodeId {
@@ -275,10 +303,6 @@ pub fn select_trigger(document: &Document, select: NodeId) -> NodeId {
 
 pub fn select_search(document: &Document, select: NodeId) -> NodeId {
     document.component_state::<Handle>(select).search.get()
-}
-
-pub fn select_overlay(document: &Document, select: NodeId) -> NodeId {
-    document.component_state::<Handle>(select).overlay.get()
 }
 
 pub fn select_option_count(document: &Document, select: NodeId) -> usize {
@@ -322,7 +346,7 @@ fn trigger_key(state: &State, press: KeyPress) -> bool {
     ) {
         return false;
     }
-    if overlay_is_open(state.overlay.get()) {
+    if state.open.get_untracked() {
         return false;
     }
     if press.pressed {
@@ -333,18 +357,20 @@ fn trigger_key(state: &State, press: KeyPress) -> bool {
 }
 
 fn open(state: &State) {
-    open_overlay(state.overlay.get());
-    unstyled::set_text_input_value(state.search.get(), "");
+    state.set_open.set(true);
     filter(state, "");
     state.set_highlighted.set(state.selected.get_untracked());
-    reveal_highlighted(state);
-    unstyled::focus_text_input(state.search.get());
+    state.set_focus.set(Focus::Search);
+}
+
+fn dismiss(state: &State) {
+    state.set_open.set(false);
+    state.set_focus.set(Focus::Trigger);
 }
 
 fn confirm(state: &State, index: usize) {
     apply_selection(state, Some(index));
-    close_overlay(state.overlay.get());
-    unstyled::focus_button(state.trigger.get());
+    state.set_open.set(false);
 }
 
 fn apply_selection(state: &State, selected: Option<usize>) {
@@ -353,6 +379,7 @@ fn apply_selection(state: &State, selected: Option<usize>) {
 }
 
 fn filter(state: &State, text: &str) {
+    state.set_search_text.set(text.to_owned());
     let query = text.to_lowercase();
     let mut first_visible = None;
     for (index, row) in state.rows.iter().enumerate() {
@@ -369,7 +396,6 @@ fn filter(state: &State, text: &str) {
     if !still_visible {
         state.set_highlighted.set(first_visible);
     }
-    reveal_highlighted(state);
 }
 
 fn navigate(state: &State, press: KeyPress) -> bool {
@@ -396,12 +422,5 @@ fn navigate(state: &State, press: KeyPress) -> bool {
         _ => return false,
     };
     state.set_highlighted.set(Some(next));
-    reveal_highlighted(state);
     true
-}
-
-fn reveal_highlighted(state: &State) {
-    if let Some(index) = state.highlighted.get_untracked() {
-        reveal_scroll_item(state.list.get(), state.rows[index].visibility.get());
-    }
 }
