@@ -176,25 +176,19 @@ pub fn select(
         rows
     });
 
-    with_document(|document| {
-        set_component_state(
-            document,
-            select,
-            State {
-                trigger,
-                overlay,
-                search,
-                list,
-                rows,
-                option,
-                selected_read,
-                selected_write,
-                highlighted: selected,
-                highlighted_read,
-                highlighted_write,
-                on_change,
-            },
-        );
+    set_component_state(State {
+        trigger,
+        overlay,
+        search,
+        list,
+        rows,
+        option,
+        selected_read,
+        selected_write,
+        highlighted: selected,
+        highlighted_read,
+        highlighted_write,
+        on_change,
     });
 
     with_document(|document| {
@@ -430,7 +424,7 @@ fn open(document: &mut Document, select: NodeId) {
         (state.overlay, state.search, state.selected_read.get())
     };
     document.open_overlay(overlay);
-    unstyled::set_text_input_value(document, search, "");
+    unstyled::set_text_input_value(search, "");
     filter(document, select, "");
     set_highlighted(document, select, selected);
     reveal_highlighted(document, select);

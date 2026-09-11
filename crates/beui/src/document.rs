@@ -105,6 +105,10 @@ impl Document {
         self.arena.contains(id)
     }
 
+    pub fn copy_text(&mut self, text: impl Into<String>) {
+        self.copied_text = Some(text.into());
+    }
+
     pub fn remove_node(&mut self, id: NodeId) {
         let mut scopes = Vec::new();
         self.detach_subtree(id, &mut scopes);

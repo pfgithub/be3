@@ -13,4 +13,4 @@ pub(crate) mod visibility;
 
 pub use list::{Align, Direction, ItemSize};
 pub use scroll::ScrollPosition;
-pub use text::TextAlign;
+pub use text::{text_index_at, TextAlign};

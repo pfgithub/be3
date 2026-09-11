@@ -23,19 +23,15 @@ pub fn context_menu(
     items: Prop<Vec<MenuItem>>,
     on_select: Callback<Vec<usize>>,
 ) -> NodeId {
-    let inner = view! {
+    view! {
         <unstyled::context_menu
             region={region}
-            items={Vec::new()}
+            items={items}
             row={std::rc::Rc::new(row_view)}
             panel={std::rc::Rc::new(panel_view)}
             on_select={move |path| on_select.call(path)}
         />
-    };
-
-    items.apply(move |items| unstyled::set_context_menu_items(inner, items));
-
-    inner
+    }
 }
 
 fn row_view(row: MenuRowHandle) -> NodeId {

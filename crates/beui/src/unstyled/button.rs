@@ -5,8 +5,8 @@ use crate::input::{CursorIcon, KeyPress};
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
-    self, create_signal, current_component, set_component_state, untrack, with_document, Callback,
-    Children, ClickCallback, ClickCatcherBuilder, FocusableBuilder, Prop, ReadSignal,
+    self, create_signal, set_component_state, untrack, with_document, Callback, Children,
+    ClickCallback, ClickCatcherBuilder, FocusableBuilder, Prop, ReadSignal,
 };
 
 pub struct ButtonHandle {
@@ -35,7 +35,6 @@ pub fn button(
     on_key: Callback<KeyPress, bool>,
     on_text: Callback<String>,
 ) -> NodeId {
-    let button = current_component();
     let (hovered, set_hovered) = create_signal(false);
     let (active, set_active) = create_signal(false);
     let (focused, set_focused) = create_signal(false);
@@ -95,18 +94,12 @@ pub fn button(
         </focusable>
     };
 
-    with_document(|document| {
-        set_component_state(
-            document,
-            button,
-            State {
-                focusable,
-                hovered,
-                active,
-                focused,
-                on_click,
-            },
-        );
+    set_component_state(State {
+        focusable,
+        hovered,
+        active,
+        focused,
+        on_click,
     });
 
     focusable

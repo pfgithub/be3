@@ -5,8 +5,8 @@ use crate::input::CursorIcon;
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
-    self, component_detail, create_signal, current_component, set_component_state, untrack,
-    with_document, Callback, ClickCatcherBuilder, FocusableBuilder, Prop, ReadSignal,
+    self, component_detail, create_signal, set_component_state, untrack, Callback,
+    ClickCatcherBuilder, FocusableBuilder, Prop, ReadSignal,
 };
 
 pub struct ToggleHandle {
@@ -32,7 +32,6 @@ pub fn toggle(
     content: Option<ToggleContent>,
     on_change: Callback<bool>,
 ) -> NodeId {
-    let toggle = current_component();
     let (checked_read, set_checked) = create_signal(false);
     checked.apply({
         let set_checked = set_checked.clone();
@@ -84,18 +83,12 @@ pub fn toggle(
         </focusable>
     };
 
-    with_document(|document| {
-        set_component_state(
-            document,
-            toggle,
-            State {
-                focusable,
-                checked: checked_read,
-                hovered,
-                active,
-                focused,
-            },
-        );
+    set_component_state(State {
+        focusable,
+        checked: checked_read,
+        hovered,
+        active,
+        focused,
     });
 
     focusable

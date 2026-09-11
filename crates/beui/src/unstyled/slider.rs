@@ -5,8 +5,8 @@ use crate::input::{CursorIcon, Key, KeyPress, PointerPress};
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
-    self, component_detail, create_signal, current_component, set_component_state, untrack,
-    with_document, Callback, ClickCatcherBuilder, FocusableBuilder, Prop, ReadSignal,
+    self, component_detail, create_signal, set_component_state, untrack, with_document, Callback,
+    ClickCatcherBuilder, FocusableBuilder, Prop, ReadSignal,
 };
 
 const STEP: f32 = 0.05;
@@ -34,7 +34,6 @@ pub fn slider(
     on_drag_change: Callback<bool>,
     on_focus_change: Callback<bool>,
 ) -> NodeId {
-    let slider = current_component();
     let (value_read, set_value_signal) = create_signal(0.0);
     value.apply({
         let set_value_signal = set_value_signal.clone();
@@ -111,17 +110,11 @@ pub fn slider(
         </focusable>
     };
 
-    with_document(|document| {
-        set_component_state(
-            document,
-            slider,
-            State {
-                focusable,
-                value: value_for_state,
-                dragging,
-                focused,
-            },
-        );
+    set_component_state(State {
+        focusable,
+        value: value_for_state,
+        dragging,
+        focused,
     });
 
     focusable

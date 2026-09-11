@@ -1,4 +1,6 @@
+use std::cell::RefCell;
 use std::ops::Range;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use text_editor_core::{
@@ -9,14 +11,16 @@ use text_editor_core::{
 use crate::color::Color32;
 use crate::input::{CursorIcon, Key, KeyPress, PointerPress};
 
+use crate::base::text_index_at;
 use crate::base::TextAlign;
 use crate::document::Document;
 use crate::node::NodeId;
 use beui_macros::{component, view};
 
 use crate::reactive::{
-    self, create_effect, create_signal, current_component, set_component_state, with_document,
-    Callback, ClickCatcherBuilder, FocusableBuilder, Prop, ReadSignal,
+    component_detail, copy_text, create_signal, set_component_state, with_document, Callback,
+    ClickCatcherBuilder, FocusableBuilder, NodeRef, PaddingBuilder, Prop, ReadSignal, TextBuilder,
+    WriteSignal,
 };
 
 const FONT_SIZE: f32 = 14.0;
@@ -32,16 +36,22 @@ pub struct TextInputHandle {
 
 pub type TextInputContent = Box<dyn FnOnce(TextInputHandle) -> NodeId>;
 
-struct State {
-    focusable: NodeId,
-    text: NodeId,
+struct Editor {
     core: Core,
     dragging: bool,
-    hovered: ReadSignal<bool>,
+    text: NodeRef,
+    focusable: NodeRef,
+    value: ReadSignal<String>,
+    set_value: WriteSignal<String>,
+    set_caret: WriteSignal<Option<usize>>,
+    set_selection: WriteSignal<Vec<Range<usize>>>,
     focused: ReadSignal<bool>,
+    hovered: ReadSignal<bool>,
     on_change: Callback<String>,
     on_submit: Callback<String>,
 }
+
+type Handle = Rc<RefCell<Editor>>;
 
 #[component]
 pub fn text_input(
@@ -61,160 +71,147 @@ pub fn text_input(
     on_focus_change: Callback<bool>,
     on_key_override: Callback<KeyPress, bool>,
 ) -> NodeId {
-    let input = current_component();
-    let (hovered_read, set_hovered) = create_signal(false);
-    let (focused_read, set_focused) = create_signal(false);
     let initial = value.peek();
+    let (hovered, set_hovered) = create_signal(false);
+    let (focused, set_focused) = create_signal(false);
+    let (text_value, set_value) = create_signal(initial.clone());
+    let (caret, set_caret) = create_signal(None);
+    let (selection, set_selection) = create_signal(Vec::new());
+    let text = NodeRef::new();
+    let focusable = NodeRef::new();
 
-    let text = with_document(|document| {
-        let text = document.create_text(initial.clone(), FONT_SIZE, Color32::WHITE);
-        document.set_text_align(text, TextAlign::Start, TextAlign::Center);
-        document.set_text_clip(text, true);
-        text
-    });
-    let field = with_document(|document| {
-        let field = document.create_padding(0.0, 0.0);
-        document.set_padding_child(field, text);
-        field
-    });
-
-    placeholder.apply(move |value| {
-        with_document(|document| document.set_text_placeholder(text, value));
-    });
-    font_size.apply(move |value| {
-        with_document(|document| document.set_text_font_size(text, value));
-    });
-    color.apply(move |value| {
-        with_document(|document| document.set_text_color(text, value));
-    });
-    placeholder_color.apply(move |value| {
-        with_document(|document| document.set_text_placeholder_color(text, value));
-    });
-    selection_color.apply(move |value| {
-        with_document(|document| document.set_text_selection_color(text, value));
-    });
-    caret_color.apply(move |value| {
-        with_document(|document| document.set_text_caret_color(text, value));
-    });
-    let (horizontal, set_horizontal) = create_signal(0.0);
-    let (vertical, set_vertical) = create_signal(0.0);
-    padding_horizontal.apply(move |value| set_horizontal.set(value));
-    padding_vertical.apply(move |value| set_vertical.set(value));
-    create_effect(move || {
-        let (horizontal, vertical) = (horizontal.get(), vertical.get());
-        with_document(|document| document.set_padding(field, horizontal, vertical));
+    let editor: Handle = Rc::new(RefCell::new(Editor {
+        core: core(&initial),
+        dragging: false,
+        text: text.clone(),
+        focusable: focusable.clone(),
+        value: text_value.clone(),
+        set_value,
+        set_caret,
+        set_selection,
+        focused: focused.clone(),
+        hovered: hovered.clone(),
+        on_change,
+        on_submit,
+    }));
+    set_component_state(editor.clone());
+    component_detail({
+        let text_value = text_value.clone();
+        move || detail(&text_value.get())
     });
 
-    let content_node = match content {
-        Some(build) => build(TextInputHandle {
-            field,
-            hovered: hovered_read.clone(),
-            focused: focused_read.clone(),
-        }),
-        None => field,
-    };
-
-    let focusable = view! {
+    let root = view! {
         <focusable
-            on_focus_change={move |focused: bool| {
-                set_focused.set(focused);
-                with_document(|document| {
-                    if !focused {
-                        let state = document.component_state_mut::<State>(input);
-                        state.dragging = false;
-                        state.core.external_edit();
+            node_ref={&focusable}
+            on_focus_change={{
+                let editor = editor.clone();
+                move |is_focused: bool| {
+                    set_focused.set(is_focused);
+                    if !is_focused {
+                        let mut editor = editor.borrow_mut();
+                        editor.dragging = false;
+                        editor.core.external_edit();
                     }
-                    show(document, input);
-                });
-                on_focus_change.call(focused);
-            }}
-            on_text={move |typed: String| {
-                with_document(|document| insert(document, input, &typed));
-            }}
-            on_key={move |press: KeyPress| {
-                if on_key_override.call(press) {
-                    return true;
+                    show(&editor);
+                    on_focus_change.call(is_focused);
                 }
-                with_document(|document| key(document, input, press))
+            }}
+            on_text={{
+                let editor = editor.clone();
+                move |typed: String| insert(&editor, &typed)
+            }}
+            on_key={{
+                let editor = editor.clone();
+                move |press: KeyPress| {
+                    on_key_override.call(press) || key(&editor, press)
+                }
             }}
         >
             <click_catcher
                 cursor={CursorIcon::Text}
-                on_press={move |press: PointerPress| {
-                    with_document(|document| point(document, input, press));
+                on_press={{
+                    let editor = editor.clone();
+                    move |press: PointerPress| point(&editor, press)
                 }}
-                on_drag={move |press: PointerPress| {
-                    with_document(|document| extend(document, input, press));
+                on_drag={{
+                    let editor = editor.clone();
+                    move |press: PointerPress| extend(&editor, press)
                 }}
-                on_hover_change={move |hovered: bool| {
-                    set_hovered.set(hovered);
-                    on_hover_change.call(hovered);
+                on_hover_change={move |is_hovered: bool| {
+                    set_hovered.set(is_hovered);
+                    on_hover_change.call(is_hovered);
                 }}
             >
-                {content_node}
+                {{
+                    let field = view! {
+                        <padding horizontal={padding_horizontal} vertical={padding_vertical}>
+                            <text
+                                node_ref={&text}
+                                string={text_value.clone()}
+                                font_size={font_size}
+                                color={color}
+                                placeholder={placeholder}
+                                placeholder_color={placeholder_color}
+                                selection_color={selection_color}
+                                caret_color={caret_color}
+                                caret={caret}
+                                selection={selection}
+                                align={TextAlign::Start}
+                                clip={true}
+                            />
+                        </padding>
+                    };
+                    match content {
+                        Some(build) => build(TextInputHandle { field, hovered, focused }),
+                        None => field,
+                    }
+                }}
             </click_catcher>
         </focusable>
     };
 
-    with_document(|document| {
-        reactive::set_component_detail(document, input, detail(&initial));
-        set_component_state(
-            document,
-            input,
-            State {
-                focusable,
-                text,
-                core: core(&initial),
-                dragging: false,
-                hovered: hovered_read,
-                focused: focused_read,
-                on_change,
-                on_submit,
-            },
-        );
+    value.apply({
+        let editor = editor.clone();
+        move |value| replace_all(&editor, value)
     });
 
-    value.apply(move |value| {
-        with_document(|document| {
-            if document.contains(input) {
-                set_text_input_value(document, input, value);
-            }
-        });
-    });
+    root
+}
 
-    focusable
+fn handle(document: &Document, input: NodeId) -> &Handle {
+    document.component_state::<Handle>(input)
 }
 
 pub fn text_input_text(document: &Document, input: NodeId) -> NodeId {
-    document.component_state::<State>(input).text
+    handle(document, input).borrow().text.get()
 }
 
 pub fn text_input_value(document: &Document, input: NodeId) -> String {
-    content(&document.component_state::<State>(input).core)
+    content(&handle(document, input).borrow().core)
 }
 
 pub fn text_input_hovered(document: &Document, input: NodeId) -> ReadSignal<bool> {
-    document.component_state::<State>(input).hovered.clone()
+    handle(document, input).borrow().hovered.clone()
 }
 
 pub fn text_input_focused(document: &Document, input: NodeId) -> ReadSignal<bool> {
-    document.component_state::<State>(input).focused.clone()
+    handle(document, input).borrow().focused.clone()
 }
 
-pub fn set_text_input_value(document: &mut Document, input: NodeId, value: impl Into<String>) {
-    let value = value.into();
-    command(
-        document,
-        input,
-        EditorCommand::ReplaceWholeFile(value.as_bytes()),
-    );
+pub fn set_text_input_value(input: NodeId, value: impl Into<String>) {
+    let editor = with_document(|document| handle(document, input).clone());
+    replace_all(&editor, value.into());
 }
 
 pub fn focus_text_input(input: NodeId) {
     with_document(|document| {
-        let focusable = document.component_state::<State>(input).focusable;
+        let focusable = handle(document, input).borrow().focusable.get();
         document.focus_focusable(focusable);
     });
+}
+
+fn replace_all(editor: &Handle, value: String) {
+    command(editor, EditorCommand::ReplaceWholeFile(value.as_bytes()));
 }
 
 fn core(value: &str) -> Core {
@@ -251,32 +248,29 @@ fn selection(core: &Core) -> Vec<Range<usize>> {
         .collect()
 }
 
-fn command(document: &mut Document, input: NodeId, command: EditorCommand<'_>) {
-    document
-        .component_state_mut::<State>(input)
-        .core
-        .execute_command(command);
-    show(document, input);
+fn command(editor: &Handle, command: EditorCommand<'_>) {
+    editor.borrow_mut().core.execute_command(command);
+    show(editor);
 }
 
-fn show(document: &mut Document, input: NodeId) {
-    let state = document.component_state::<State>(input);
-    let text = state.text;
-    let value = content(&state.core);
-    let caret = state.focused.get().then(|| caret(&state.core));
-    let selection = selection(&state.core);
-    document.set_text_caret(text, caret);
-    document.set_text_selection(text, selection);
-    if document.text(text) == value {
-        return;
-    }
-    document.set_text(text, value.clone());
-    document.set_component_detail(input, detail(&value));
-    let on_change = document.component_state::<State>(input).on_change.clone();
+fn show(editor: &Handle) {
+    let (on_change, value) = {
+        let editor = editor.borrow();
+        let value = content(&editor.core);
+        editor
+            .set_caret
+            .set(editor.focused.get_untracked().then(|| caret(&editor.core)));
+        editor.set_selection.set(selection(&editor.core));
+        if editor.value.get_untracked() == value {
+            return;
+        }
+        editor.set_value.set(value.clone());
+        (editor.on_change.clone(), value)
+    };
     on_change.call(value);
 }
 
-fn insert(document: &mut Document, input: NodeId, typed: &str) {
+fn insert(editor: &Handle, typed: &str) {
     let typed: String = typed
         .chars()
         .filter(|letter| !letter.is_control())
@@ -284,20 +278,19 @@ fn insert(document: &mut Document, input: NodeId, typed: &str) {
     if typed.is_empty() {
         return;
     }
-    command(document, input, EditorCommand::InsertText(typed.as_bytes()));
+    command(editor, EditorCommand::InsertText(typed.as_bytes()));
 }
 
-fn point(document: &mut Document, input: NodeId, press: PointerPress) {
-    let text = document.component_state::<State>(input).text;
-    let index = document.text_index_at(text, press.pos);
-    let position = document
-        .component_state::<State>(input)
-        .core
-        .position(index);
+fn point(editor: &Handle, press: PointerPress) {
+    let index = {
+        let text = editor.borrow().text.get();
+        text_index_at(text, press.pos)
+    };
+    let position = editor.borrow().core.position(index);
     let dragging = press.clicks < ALL_CLICKS;
-    document.component_state_mut::<State>(input).dragging = dragging;
+    editor.borrow_mut().dragging = dragging;
     if !dragging {
-        command(document, input, EditorCommand::SelectAll);
+        command(editor, EditorCommand::SelectAll);
         return;
     }
     let mode = match press.clicks {
@@ -306,8 +299,7 @@ fn point(document: &mut Document, input: NodeId, press: PointerPress) {
         _ => DragSelectionMode::move_to(CursorLeftRightStop::UnicodeGraphemeCluster),
     };
     command(
-        document,
-        input,
+        editor,
         EditorCommand::Click {
             position,
             mode,
@@ -317,21 +309,20 @@ fn point(document: &mut Document, input: NodeId, press: PointerPress) {
     );
 }
 
-fn extend(document: &mut Document, input: NodeId, press: PointerPress) {
-    let state = document.component_state::<State>(input);
-    if !state.dragging {
-        return;
-    }
-    let text = state.text;
-    let index = document.text_index_at(text, press.pos);
-    let position = document
-        .component_state::<State>(input)
-        .core
-        .position(index);
-    command(document, input, EditorCommand::Drag(position));
+fn extend(editor: &Handle, press: PointerPress) {
+    let text = {
+        let state = editor.borrow();
+        if !state.dragging {
+            return;
+        }
+        state.text.get()
+    };
+    let index = text_index_at(text, press.pos);
+    let position = editor.borrow().core.position(index);
+    command(editor, EditorCommand::Drag(position));
 }
 
-fn key(document: &mut Document, input: NodeId, press: KeyPress) -> bool {
+fn key(editor: &Handle, press: KeyPress) -> bool {
     if !press.pressed {
         return matches!(press.key, Key::Enter | Key::Space);
     }
@@ -344,8 +335,7 @@ fn key(document: &mut Document, input: NodeId, press: KeyPress) -> bool {
     };
     match press.key {
         Key::ArrowLeft | Key::ArrowRight | Key::Home | Key::End => command(
-            document,
-            input,
+            editor,
             EditorCommand::MoveCursorLeftRight {
                 mode: if modifiers.shift {
                     MoveMode::Select
@@ -365,8 +355,7 @@ fn key(document: &mut Document, input: NodeId, press: KeyPress) -> bool {
             },
         ),
         Key::Backspace | Key::Delete => command(
-            document,
-            input,
+            editor,
             EditorCommand::Delete {
                 direction: if press.key == Key::Backspace {
                     LRDirection::Left
@@ -377,35 +366,41 @@ fn key(document: &mut Document, input: NodeId, press: KeyPress) -> bool {
             },
         ),
         Key::C | Key::X if modifiers.ctrl && !modifiers.alt => {
-            let state = document.component_state_mut::<State>(input);
-            if !selection(&state.core).is_empty() {
-                let mode = if press.key == Key::X {
-                    CopyMode::Cut
+            let copied = {
+                let mut state = editor.borrow_mut();
+                if selection(&state.core).is_empty() {
+                    None
                 } else {
-                    CopyMode::Copy
-                };
-                document.copied_text = Some(state.core.copy_utf8(mode));
-                show(document, input);
+                    let mode = if press.key == Key::X {
+                        CopyMode::Cut
+                    } else {
+                        CopyMode::Copy
+                    };
+                    Some(state.core.copy_utf8(mode))
+                }
+            };
+            if let Some(copied) = copied {
+                copy_text(copied);
+                show(editor);
             }
         }
-        Key::A if modifiers.ctrl => command(document, input, EditorCommand::SelectAll),
-        Key::Z if modifiers.ctrl && modifiers.shift => {
-            command(document, input, EditorCommand::Redo);
-        }
-        Key::Z if modifiers.ctrl => command(document, input, EditorCommand::Undo),
-        Key::Y if modifiers.ctrl => command(document, input, EditorCommand::Redo),
-        Key::Enter => submit(document, input),
+        Key::A if modifiers.ctrl => command(editor, EditorCommand::SelectAll),
+        Key::Z if modifiers.ctrl && modifiers.shift => command(editor, EditorCommand::Redo),
+        Key::Z if modifiers.ctrl => command(editor, EditorCommand::Undo),
+        Key::Y if modifiers.ctrl => command(editor, EditorCommand::Redo),
+        Key::Enter => submit(editor),
         Key::Space => {}
         _ => return false,
     }
     true
 }
 
-fn submit(document: &mut Document, input: NodeId) {
-    let state = document.component_state_mut::<State>(input);
-    state.core.external_edit();
-    let value = content(&state.core);
-    let on_submit = document.component_state::<State>(input).on_submit.clone();
+fn submit(editor: &Handle) {
+    let (on_submit, value) = {
+        let mut state = editor.borrow_mut();
+        state.core.external_edit();
+        (state.on_submit.clone(), content(&state.core))
+    };
     on_submit.call(value);
 }
 

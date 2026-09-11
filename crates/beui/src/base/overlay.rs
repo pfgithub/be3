@@ -7,11 +7,13 @@ use crate::geometry::{pos2, Pos2, Rect, Vec2};
 use crate::input::{CursorIcon, PointerPress};
 use crate::painter::Painter;
 
-use beui_macros::view;
+use beui_macros::{component, view};
 
 use crate::document::Document;
 use crate::node::{ClickHandler, Element, InteractInput, NodeId};
-use crate::reactive::{with_document, with_reactive_scope, ClickCatcherBuilder};
+use crate::reactive::{
+    with_document, with_reactive_scope, Children, ClickCallback, ClickCatcherBuilder,
+};
 
 #[derive(Clone, Copy)]
 pub(crate) enum OverlayAnchor {
@@ -154,6 +156,47 @@ impl Element for OverlayNode {
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
+}
+
+#[component(base)]
+pub(crate) fn overlay(
+    anchor: OverlayAnchor,
+    placement: Placement,
+    on_dismiss: ClickCallback,
+    children: Children,
+) -> NodeId {
+    let content = children.into_first();
+    with_document(|document| {
+        let overlay = document.create_overlay(anchor, placement);
+        if let Some(content) = content {
+            document.set_overlay_content(overlay, content);
+        }
+        if !on_dismiss.is_empty() {
+            document.set_overlay_on_dismiss(overlay, move || on_dismiss.call());
+        }
+        overlay
+    })
+}
+
+pub(crate) fn open_overlay(overlay: NodeId) {
+    with_document(|document| document.open_overlay(overlay));
+}
+
+pub(crate) fn close_overlay(overlay: NodeId) {
+    with_document(|document| document.close_overlay(overlay));
+}
+
+pub(crate) fn move_overlay_to(overlay: NodeId, pos: Pos2) {
+    with_document(|document| document.set_overlay_anchor(overlay, OverlayAnchor::Point(pos)));
+}
+
+pub(crate) fn replace_overlay_content(overlay: NodeId, content: NodeId) {
+    with_document(|document| {
+        if let Some(previous) = document.overlay_content(overlay) {
+            document.remove_node(previous);
+        }
+        document.set_overlay_content(overlay, content);
+    });
 }
 
 impl Document {

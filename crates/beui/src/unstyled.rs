@@ -17,17 +17,14 @@ pub use choice::{
     choice, choice_selected, choice_selected_signal, focus_choice, ChoiceKind, ChoiceOption,
     ChoiceOptionHandle,
 };
-pub use context_menu::{
-    context_menu_menu, context_menu_overlay, set_context_menu_items, ContextMenuBuilder,
-};
+pub use context_menu::{context_menu_menu, context_menu_overlay, ContextMenuBuilder};
 pub use disclosure::{
     disclosure_focused, disclosure_hovered, disclosure_open, disclosure_open_signal,
     focus_disclosure, DisclosureBuilder, DisclosureHandle,
 };
 pub use menu::{
-    hover_menu_list_row, menu_list_len, menu_list_root_focusable, menu_list_row_button,
-    menu_list_row_submenu_content, menu_list_row_submenu_overlay, MenuItem, MenuPanel, MenuRow,
-    MenuRowHandle,
+    menu_list_len, menu_list_root_focusable, menu_list_row_button, menu_list_row_submenu_content,
+    menu_list_row_submenu_overlay, MenuItem, MenuPanel, MenuRow, MenuRowHandle,
 };
 pub use pressable::PressableBuilder;
 pub use select::{

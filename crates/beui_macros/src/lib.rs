@@ -267,6 +267,7 @@ pub fn component(attr: TokenStream, item: TokenStream) -> TokenStream {
         #vis struct #builder_ident #generics #where_clause {
             #(#fields,)*
             test_id: Option<String>,
+            node_ref: Option<::beui::reactive::NodeRef>,
         }
 
         impl #generics ::core::default::Default for #builder_ident #generics #where_clause {
@@ -274,6 +275,7 @@ pub fn component(attr: TokenStream, item: TokenStream) -> TokenStream {
                 Self {
                     #(#prop_idents: ::core::default::Default::default(),)*
                     test_id: None,
+                    node_ref: None,
                 }
             }
         }
@@ -286,12 +288,21 @@ pub fn component(attr: TokenStream, item: TokenStream) -> TokenStream {
                 self
             }
 
+            pub fn node_ref(mut self, value: &::beui::reactive::NodeRef) -> Self {
+                self.node_ref = Some(value.clone());
+                self
+            }
+
             pub fn build(self) #output {
                 let test_id = self.test_id;
+                let node_ref = self.node_ref;
                 #(#field_lets)*
                 let node = #finish;
                 if let Some(test_id) = test_id {
                     ::beui::reactive::with_document(|document| document.set_test_id(node, test_id));
+                }
+                if let Some(node_ref) = node_ref {
+                    node_ref.fill(node);
                 }
                 node
             }

@@ -6,8 +6,8 @@ use crate::document::Document;
 use crate::input::{Key, KeyPress};
 use crate::node::NodeId;
 use crate::reactive::{
-    self, bind, create_memo, create_signal, current_component, intrinsic, set_component_detail,
-    set_component_state, untrack, with_document, Callback, ListBuilder, Memo, Prop, ReadSignal,
+    self, bind, create_memo, create_signal, current_component, intrinsic, set_component_state,
+    set_shadow_detail, untrack, with_document, Callback, ListBuilder, Memo, Prop, ReadSignal,
     WriteSignal,
 };
 use crate::unstyled;
@@ -124,21 +124,15 @@ pub fn choice(
             <list direction={direction} spacing={6.0} children={buttons} />
         };
 
-        with_document(|document| {
-            set_component_detail(document, choice, String::new());
-            set_component_state(
-                document,
-                choice,
-                State {
-                    options,
-                    selected: selected_read,
-                    set_selected,
-                    kind,
-                    search: String::new(),
-                    typed_at: None,
-                    on_change,
-                },
-            );
+        set_shadow_detail(choice, String::new());
+        set_component_state(State {
+            options,
+            selected: selected_read,
+            set_selected,
+            kind,
+            search: String::new(),
+            typed_at: None,
+            on_change,
         });
 
         if kind == ChoiceKind::Listbox {

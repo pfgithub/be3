@@ -3,8 +3,8 @@ use beui_macros::{component, view};
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
-    component_detail, create_signal, current_component, set_component_state, untrack,
-    with_document, Callback, Children, ColumnBuilder, Prop, ReadSignal, VisibilityBuilder,
+    component_detail, create_signal, set_component_state, untrack, with_document, Callback,
+    Children, ColumnBuilder, Prop, ReadSignal, VisibilityBuilder,
 };
 use crate::unstyled;
 use crate::unstyled::button::ButtonHandle;
@@ -31,7 +31,6 @@ pub fn disclosure(
     open: Prop<bool>,
     on_toggle: Callback<bool>,
 ) -> NodeId {
-    let disclosure = current_component();
     let content = children
         .into_first()
         .expect("disclosure requires content, e.g. <unstyled::disclosure>{intrinsic(node)}</unstyled::disclosure>");
@@ -78,15 +77,9 @@ pub fn disclosure(
         </column>
     };
 
-    with_document(|document| {
-        set_component_state(
-            document,
-            disclosure,
-            State {
-                button: button_cell.get().expect("disclosure button not yet built"),
-                open: open_read,
-            },
-        );
+    set_component_state(State {
+        button: button_cell.get().expect("disclosure button not yet built"),
+        open: open_read,
     });
 
     root

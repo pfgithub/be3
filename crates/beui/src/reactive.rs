@@ -106,6 +106,11 @@ pub fn build(f: impl FnOnce() -> NodeId) -> Document {
     document
 }
 
+pub fn copy_text(text: impl Into<String>) {
+    let text = text.into();
+    with_document(|document| document.copy_text(text));
+}
+
 pub fn bind(mut effect: impl FnMut(&mut Document) + 'static) {
     create_effect(move || with_document(&mut effect));
 }
@@ -149,15 +154,17 @@ pub fn current_component() -> NodeId {
         .expect("current_component() called outside of a #[component] body")
 }
 
-pub fn set_component_detail(document: &mut Document, shadow: NodeId, detail: impl Into<String>) {
+pub fn set_shadow_detail(shadow: NodeId, detail: impl Into<String>) {
     let detail = detail.into();
-    if document.contains(shadow) {
-        document.set_component_detail(shadow, detail);
-    } else {
-        PENDING_DETAIL.with(|cell| {
-            cell.borrow_mut().insert(shadow, detail);
-        });
-    }
+    with_document(|document| {
+        if document.contains(shadow) {
+            document.set_component_detail(shadow, detail);
+        } else {
+            PENDING_DETAIL.with(|cell| {
+                cell.borrow_mut().insert(shadow, detail);
+            });
+        }
+    });
 }
 
 pub fn component_detail(detail: impl Fn() -> String + 'static) {
@@ -165,19 +172,50 @@ pub fn component_detail(detail: impl Fn() -> String + 'static) {
 }
 
 pub fn shadow_detail(shadow: NodeId, detail: impl Fn() -> String + 'static) {
-    create_effect(move || {
-        let detail = detail();
-        with_document(|document| set_component_detail(document, shadow, detail));
+    create_effect(move || set_shadow_detail(shadow, detail()));
+}
+
+pub fn set_component_state<T: 'static>(state: T) {
+    let shadow = current_component();
+    with_document(|document| {
+        if document.contains(shadow) {
+            document.set_component_state(shadow, state);
+        } else {
+            PENDING_STATE.with(|cell| {
+                cell.borrow_mut().insert(shadow, Box::new(state));
+            });
+        }
     });
 }
 
-pub fn set_component_state<T: 'static>(document: &mut Document, shadow: NodeId, state: T) {
-    if document.contains(shadow) {
-        document.set_component_state(shadow, state);
-    } else {
-        PENDING_STATE.with(|cell| {
-            cell.borrow_mut().insert(shadow, Box::new(state));
-        });
+pub fn component_state<T: 'static, R>(shadow: NodeId, read: impl FnOnce(&T) -> R) -> R {
+    with_document(|document| read(document.component_state::<T>(shadow)))
+}
+
+pub fn component_state_mut<T: 'static, R>(shadow: NodeId, write: impl FnOnce(&mut T) -> R) -> R {
+    with_document(|document| write(document.component_state_mut::<T>(shadow)))
+}
+
+#[derive(Clone, Default)]
+pub struct NodeRef(Rc<Cell<Option<NodeId>>>);
+
+impl NodeRef {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn fill(&self, node: NodeId) {
+        self.0.set(Some(node));
+    }
+
+    pub fn get(&self) -> NodeId {
+        self.0
+            .get()
+            .expect("node_ref read before the node it points at was built")
+    }
+
+    pub fn try_get(&self) -> Option<NodeId> {
+        self.0.get()
     }
 }
 

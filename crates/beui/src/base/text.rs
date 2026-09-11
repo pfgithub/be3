@@ -17,6 +17,9 @@ use beui_macros::component;
 
 const CARET_WIDTH: f32 = 1.0;
 const BLINK_INTERVAL: Duration = Duration::from_millis(530);
+const DEFAULT_FONT_SIZE: f32 = 14.0;
+const DEFAULT_PLACEHOLDER_COLOR: Color32 = Color32::from_gray(140);
+const DEFAULT_SELECTION_COLOR: Color32 = Color32::from_gray(80);
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum TextAlign {
@@ -258,8 +261,8 @@ impl Document {
             placeholder: String::new(),
             font_size,
             color,
-            placeholder_color: Color32::from_gray(140),
-            selection_color: Color32::from_gray(80),
+            placeholder_color: DEFAULT_PLACEHOLDER_COLOR,
+            selection_color: DEFAULT_SELECTION_COLOR,
             caret_color: color,
             horizontal: TextAlign::Start,
             vertical: TextAlign::Start,
@@ -377,22 +380,35 @@ impl Document {
     }
 }
 
+pub fn text_index_at(text: NodeId, pos: Pos2) -> usize {
+    with_document(|document| document.text_index_at(text, pos))
+}
+
 #[component(base)]
 pub fn text(
     string: Prop<String>,
-    font_size: Option<f32>,
-    color: Prop<Color32>,
+    #[prop(default = DEFAULT_FONT_SIZE)] font_size: Prop<f32>,
+    #[prop(default = Color32::WHITE)] color: Prop<Color32>,
+    placeholder: Prop<String>,
+    #[prop(default = DEFAULT_PLACEHOLDER_COLOR)] placeholder_color: Prop<Color32>,
+    #[prop(default = DEFAULT_SELECTION_COLOR)] selection_color: Prop<Color32>,
+    #[prop(default = Color32::WHITE)] caret_color: Prop<Color32>,
+    caret: Prop<Option<usize>>,
+    selection: Prop<Vec<Range<usize>>>,
     align: Option<TextAlign>,
+    vertical_align: Option<TextAlign>,
     wrap: Option<bool>,
     monospace: Option<bool>,
     icon: Option<bool>,
     clip: Option<bool>,
 ) -> NodeId {
     let node = with_document(|document| {
-        let node = document.create_text(String::new(), font_size.unwrap_or(14.0), Color32::WHITE);
-        if let Some(align) = align {
-            document.set_text_align(node, align, TextAlign::Center);
-        }
+        let node = document.create_text(String::new(), DEFAULT_FONT_SIZE, Color32::WHITE);
+        let vertical = vertical_align.unwrap_or(match align {
+            Some(_) => TextAlign::Center,
+            None => TextAlign::Start,
+        });
+        document.set_text_align(node, align.unwrap_or(TextAlign::Start), vertical);
         if wrap.unwrap_or(false) {
             document.set_text_wrap(node, true);
         }
@@ -408,6 +424,21 @@ pub fn text(
         node
     });
     string.apply(move |value| with_document(|document| document.set_text(node, value)));
+    font_size
+        .apply(move |value| with_document(|document| document.set_text_font_size(node, value)));
     color.apply(move |value| with_document(|document| document.set_text_color(node, value)));
+    placeholder
+        .apply(move |value| with_document(|document| document.set_text_placeholder(node, value)));
+    placeholder_color.apply(move |value| {
+        with_document(|document| document.set_text_placeholder_color(node, value));
+    });
+    selection_color.apply(move |value| {
+        with_document(|document| document.set_text_selection_color(node, value));
+    });
+    caret_color
+        .apply(move |value| with_document(|document| document.set_text_caret_color(node, value)));
+    caret.apply(move |value| with_document(|document| document.set_text_caret(node, value)));
+    selection
+        .apply(move |value| with_document(|document| document.set_text_selection(node, value)));
     node
 }
