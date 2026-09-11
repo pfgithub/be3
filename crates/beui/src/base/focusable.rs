@@ -343,6 +343,10 @@ impl Document {
     }
 }
 
+pub(crate) fn focus(focusable: NodeId) {
+    with_document(|document| document.focus_focusable(focusable));
+}
+
 #[component(base)]
 pub fn focusable(
     #[prop(default = true)] tab_stop: Prop<bool>,

@@ -8,6 +8,7 @@ use text_editor_core::{
     TextBuffer, TextLanguage,
 };
 
+use crate::base::focusable::focus;
 use crate::color::Color32;
 use crate::input::{CursorIcon, Key, KeyPress, PointerPress};
 
@@ -18,7 +19,7 @@ use crate::node::NodeId;
 use beui_macros::{component, view};
 
 use crate::reactive::{
-    component_detail, copy_text, create_signal, set_component_state, with_document, Callback,
+    component_detail, component_state, copy_text, create_signal, set_component_state, Callback,
     ClickCatcherBuilder, FocusableBuilder, NodeRef, PaddingBuilder, Prop, ReadSignal, TextBuilder,
     WriteSignal,
 };
@@ -182,6 +183,10 @@ fn handle(document: &Document, input: NodeId) -> &Handle {
     document.component_state::<Handle>(input)
 }
 
+fn editor(input: NodeId) -> Handle {
+    component_state::<Handle, _>(input, Rc::clone)
+}
+
 pub fn text_input_text(document: &Document, input: NodeId) -> NodeId {
     handle(document, input).borrow().text.get()
 }
@@ -199,15 +204,11 @@ pub fn text_input_focused(document: &Document, input: NodeId) -> ReadSignal<bool
 }
 
 pub fn set_text_input_value(input: NodeId, value: impl Into<String>) {
-    let editor = with_document(|document| handle(document, input).clone());
-    replace_all(&editor, value.into());
+    replace_all(&editor(input), value.into());
 }
 
 pub fn focus_text_input(input: NodeId) {
-    with_document(|document| {
-        let focusable = handle(document, input).borrow().focusable.get();
-        document.focus_focusable(focusable);
-    });
+    focus(editor(input).borrow().focusable.get());
 }
 
 fn replace_all(editor: &Handle, value: String) {

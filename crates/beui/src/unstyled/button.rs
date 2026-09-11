@@ -1,11 +1,12 @@
 use beui_macros::{component, view};
 
+use crate::base::focusable::focus;
 use crate::input::{CursorIcon, KeyPress};
 
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
-    self, create_signal, set_component_state, untrack, with_document, Callback, Children,
+    self, component_state, create_signal, set_component_state, untrack, Callback, Children,
     ClickCallback, ClickCatcherBuilder, FocusableBuilder, Prop, ReadSignal,
 };
 
@@ -111,19 +112,11 @@ pub fn button_focused(document: &Document, button: NodeId) -> ReadSignal<bool> {
 }
 
 pub fn set_button_on_click(button: NodeId, handler: impl FnMut() + 'static) {
-    with_document(|document| {
-        document
-            .component_state::<State>(button)
-            .on_click
-            .set(handler);
-    });
+    component_state::<State, _>(button, |state| state.on_click.clone()).set(handler);
 }
 
 pub fn focus_button(button: NodeId) {
-    with_document(|document| {
-        let focusable = document.component_state::<State>(button).focusable;
-        document.focus_focusable(focusable);
-    });
+    focus(component_state::<State, _>(button, |state| state.focusable));
 }
 
 pub fn button_focusable(document: &Document, button: NodeId) -> NodeId {

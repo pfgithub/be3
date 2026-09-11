@@ -1,3 +1,4 @@
+use crate::base::shadow::shadow_root;
 use crate::base::TextAlign;
 use crate::color::Color32;
 use crate::document::Document;
@@ -5,8 +6,8 @@ use crate::node::NodeId;
 use beui_macros::{component, view};
 
 use crate::reactive::{
-    with_document, Callback, CenteredRowBuilder, FillBuilder, OutlineBuilder, PaddingBuilder, Prop,
-    SizedBuilder, SpacerBuilder, TextBuilder, VisibilityBuilder,
+    Callback, CenteredRowBuilder, FillBuilder, OutlineBuilder, PaddingBuilder, Prop, SizedBuilder,
+    SpacerBuilder, TextBuilder, VisibilityBuilder,
 };
 use crate::styled::theme::{
     ACCENT, ACCENT_SOFT, BORDER, FONT_BODY, RADIUS, SURFACE_RAISED, TEXT, TEXT_MUTED,
@@ -104,10 +105,7 @@ pub(super) fn selected_index(document: &Document, choice: NodeId) -> Option<usiz
 }
 
 pub(super) fn focus(choice: NodeId) {
-    with_document(|document| {
-        let inner = document.shadow_root(choice);
-        unstyled::focus_choice(inner);
-    });
+    unstyled::focus_choice(shadow_root(choice));
 }
 
 fn background(active: bool, hovered: bool) -> Color32 {

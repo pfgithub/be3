@@ -1,11 +1,12 @@
 use beui_macros::{component, view};
 
+use crate::base::shadow::shadow_root;
 use crate::color::Color32;
 
 use crate::base::TextAlign;
 use crate::node::NodeId;
 use crate::reactive::{
-    with_document, ClickCallback, FillBuilder, OutlineBuilder, PaddingBuilder, Prop, TextBuilder,
+    ClickCallback, FillBuilder, OutlineBuilder, PaddingBuilder, Prop, TextBuilder,
 };
 use crate::styled::theme::{
     ACCENT, ACCENT_ACTIVE, ACCENT_HOVER, BORDER, BORDER_WIDTH, FONT_BODY, ON_ACCENT, RADIUS,
@@ -72,8 +73,5 @@ pub fn button(
 }
 
 pub fn focus_button(button: NodeId) {
-    with_document(|document| {
-        let inner = document.shadow_root(button);
-        unstyled::focus_button(inner);
-    });
+    unstyled::focus_button(shadow_root(button));
 }

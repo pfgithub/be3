@@ -1,11 +1,12 @@
 use beui_macros::{component, view};
 
+use crate::base::focusable::focus;
 use crate::input::{CursorIcon, Key, KeyPress, PointerPress};
 
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
-    self, component_detail, create_signal, set_component_state, untrack, with_document, Callback,
+    self, component_detail, component_state, create_signal, set_component_state, untrack, Callback,
     ClickCatcherBuilder, FocusableBuilder, Prop, ReadSignal,
 };
 
@@ -137,8 +138,5 @@ fn detail(value: f32) -> String {
 }
 
 pub fn focus_slider(slider: NodeId) {
-    with_document(|document| {
-        let focusable = document.component_state::<State>(slider).focusable;
-        document.focus_focusable(focusable);
-    });
+    focus(component_state::<State, _>(slider, |state| state.focusable));
 }

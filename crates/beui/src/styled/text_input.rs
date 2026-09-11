@@ -1,10 +1,11 @@
 use beui_macros::{component, view};
 
+use crate::base::shadow::shadow_root;
 use crate::color::Color32;
 
 use crate::document::Document;
 use crate::node::NodeId;
-use crate::reactive::{with_document, Callback, FillBuilder, OutlineBuilder, Prop, SizedBuilder};
+use crate::reactive::{Callback, FillBuilder, OutlineBuilder, Prop, SizedBuilder};
 use crate::styled::theme::{
     ACCENT, ACCENT_SOFT, BORDER, BORDER_WIDTH, FONT_BODY, RADIUS, SURFACE_RAISED, TEXT, TEXT_MUTED,
 };
@@ -60,10 +61,7 @@ pub fn text_input_value(document: &Document, input: NodeId) -> String {
 }
 
 pub fn focus_text_input(input: NodeId) {
-    with_document(|document| {
-        let inner = document.shadow_root(input);
-        unstyled::focus_text_input(inner);
-    });
+    unstyled::focus_text_input(shadow_root(input));
 }
 
 fn border_color(focused: bool, hovered: bool) -> Color32 {

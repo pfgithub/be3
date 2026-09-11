@@ -8,8 +8,8 @@ use crate::input::{Key, KeyPress};
 use crate::node::NodeId;
 use crate::reactive::{
     component_state, create_effect, create_memo, create_signal, current_component, intrinsic,
-    set_component_state, with_document, Callback, ColumnBuilder, Memo, NodeRef, Prop, ReadSignal,
-    ScrollBuilder, VisibilityBuilder, WriteSignal,
+    set_component_state, Callback, ColumnBuilder, Memo, NodeRef, Prop, ReadSignal, ScrollBuilder,
+    VisibilityBuilder, WriteSignal,
 };
 use crate::unstyled;
 use crate::unstyled::button::{ButtonContent, ButtonHandle};
@@ -196,14 +196,20 @@ fn row(
         let option = option.clone();
         let label = label.to_owned();
         let highlighted = highlighted.clone();
-        Box::new(move |handle: ButtonHandle| {
+        Box::new(move |button: ButtonHandle| {
             let is_highlighted = create_memo(move || highlighted.get() == Some(index));
+            let hovered = button.hovered.clone();
+            create_effect(move || {
+                if hovered.get() {
+                    handle(select).set_highlighted.set(Some(index));
+                }
+            });
             option(SelectOptionHandle {
                 index,
                 label,
                 highlighted: is_highlighted,
-                hovered: handle.hovered.clone(),
-                focused: handle.focused,
+                hovered: button.hovered,
+                focused: button.focused,
             })
         })
     };
@@ -219,13 +225,6 @@ fn row(
             />
         </visibility>
     };
-
-    let hovered = with_document(|document| unstyled::button_hovered(document, button.get()));
-    create_effect(move || {
-        if hovered.get() {
-            handle(select).set_highlighted.set(Some(index));
-        }
-    });
 
     Row {
         button,

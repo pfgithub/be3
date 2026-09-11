@@ -8,8 +8,8 @@ use crate::input::{Key, KeyPress};
 use crate::node::NodeId;
 use crate::reactive::{
     component_state, create_effect, create_memo, create_signal, current_component, intrinsic,
-    set_component_name, set_component_state, set_shadow_detail, with_document, Callback,
-    ListBuilder, Memo, NodeRef, Prop, ReadSignal, WriteSignal,
+    set_component_name, set_component_state, set_shadow_detail, Callback, ListBuilder, Memo,
+    NodeRef, Prop, ReadSignal, WriteSignal,
 };
 use crate::unstyled;
 use crate::unstyled::ButtonHandle;
@@ -49,6 +49,7 @@ struct Typeahead {
 struct State {
     shadow: NodeId,
     options: Vec<Option_>,
+    focused: Rc<RefCell<Vec<ReadSignal<bool>>>>,
     selected: ReadSignal<Option<usize>>,
     set_selected: WriteSignal<Option<usize>>,
     kind: ChoiceKind,
@@ -73,7 +74,7 @@ pub fn choice(
     let (selected, set_selected) = create_signal(None);
 
     let mut options = Vec::new();
-    let mut focused_signals = Vec::new();
+    let focused_signals: Rc<RefCell<Vec<ReadSignal<bool>>>> = Rc::default();
     let mut buttons = Vec::new();
     for (index, label) in labels.iter().enumerate() {
         let button = NodeRef::new();
@@ -88,14 +89,16 @@ pub fn choice(
         let content = {
             let option = option.clone();
             let label = label.clone();
-            Box::new(move |handle: ButtonHandle| {
+            let focused_signals = focused_signals.clone();
+            Box::new(move |button: ButtonHandle| {
+                focused_signals.borrow_mut().push(button.focused.clone());
                 option(ChoiceOptionHandle {
                     index,
                     label,
                     selected: is_selected,
-                    hovered: handle.hovered,
-                    active: handle.active,
-                    focused: handle.focused,
+                    hovered: button.hovered,
+                    active: button.active,
+                    focused: button.focused,
                 })
             })
         };
@@ -114,9 +117,6 @@ pub fn choice(
                 }}
             />
         };
-        focused_signals.push(with_document(|document| {
-            unstyled::button_focused(document, node)
-        }));
         buttons.push(intrinsic(node));
         options.push(Option_ {
             button,
@@ -127,6 +127,7 @@ pub fn choice(
     let state: Handle = Rc::new(State {
         shadow: choice,
         options,
+        focused: focused_signals.clone(),
         selected,
         set_selected,
         kind,
@@ -139,7 +140,8 @@ pub fn choice(
     if kind == ChoiceKind::Listbox {
         let state = state.clone();
         create_effect(move || {
-            if !focused_signals.iter().any(ReadSignal::get) {
+            let any_focused = state.focused.borrow().iter().any(ReadSignal::get);
+            if !any_focused {
                 *state.typeahead.borrow_mut() = Typeahead::default();
             }
         });
@@ -196,9 +198,7 @@ fn select(state: &State, selected: Option<usize>) {
     {
         return;
     }
-    let focused = state.options.iter().any(|option| {
-        with_document(|document| unstyled::button_focused(document, option.button.get()).get())
-    });
+    let focused = state.focused.borrow().iter().any(ReadSignal::get);
     sync_selected(state, selected);
     if focused {
         if let Some(option) = state.options.get(selected.unwrap_or(0)) {

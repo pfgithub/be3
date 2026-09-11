@@ -1,3 +1,4 @@
+use crate::base::focusable::focus;
 use crate::base::overlay::{OverlayAnchor, OverlayBuilder, Placement};
 use crate::document::Document;
 use crate::input::{Key, KeyPress};
@@ -6,8 +7,8 @@ use beui_macros::{component, view};
 
 use crate::reactive::{
     component_state, create_effect, create_signal, current_component, intrinsic,
-    set_component_state, with_document, Callback, ColumnBuilder, FocusableBuilder, NodeRef, Prop,
-    ReadSignal, WriteSignal,
+    set_component_state, Callback, ColumnBuilder, FocusableBuilder, NodeRef, Prop, ReadSignal,
+    WriteSignal,
 };
 use crate::unstyled;
 use crate::unstyled::button::ButtonHandle;
@@ -97,11 +98,17 @@ pub(crate) fn menu_list(
         let content = {
             let row = row.clone();
             let item = item.clone();
-            Box::new(move |handle: ButtonHandle| {
+            Box::new(move |button: ButtonHandle| {
+                let hovered = button.hovered.clone();
+                create_effect(move || {
+                    if hovered.get() {
+                        hover_menu_list_row(menu, index);
+                    }
+                });
                 row(MenuRowHandle {
                     item,
-                    hovered: handle.hovered,
-                    focused: handle.focused,
+                    hovered: button.hovered,
+                    focused: button.focused,
                 })
             })
         };
@@ -162,13 +169,6 @@ pub(crate) fn menu_list(
             submenu,
             submenu_content,
         });
-
-        let hovered = with_document(|document| unstyled::button_hovered(document, button));
-        create_effect(move || {
-            if hovered.get() {
-                hover_menu_list_row(menu, index);
-            }
-        });
     }
 
     set_component_state(State {
@@ -228,7 +228,7 @@ pub(crate) fn focus_menu_list_root(menu: NodeId) {
     let (root, set_active) =
         component_state::<State, _>(menu, |state| (state.root, state.set_active.clone()));
     set_active.set(None);
-    with_document(|document| document.focus_focusable(root));
+    focus(root);
 }
 
 pub fn menu_list_root_focusable(document: &Document, menu: NodeId) -> NodeId {

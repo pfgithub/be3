@@ -1,11 +1,12 @@
 use beui_macros::{component, view};
 
+use crate::base::focusable::focus;
 use crate::input::CursorIcon;
 
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
-    self, component_detail, create_signal, set_component_state, untrack, with_document, Callback,
+    self, component_detail, component_state, create_signal, set_component_state, untrack, Callback,
     ClickCatcherBuilder, FocusableBuilder, Prop, ReadSignal,
 };
 
@@ -119,8 +120,5 @@ fn detail(checked: bool) -> &'static str {
 }
 
 pub fn focus_toggle(toggle: NodeId) {
-    with_document(|document| {
-        let focusable = document.component_state::<State>(toggle).focusable;
-        document.focus_focusable(focusable);
-    });
+    focus(component_state::<State, _>(toggle, |state| state.focusable));
 }

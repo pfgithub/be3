@@ -42,14 +42,12 @@ impl DemoApp {
         let (count, set_count) = create_signal(0i64);
 
         let root = with_reactive_scope(&mut document, || {
-            let value =
-                view! { <display content={create_memo(move || count.get().to_string())} /> };
             view! {
                 <fill color={BACKGROUND} radius={0}>
                     <column spacing={0.0}>
-                        @fixed(HEADER_HEIGHT) <build_header set_count={set_count} />
+                        @fixed(HEADER_HEIGHT) <demo_header set_count={set_count} />
                         @fixed(SEPARATOR_HEIGHT) <separator/>
-                        @percent(100.0) <build_body value={value} />
+                        @percent(100.0) <demo_body count={count} />
                     </column>
                 </fill>
             }
@@ -171,7 +169,7 @@ fn scroll_row(index: usize, rows: Rows, compact: bool) -> NodeId {
 }
 
 #[component]
-fn build_header(set_count: WriteSignal<i64>) -> NodeId {
+fn demo_header(set_count: WriteSignal<i64>) -> NodeId {
     let reset_count = set_count.clone();
     let decrement_count = set_count.clone();
     view! {
@@ -199,19 +197,19 @@ fn build_header(set_count: WriteSignal<i64>) -> NodeId {
 }
 
 #[component]
-fn build_body(value: NodeId) -> NodeId {
+fn demo_body(count: ReadSignal<i64>) -> NodeId {
     view! {
         <padding horizontal={BODY_PADDING} vertical={BODY_PADDING}>
             <row spacing={20.0}>
-                @percent(32.0) <build_sidebar />
-                @percent(68.0) <build_main value={value} />
+                @percent(32.0) <sidebar />
+                @percent(68.0) <main_panel count={count} />
             </row>
         </padding>
     }
 }
 
 #[component]
-fn build_sidebar() -> NodeId {
+fn sidebar() -> NodeId {
     view! {
         <card>
             <column spacing={12.0}>
@@ -238,7 +236,7 @@ fn build_sidebar() -> NodeId {
 }
 
 #[component]
-fn build_main(value: NodeId) -> NodeId {
+fn main_panel(count: ReadSignal<i64>) -> NodeId {
     let (status_text, set_status_text) = create_signal("Nothing selected".to_string());
     let rows = Rows::new(set_status_text);
     let row_height = {
@@ -253,30 +251,17 @@ fn build_main(value: NodeId) -> NodeId {
     };
     let item_rows = rows.clone();
     let (scroll_position, set_scroll_position) = create_signal(ScrollPosition::ZERO);
-    let scroll = view! {
-        <virtual_list
-            count={ROW_COUNT}
-            item_height={row_height}
-            focus_color={ACCENT}
-            on_change={move |position| set_scroll_position.set(position)}
-            item={Box::new(move |index| {
-                let rows = item_rows.clone();
-                let compact = rows.compact.get();
-                view! { <scroll_row index={index} rows={rows} compact={compact} /> }
-            })}
-        />
-    };
 
     view! {
         <column spacing={20.0}>
             <card>
                 <column spacing={4.0}>
                     <caption content={"Counter".to_string()} />
-                    {value}
+                    <display content={create_memo(move || count.get().to_string())} />
                     <paragraph content={"Click the header buttons, or focus one with Tab and press Enter.".to_string()} />
                 </column>
             </card>
-            <build_controls rows={rows.clone()} />
+            <controls rows={rows.clone()} />
             @percent(100.0) <card>
                 <column spacing={12.0}>
                     <centered_row spacing={12.0}>
@@ -285,7 +270,17 @@ fn build_main(value: NodeId) -> NodeId {
                     </centered_row>
                     @fixed(SEPARATOR_HEIGHT) <separator/>
                     @percent(100.0) <row spacing={10.0}>
-                        @percent(100.0) {scroll}
+                        @percent(100.0) <virtual_list
+                            count={ROW_COUNT}
+                            item_height={row_height}
+                            focus_color={ACCENT}
+                            on_change={move |position| set_scroll_position.set(position)}
+                            item={Box::new(move |index| {
+                                let rows = item_rows.clone();
+                                let compact = rows.compact.get();
+                                view! { <scroll_row index={index} rows={rows} compact={compact} /> }
+                            })}
+                        />
                         @fixed(SCROLLBAR_WIDTH) <scrollbar position={scroll_position} />
                     </row>
                 </column>
@@ -295,7 +290,7 @@ fn build_main(value: NodeId) -> NodeId {
 }
 
 #[component]
-fn build_controls(rows: Rows) -> NodeId {
+fn controls(rows: Rows) -> NodeId {
     let (selected_tab, set_selected_tab) = create_signal(0usize);
 
     let list_rows = rows.clone();
@@ -316,11 +311,11 @@ fn build_controls(rows: Rows) -> NodeId {
                     set_selected_tab.set(selected);
                 }} />
                 <column spacing={0.0}>
-                    <show condition={list_condition} then={Box::new(move || view! { <build_list_controls rows={list_rows} /> })} />
-                    <show condition={load_condition} then={Box::new(|| view! { <build_load_controls /> })} />
-                    <show condition={name_condition} then={Box::new(|| view! { <build_name_controls /> })} />
-                    <show condition={choices_condition} then={Box::new(|| view! { <build_choice_controls /> })} />
-                    <show condition={menus_condition} then={Box::new(|| view! { <build_menu_controls /> })} />
+                    <show condition={list_condition} then={Box::new(move || view! { <list_controls rows={list_rows} /> })} />
+                    <show condition={load_condition} then={Box::new(|| view! { <load_controls /> })} />
+                    <show condition={name_condition} then={Box::new(|| view! { <name_controls /> })} />
+                    <show condition={choices_condition} then={Box::new(|| view! { <choice_controls /> })} />
+                    <show condition={menus_condition} then={Box::new(|| view! { <menu_controls /> })} />
                 </column>
             </column>
         </card>
@@ -328,7 +323,7 @@ fn build_controls(rows: Rows) -> NodeId {
 }
 
 #[component]
-fn build_list_controls(rows: Rows) -> NodeId {
+fn list_controls(rows: Rows) -> NodeId {
     let timing_rows = rows.clone();
     let compact_rows = rows.clone();
     view! {
@@ -345,7 +340,7 @@ fn build_list_controls(rows: Rows) -> NodeId {
 }
 
 #[component]
-fn build_load_controls() -> NodeId {
+fn load_controls() -> NodeId {
     let (progress_value, set_progress_value) = create_signal(0.4f32);
     let readout_value = progress_value.clone();
 
@@ -364,7 +359,7 @@ fn build_load_controls() -> NodeId {
 }
 
 #[component]
-fn build_name_controls() -> NodeId {
+fn name_controls() -> NodeId {
     let (greeting_text, set_greeting_text) = create_signal(greeting_label(""));
 
     view! {
@@ -394,7 +389,7 @@ fn percent_label(value: f32) -> String {
 }
 
 #[component]
-fn build_choice_controls() -> NodeId {
+fn choice_controls() -> NodeId {
     let modes = ["Automatic", "Manual", "Scheduled"];
     let (mode_status_text, set_mode_status_text) = create_signal("Automatic updates".to_string());
     let colors = ["Amber", "Blue", "Green", "Purple"];
@@ -438,7 +433,7 @@ fn build_choice_controls() -> NodeId {
 }
 
 #[component]
-fn build_menu_controls() -> NodeId {
+fn menu_controls() -> NodeId {
     let fruits: Vec<String> = ["Apple", "Banana", "Cherry", "Date", "Grape", "Mango"]
         .iter()
         .map(|label| (*label).to_owned())

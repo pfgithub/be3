@@ -3,7 +3,7 @@ use beui_macros::{component, view};
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
-    component_detail, create_signal, set_component_state, untrack, with_document, Callback,
+    component_detail, component_state, create_signal, set_component_state, untrack, Callback,
     Children, ColumnBuilder, NodeRef, Prop, ReadSignal, VisibilityBuilder,
 };
 use crate::unstyled;
@@ -100,8 +100,7 @@ pub fn disclosure_focused(document: &Document, disclosure: NodeId) -> ReadSignal
 }
 
 pub fn focus_disclosure(disclosure: NodeId) {
-    with_document(|document| {
-        let button = document.component_state::<State>(disclosure).button.get();
-        unstyled::focus_button(button);
-    });
+    unstyled::focus_button(component_state::<State, _>(disclosure, |state| {
+        state.button.get()
+    }));
 }
