@@ -5,6 +5,7 @@ use crate::document::Document;
 use crate::node::NodeId;
 use beui_macros::{component, view};
 
+use crate::reactive::Memo;
 use crate::reactive::{
     Callback, CenteredRowBuilder, FillBuilder, OutlineBuilder, PaddingBuilder, Prop, SizedBuilder,
     SpacerBuilder, TextBuilder, VisibilityBuilder,
@@ -17,6 +18,11 @@ use crate::unstyled::ChoiceBuilder;
 use crate::unstyled::ChoiceOptionHandle;
 
 pub(super) use crate::unstyled::ChoiceKind as Kind;
+
+const MARK_SPACING: f32 = 10.0;
+const MARK_BOX: f32 = 18.0;
+const MARK_DOT: f32 = 8.0;
+const MARK_RADIUS: u8 = 9;
 
 pub(super) fn choice(
     labels: Vec<String>,
@@ -61,41 +67,50 @@ fn choice_option(kind: Kind, handle: ChoiceOptionHandle) -> NodeId {
     } else {
         TextAlign::Start
     };
-    let label = view! {
-        <text string={label} font_size={FONT_BODY} color={label_color} align={align} />
-    };
-
-    let content = if kind == Kind::Radio {
-        let mark_visible = selected.clone();
-        view! {
-            <centered_row spacing={10.0}>
-                <sized width={18.0} height={18.0}>
-                    <outline color={BORDER} width={2.0} radius={9} offset={0.0} visible={true}>
-                        <centered_row spacing={0.0}>
-                            @percent(100.0) <spacer />
-                            <visibility visible={mark_visible}>
-                                <sized width={8.0} height={8.0}>
-                                    <fill color={ACCENT} radius={9}></fill>
-                                </sized>
-                            </visibility>
-                            @percent(100.0) <spacer />
-                        </centered_row>
-                    </outline>
-                </sized>
-                @percent(100.0) {label}
-            </centered_row>
-        }
-    } else {
-        label
-    };
-
+    let radio = kind == Kind::Radio;
+    let checked = selected.clone();
     let fill_color = Prop::Dynamic(Box::new(move || background(selected.get(), hovered.get())));
     view! {
         <outline color={ACCENT} width={2.0} radius={RADIUS} offset={1.0} visible={focused}>
             <fill color={fill_color} radius={RADIUS}>
-                <padding horizontal={14.0} vertical={6.0}>{content}</padding>
+                <padding horizontal={14.0} vertical={6.0}>
+                    {{
+                        let label = view! {
+                            <text string={label} font_size={FONT_BODY} color={label_color} align={align} />
+                        };
+                        if !radio {
+                            label
+                        } else {
+                            view! {
+                                <centered_row spacing={MARK_SPACING}>
+                                    <radio_mark checked={checked} />
+                                    @percent(100.0) {label}
+                                </centered_row>
+                            }
+                        }
+                    }}
+                </padding>
             </fill>
         </outline>
+    }
+}
+
+#[component]
+fn radio_mark(checked: Memo<bool>) -> NodeId {
+    view! {
+        <sized width={MARK_BOX} height={MARK_BOX}>
+            <outline color={BORDER} width={2.0} radius={MARK_RADIUS} offset={0.0} visible={true}>
+                <centered_row spacing={0.0}>
+                    @percent(100.0) <spacer />
+                    <visibility visible={checked}>
+                        <sized width={MARK_DOT} height={MARK_DOT}>
+                            <fill color={ACCENT} radius={MARK_RADIUS} />
+                        </sized>
+                    </visibility>
+                    @percent(100.0) <spacer />
+                </centered_row>
+            </outline>
+        </sized>
     }
 }
 

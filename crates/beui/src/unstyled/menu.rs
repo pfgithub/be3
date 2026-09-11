@@ -60,7 +60,7 @@ struct Row {
 
 struct State {
     rows: Vec<Row>,
-    root: NodeId,
+    root: NodeRef,
     set_active: WriteSignal<Option<usize>>,
     on_select: Callback<Vec<usize>>,
 }
@@ -80,109 +80,125 @@ pub(crate) fn menu_list(
         let active = active.clone();
         Prop::Dynamic(Box::new(move || active.get().is_none()))
     };
-    let root = view! {
-        <focusable
-            tab_stop={root_tab_stop}
-            on_key={move |press: KeyPress| root_key(menu, press)}
-        />
-    };
-
-    let mut lines = Vec::new();
-    let mut rows = Vec::new();
-    for (index, item) in items.iter().enumerate() {
-        let disabled = item.disabled;
-        let tab_stop = {
-            let active = active.clone();
-            Prop::Dynamic(Box::new(move || active.get() == Some(index)))
-        };
-        let content = {
-            let row = row.clone();
-            let item = item.clone();
-            Box::new(move |button: ButtonHandle| {
-                let hovered = button.hovered.clone();
-                create_effect(move || {
-                    if hovered.get() {
-                        hover_menu_list_row(menu, index);
-                    }
-                });
-                row(MenuRowHandle {
-                    item,
-                    hovered: button.hovered,
-                    focused: button.focused,
-                })
-            })
-        };
-        let parent = parent.clone();
-        let button = view! {
-            <unstyled::button
-                tab_stop={tab_stop}
-                content={content}
-                on_click={move || {
-                    if disabled {
-                        return;
-                    }
-                    if !open_submenu(menu, index) {
-                        select(menu, vec![index]);
-                    }
-                }}
-                on_key={move |press: KeyPress| key(menu, index, parent.clone(), press)}
-            />
-        };
-        lines.push(intrinsic(button));
-
-        let (submenu, submenu_content) = if item.children.is_empty() {
-            (None, None)
-        } else {
-            let submenu = NodeRef::new();
-            let content = NodeRef::new();
-            let overlay = view! {
-                <overlay
-                    node_ref={&submenu}
-                    anchor={OverlayAnchor::Node(button)}
-                    placement={Placement::RightStart}
-                >
-                    {panel(view! {
-                        <menu_list
-                            node_ref={&content}
-                            items={item.children.clone()}
-                            row={row.clone()}
-                            panel={panel.clone()}
-                            parent={(submenu.clone(), button)}
-                        />
-                    })}
-                </overlay>
-            };
-            lines.push(intrinsic(overlay));
-            let content = content.get();
-            component_state::<State, _>(content, |state| state.on_select.clone()).set(
-                move |mut path: Vec<usize>| {
-                    path.insert(0, index);
-                    select(menu, path);
-                },
-            );
-            (Some(overlay), Some(content))
-        };
-
-        rows.push(Row {
-            button,
-            disabled,
-            submenu,
-            submenu_content,
-        });
-    }
+    let rows: Vec<Row> = items
+        .iter()
+        .enumerate()
+        .map(|(index, item)| build_row(menu, index, item, &active, &row, &panel, &parent))
+        .collect();
+    let lines: Vec<_> = rows
+        .iter()
+        .flat_map(|row| [Some(row.button), row.submenu])
+        .flatten()
+        .map(intrinsic)
+        .collect();
+    let root = NodeRef::new();
 
     set_component_state(State {
         rows,
-        root,
+        root: root.clone(),
         set_active,
         on_select: Callback::empty(),
     });
 
     view! {
         <column spacing={0.0}>
-            {root}
+            <focusable
+                node_ref={&root}
+                tab_stop={root_tab_stop}
+                on_key={move |press: KeyPress| root_key(menu, press)}
+            />
             <column spacing={2.0} children={lines} />
         </column>
+    }
+}
+
+fn build_row(
+    menu: NodeId,
+    index: usize,
+    item: &MenuItem,
+    active: &ReadSignal<Option<usize>>,
+    row: &MenuRow,
+    panel: &MenuPanel,
+    parent: &Option<(NodeRef, NodeId)>,
+) -> Row {
+    let disabled = item.disabled;
+    let tab_stop = {
+        let active = active.clone();
+        Prop::Dynamic(Box::new(move || active.get() == Some(index)))
+    };
+    let content = {
+        let row = row.clone();
+        let item = item.clone();
+        Box::new(move |button: ButtonHandle| {
+            let hovered = button.hovered.clone();
+            create_effect(move || {
+                if hovered.get() {
+                    hover_menu_list_row(menu, index);
+                }
+            });
+            row(MenuRowHandle {
+                item,
+                hovered: button.hovered,
+                focused: button.focused,
+            })
+        })
+    };
+    let parent = parent.clone();
+    let button = view! {
+        <unstyled::button
+            tab_stop={tab_stop}
+            content={content}
+            on_click={move || {
+                if disabled {
+                    return;
+                }
+                if !open_submenu(menu, index) {
+                    select(menu, vec![index]);
+                }
+            }}
+            on_key={move |press: KeyPress| key(menu, index, parent.clone(), press)}
+        />
+    };
+
+    if item.children.is_empty() {
+        return Row {
+            button,
+            disabled,
+            submenu: None,
+            submenu_content: None,
+        };
+    }
+
+    let submenu = NodeRef::new();
+    let content = NodeRef::new();
+    let (row, panel) = (row.clone(), panel.clone());
+    let overlay = view! {
+        <overlay
+            node_ref={&submenu}
+            anchor={OverlayAnchor::Node(button)}
+            placement={Placement::RightStart}
+        >
+            {panel(view! {
+                <menu_list
+                    node_ref={&content}
+                    items={item.children.clone()}
+                    row={row}
+                    panel={panel.clone()}
+                    parent={(submenu.clone(), button)}
+                />
+            })}
+        </overlay>
+    };
+    let content = content.get();
+    menu_list_on_select(content).set(move |mut path: Vec<usize>| {
+        path.insert(0, index);
+        select(menu, path);
+    });
+    Row {
+        button,
+        disabled,
+        submenu: Some(overlay),
+        submenu_content: Some(content),
     }
 }
 
@@ -226,13 +242,13 @@ pub(crate) fn focus_menu_list(menu: NodeId) {
 
 pub(crate) fn focus_menu_list_root(menu: NodeId) {
     let (root, set_active) =
-        component_state::<State, _>(menu, |state| (state.root, state.set_active.clone()));
+        component_state::<State, _>(menu, |state| (state.root.get(), state.set_active.clone()));
     set_active.set(None);
     focus(root);
 }
 
 pub fn menu_list_root_focusable(document: &Document, menu: NodeId) -> NodeId {
-    document.component_state::<State>(menu).root
+    document.component_state::<State>(menu).root.get()
 }
 
 fn rows_len(menu: NodeId) -> usize {
