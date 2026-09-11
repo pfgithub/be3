@@ -125,14 +125,32 @@ impl Document {
             self.arena.get_mut_as::<OutlineNode>(outline).visible = visible;
         }
     }
+
+    pub(crate) fn set_outline_width(&mut self, outline: NodeId, width: f32) {
+        if self.arena.get_as::<OutlineNode>(outline).width != width {
+            self.arena.get_mut_as::<OutlineNode>(outline).width = width;
+        }
+    }
+
+    pub(crate) fn set_outline_radius(&mut self, outline: NodeId, corner_radius: u8) {
+        if self.arena.get_as::<OutlineNode>(outline).corner_radius != corner_radius {
+            self.arena.get_mut_as::<OutlineNode>(outline).corner_radius = corner_radius;
+        }
+    }
+
+    pub(crate) fn set_outline_offset(&mut self, outline: NodeId, offset: f32) {
+        if self.arena.get_as::<OutlineNode>(outline).offset != offset {
+            self.arena.get_mut_as::<OutlineNode>(outline).offset = offset;
+        }
+    }
 }
 
 #[component(base)]
 pub fn outline(
     color: Prop<Color32>,
-    width: f32,
-    radius: u8,
-    offset: f32,
+    width: Prop<f32>,
+    radius: Prop<u8>,
+    offset: Prop<f32>,
     visible: Prop<bool>,
     children: Children,
 ) -> NodeId {
@@ -140,11 +158,18 @@ pub fn outline(
         .into_first()
         .expect("outline requires a child, e.g. <outline>{content}</outline>");
     let outline = with_document(|document| {
-        let outline = document.create_outline(Color32::TRANSPARENT, width, radius, offset);
+        let outline = document.create_outline(Color32::TRANSPARENT, 0.0, 0, 0.0);
         document.set_outline_child(outline, child);
         outline
     });
     color.apply(move |color| with_document(|document| document.set_outline_color(outline, color)));
+    width.apply(move |width| with_document(|document| document.set_outline_width(outline, width)));
+    radius.apply(move |radius| {
+        with_document(|document| document.set_outline_radius(outline, radius))
+    });
+    offset.apply(move |offset| {
+        with_document(|document| document.set_outline_offset(outline, offset))
+    });
     visible.apply(move |visible| {
         with_document(|document| document.set_outline_visible(outline, visible))
     });

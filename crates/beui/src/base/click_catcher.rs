@@ -190,6 +190,12 @@ impl Document {
             .child = Some(child);
     }
 
+    pub(crate) fn set_click_catcher_cursor(&mut self, id: NodeId, cursor: CursorIcon) {
+        if self.arena.get_as::<ClickCatcherNode>(id).cursor != cursor {
+            self.arena.get_mut_as::<ClickCatcherNode>(id).cursor = cursor;
+        }
+    }
+
     pub(crate) fn set_click_catcher_key_active(&mut self, id: NodeId, key_active: bool) {
         if !self.contains(id) {
             return;
@@ -208,7 +214,7 @@ impl Document {
 
 #[component(base)]
 pub fn click_catcher(
-    cursor: CursorIcon,
+    #[prop(default = CursorIcon::Default)] cursor: Prop<CursorIcon>,
     key_active: Prop<bool>,
     on_click: ClickCallback,
     on_hover_change: Callback<bool>,
@@ -219,7 +225,7 @@ pub fn click_catcher(
     children: Children,
 ) -> NodeId {
     let click_catcher = with_document(|document| {
-        let click_catcher = document.create_click_catcher(cursor);
+        let click_catcher = document.create_click_catcher(CursorIcon::Default);
         let node = document.arena.get_mut_as::<ClickCatcherNode>(click_catcher);
         node.on_click = on_click;
         node.on_hover_change = on_hover_change;
@@ -231,6 +237,9 @@ pub fn click_catcher(
             document.set_click_catcher_child(click_catcher, child);
         }
         click_catcher
+    });
+    cursor.apply(move |cursor| {
+        with_document(|document| document.set_click_catcher_cursor(click_catcher, cursor));
     });
     key_active.apply(move |active| {
         with_document(|document| document.set_click_catcher_key_active(click_catcher, active));

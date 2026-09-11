@@ -107,18 +107,25 @@ impl Document {
             self.arena.get_mut_as::<FillNode>(fill).color = color;
         }
     }
+
+    pub(crate) fn set_fill_radius(&mut self, fill: NodeId, corner_radius: u8) {
+        if self.arena.get_as::<FillNode>(fill).corner_radius != corner_radius {
+            self.arena.get_mut_as::<FillNode>(fill).corner_radius = corner_radius;
+        }
+    }
 }
 
 #[component(base)]
-pub fn fill(color: Prop<Color32>, radius: u8, children: Children) -> NodeId {
+pub fn fill(color: Prop<Color32>, radius: Prop<u8>, children: Children) -> NodeId {
     let child = children.into_first();
     let fill = with_document(|document| {
-        let fill = document.create_fill(Color32::TRANSPARENT, radius);
+        let fill = document.create_fill(Color32::TRANSPARENT, 0);
         if let Some(child) = child {
             document.set_fill_child(fill, child);
         }
         fill
     });
     color.apply(move |color| with_document(|document| document.set_fill_color(fill, color)));
+    radius.apply(move |radius| with_document(|document| document.set_fill_radius(fill, radius)));
     fill
 }

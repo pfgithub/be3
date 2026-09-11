@@ -250,6 +250,12 @@ impl Document {
         }
     }
 
+    pub(crate) fn set_list_spacing(&mut self, list: NodeId, spacing: f32) {
+        if self.arena.get_as::<ListNode>(list).spacing != spacing {
+            self.arena.get_mut_as::<ListNode>(list).spacing = spacing;
+        }
+    }
+
     pub(crate) fn set_list_align(&mut self, list: NodeId, align: Align) {
         if self.arena.get_as::<ListNode>(list).align != align {
             self.arena.get_mut_as::<ListNode>(list).align = align;

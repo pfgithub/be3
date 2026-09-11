@@ -167,14 +167,14 @@ impl Element for OverlayNode {
 #[component(base)]
 pub(crate) fn overlay(
     anchor: Prop<OverlayAnchor>,
-    placement: Placement,
+    #[prop(default = Placement::BelowStart)] placement: Prop<Placement>,
     open: Prop<bool>,
     on_dismiss: ClickCallback,
     children: Children,
 ) -> NodeId {
     let content = children.into_first();
     let overlay = with_document(|document| {
-        let overlay = document.create_overlay(anchor.peek(), placement);
+        let overlay = document.create_overlay(anchor.peek(), Placement::BelowStart);
         if let Some(content) = content {
             document.set_overlay_content(overlay, content);
         }
@@ -185,6 +185,9 @@ pub(crate) fn overlay(
     });
     anchor.apply(move |anchor| {
         with_document(|document| document.set_overlay_anchor(overlay, anchor));
+    });
+    placement.apply(move |placement| {
+        with_document(|document| document.set_overlay_placement(overlay, placement));
     });
     open.apply(move |open| {
         with_document(|document| match open {
@@ -223,6 +226,12 @@ impl Document {
 
     pub(crate) fn set_overlay_anchor(&mut self, overlay: NodeId, anchor: OverlayAnchor) {
         self.arena.get_mut_as::<OverlayNode>(overlay).anchor = anchor;
+    }
+
+    pub(crate) fn set_overlay_placement(&mut self, overlay: NodeId, placement: Placement) {
+        if self.arena.get_as::<OverlayNode>(overlay).placement != placement {
+            self.arena.get_mut_as::<OverlayNode>(overlay).placement = placement;
+        }
     }
 
     pub(crate) fn set_overlay_on_dismiss(

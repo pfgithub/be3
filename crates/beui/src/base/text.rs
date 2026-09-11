@@ -270,19 +270,16 @@ impl Document {
         &self.arena.get_as::<TextNode>(id).content
     }
 
-    pub(crate) fn set_text_align(
-        &mut self,
-        text: NodeId,
-        horizontal: TextAlign,
-        vertical: TextAlign,
-    ) {
-        let node = self.arena.get_as::<TextNode>(text);
-        if node.horizontal == horizontal && node.vertical == vertical {
-            return;
+    pub(crate) fn set_text_horizontal_align(&mut self, text: NodeId, horizontal: TextAlign) {
+        if self.arena.get_as::<TextNode>(text).horizontal != horizontal {
+            self.arena.get_mut_as::<TextNode>(text).horizontal = horizontal;
         }
-        let node = self.arena.get_mut_as::<TextNode>(text);
-        node.horizontal = horizontal;
-        node.vertical = vertical;
+    }
+
+    pub(crate) fn set_text_vertical_align(&mut self, text: NodeId, vertical: TextAlign) {
+        if self.arena.get_as::<TextNode>(text).vertical != vertical {
+            self.arena.get_mut_as::<TextNode>(text).vertical = vertical;
+        }
     }
 
     pub(crate) fn set_text_wrap(&mut self, text: NodeId, wrap: bool) {
@@ -366,34 +363,33 @@ pub fn text(
     #[prop(default = Color32::WHITE)] caret_color: Prop<Color32>,
     caret: Prop<Option<usize>>,
     selection: Prop<Vec<Range<usize>>>,
-    align: Option<TextAlign>,
-    vertical_align: Option<TextAlign>,
-    wrap: Option<bool>,
-    monospace: Option<bool>,
-    icon: Option<bool>,
-    clip: Option<bool>,
+    align: Option<Prop<TextAlign>>,
+    vertical_align: Option<Prop<TextAlign>>,
+    wrap: Prop<bool>,
+    monospace: Prop<bool>,
+    icon: Prop<bool>,
+    clip: Prop<bool>,
 ) -> NodeId {
+    let vertical_default = match align {
+        Some(_) => TextAlign::Center,
+        None => TextAlign::Start,
+    };
+    let align = align.unwrap_or(Prop::Static(TextAlign::Start));
+    let vertical_align = vertical_align.unwrap_or(Prop::Static(vertical_default));
     let node = with_document(|document| {
-        let node = document.create_text(String::new(), DEFAULT_FONT_SIZE, Color32::WHITE);
-        let vertical = vertical_align.unwrap_or(match align {
-            Some(_) => TextAlign::Center,
-            None => TextAlign::Start,
-        });
-        document.set_text_align(node, align.unwrap_or(TextAlign::Start), vertical);
-        if wrap.unwrap_or(false) {
-            document.set_text_wrap(node, true);
-        }
-        if monospace.unwrap_or(false) {
-            document.set_text_monospace(node, true);
-        }
-        if icon.unwrap_or(false) {
-            document.set_text_icon(node, true);
-        }
-        if clip.unwrap_or(false) {
-            document.set_text_clip(node, true);
-        }
-        node
+        document.create_text(String::new(), DEFAULT_FONT_SIZE, Color32::WHITE)
     });
+    align.apply(move |value| {
+        with_document(|document| document.set_text_horizontal_align(node, value));
+    });
+    vertical_align.apply(move |value| {
+        with_document(|document| document.set_text_vertical_align(node, value));
+    });
+    wrap.apply(move |value| with_document(|document| document.set_text_wrap(node, value)));
+    monospace
+        .apply(move |value| with_document(|document| document.set_text_monospace(node, value)));
+    icon.apply(move |value| with_document(|document| document.set_text_icon(node, value)));
+    clip.apply(move |value| with_document(|document| document.set_text_clip(node, value)));
     string.apply(move |value| with_document(|document| document.set_text(node, value)));
     font_size
         .apply(move |value| with_document(|document| document.set_text_font_size(node, value)));

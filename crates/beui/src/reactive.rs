@@ -582,36 +582,33 @@ pub use crate::base::visibility::VisibilityBuilder;
 #[component(base)]
 pub fn list(
     #[prop(default = Direction::Vertical)] direction: Prop<Direction>,
-    align: Option<Align>,
-    spacing: f32,
+    #[prop(default = Align::Stretch)] align: Prop<Align>,
+    spacing: Prop<f32>,
     children: Children,
 ) -> NodeId {
-    let list = with_document(|document| {
-        let list = document.create_list(direction.peek(), spacing);
-        if let Some(align) = align {
-            document.set_list_align(list, align);
-        }
-        list
-    });
+    let list = with_document(|document| document.create_list(direction.peek(), 0.0));
     direction.apply(move |direction| {
         with_document(|document| document.set_list_direction(list, direction));
     });
+    align.apply(move |align| with_document(|document| document.set_list_align(list, align)));
+    spacing
+        .apply(move |spacing| with_document(|document| document.set_list_spacing(list, spacing)));
     children.mount(list);
     list
 }
 
 #[component(base)]
-pub fn row(spacing: f32, children: Children) -> NodeId {
+pub fn row(spacing: Prop<f32>, children: Children) -> NodeId {
     view! { <list direction={Direction::Horizontal} spacing={spacing} children={children} /> }
 }
 
 #[component(base)]
-pub fn column(spacing: f32, children: Children) -> NodeId {
+pub fn column(spacing: Prop<f32>, children: Children) -> NodeId {
     view! { <list direction={Direction::Vertical} spacing={spacing} children={children} /> }
 }
 
 #[component(base)]
-pub fn centered_row(spacing: f32, children: Children) -> NodeId {
+pub fn centered_row(spacing: Prop<f32>, children: Children) -> NodeId {
     view! {
         <list
             direction={Direction::Horizontal}
