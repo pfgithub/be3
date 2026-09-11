@@ -5,7 +5,7 @@ use crate::node::NodeId;
 use crate::reactive::{component_detail, create_memo, create_signal, Children, ListBuilder, Prop};
 
 #[component]
-pub fn stack(spacing: f32, narrow: Prop<bool>, children: Children) -> NodeId {
+pub fn stack(spacing: Prop<f32>, narrow: Prop<bool>, children: Children) -> NodeId {
     let (stacked, set_stacked) = create_signal(false);
     narrow.apply(move |value| set_stacked.set(value));
 

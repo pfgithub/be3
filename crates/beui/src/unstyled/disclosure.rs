@@ -22,7 +22,7 @@ struct State {
 
 #[component]
 pub fn disclosure(
-    spacing: f32,
+    spacing: Prop<f32>,
     header: Render<DisclosureHandle>,
     children: Children,
     open: Prop<bool>,
