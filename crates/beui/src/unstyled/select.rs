@@ -8,12 +8,12 @@ use crate::input::{Key, KeyPress};
 use crate::node::NodeId;
 use crate::reactive::{
     component_state, create_effect, create_selector, create_signal, current_component, intrinsic,
-    set_component_state, Callback, ColumnBuilder, Memo, NodeRef, Prop, ReadSignal, ScrollBuilder,
-    Selector, VisibilityBuilder, WriteSignal,
+    set_component_state, Callback, ColumnBuilder, Memo, NodeRef, Prop, ReadSignal, Render,
+    RenderFn, ScrollBuilder, Selector, VisibilityBuilder, WriteSignal,
 };
 use crate::unstyled;
-use crate::unstyled::button::{ButtonContent, ButtonHandle};
-use crate::unstyled::text_input::{TextInputContent, TextInputHandle};
+use crate::unstyled::button::ButtonHandle;
+use crate::unstyled::text_input::TextInputHandle;
 use beui_macros::{component, view};
 use std::rc::Rc;
 
@@ -26,8 +26,6 @@ pub struct SelectTriggerHandle {
     pub focused: ReadSignal<bool>,
 }
 
-pub type SelectTrigger = Box<dyn FnOnce(SelectTriggerHandle) -> NodeId>;
-
 pub struct SelectOptionHandle {
     pub index: usize,
     pub label: String,
@@ -35,10 +33,6 @@ pub struct SelectOptionHandle {
     pub hovered: ReadSignal<bool>,
     pub focused: ReadSignal<bool>,
 }
-
-pub type SelectOption = Box<dyn Fn(SelectOptionHandle) -> NodeId>;
-
-pub type SelectPopup = Box<dyn FnOnce(NodeId) -> NodeId>;
 
 struct Row {
     button: NodeRef,
@@ -75,17 +69,16 @@ pub fn select(
     search_selection_color: Prop<Color32>,
     search_caret_color: Prop<Color32>,
     search_padding_horizontal: Prop<f32>,
-    search_content: Option<TextInputContent>,
-    trigger: Option<SelectTrigger>,
-    option: Option<SelectOption>,
-    popup: Option<SelectPopup>,
+    search_content: Option<Render<TextInputHandle>>,
+    trigger: Option<Render<SelectTriggerHandle>>,
+    option: Option<RenderFn<SelectOptionHandle>>,
+    popup: Option<Render<NodeId>>,
 ) -> NodeId {
     let select = current_component();
     let selected_prop = selected;
     let initial = selected_prop.peek().filter(|index| *index < options.len());
-    let option =
-        Rc::new(option.unwrap_or_else(|| Box::new(|_| view! { <column spacing={0.0} /> })));
-    let popup = popup.unwrap_or_else(|| Box::new(|content| content));
+    let option = option.unwrap_or_else(|| RenderFn::new(|_| view! { <column spacing={0.0} /> }));
+    let popup = popup.unwrap_or_else(|| Render::new(|content| content));
 
     let (highlighted, set_highlighted) = create_signal(initial);
     let highlight = create_selector({
@@ -94,17 +87,18 @@ pub fn select(
     });
     let (selected, set_selected) = create_signal(initial);
 
-    let trigger_view = trigger.unwrap_or_else(|| Box::new(|_| view! { <column spacing={0.0} /> }));
-    let trigger_content: ButtonContent = {
+    let trigger_view =
+        trigger.unwrap_or_else(|| Render::new(|_| view! { <column spacing={0.0} /> }));
+    let trigger_content = {
         let selected = selected.clone();
-        Box::new(move |handle: ButtonHandle| {
-            trigger_view(SelectTriggerHandle {
+        move |handle: ButtonHandle| {
+            trigger_view.call(SelectTriggerHandle {
                 selected,
                 hovered: handle.hovered,
                 active: handle.active,
                 focused: handle.focused,
             })
-        })
+        }
     };
 
     let rows: Vec<Row> = options
@@ -141,7 +135,7 @@ pub fn select(
                     move || unstyled::focus_button(trigger.get())
                 }}
             >
-                {popup(view! {
+                {popup.call(view! {
                     <column spacing={6.0}>
                         <unstyled::text_input
                             node_ref={&search}
@@ -153,7 +147,7 @@ pub fn select(
                             selection_color={search_selection_color}
                             caret_color={search_caret_color}
                             padding_horizontal={search_padding_horizontal}
-                            content={search_content.unwrap_or_else(|| Box::new(|handle: TextInputHandle| handle.field))}
+                            content={search_content.unwrap_or_else(|| Render::new(|handle: TextInputHandle| handle.field))}
                             on_change={move |text: String| filter(&handle(select), &text)}
                             on_submit={move |_text: String| {
                                 let state = handle(select);
@@ -193,41 +187,21 @@ fn row(
     select: NodeId,
     index: usize,
     label: &str,
-    option: &Rc<SelectOption>,
+    option: &RenderFn<SelectOptionHandle>,
     highlight: &Selector<Option<usize>>,
 ) -> Row {
-    let content = {
-        let option = option.clone();
-        let label = label.to_owned();
-        let highlight = highlight.clone();
-        Box::new(move |button: ButtonHandle| {
-            let is_highlighted = highlight.memo(Some(index));
-            let hovered = button.hovered.clone();
-            create_effect(move || {
-                if hovered.get() {
-                    handle(select).set_highlighted.set(Some(index));
-                }
-            });
-            option(SelectOptionHandle {
-                index,
-                label,
-                highlighted: is_highlighted,
-                hovered: button.hovered,
-                focused: button.focused,
-            })
-        })
-    };
     let (visible, set_visible) = create_signal(true);
     let button = NodeRef::new();
     let visibility = view! {
-        <visibility visible={visible.clone()}>
-            <unstyled::button
-                node_ref={&button}
-                tab_stop={false}
-                content={content}
-                on_click={move || confirm(&handle(select), index)}
-            />
-        </visibility>
+        <select_row
+            select={select}
+            index={index}
+            label={label.to_owned()}
+            option={option.clone()}
+            highlight={highlight.clone()}
+            visible={visible.clone()}
+            button_ref={button.clone()}
+        />
     };
 
     Row {
@@ -236,6 +210,43 @@ fn row(
         label: label.to_owned(),
         visible,
         set_visible,
+    }
+}
+
+#[component]
+fn select_row(
+    select: NodeId,
+    index: usize,
+    label: String,
+    option: RenderFn<SelectOptionHandle>,
+    highlight: Selector<Option<usize>>,
+    visible: ReadSignal<bool>,
+    button_ref: Option<NodeRef>,
+) -> NodeId {
+    let button_ref = button_ref.unwrap_or_default();
+    view! {
+        <visibility visible={visible}>
+            <unstyled::button
+                node_ref={&button_ref}
+                tab_stop={false}
+                content={move |button: ButtonHandle| {
+                    let hovered = button.hovered.clone();
+                    create_effect(move || {
+                        if hovered.get() {
+                            handle(select).set_highlighted.set(Some(index));
+                        }
+                    });
+                    option.call(SelectOptionHandle {
+                        index,
+                        label,
+                        highlighted: highlight.memo(Some(index)),
+                        hovered: button.hovered,
+                        focused: button.focused,
+                    })
+                }}
+                on_click={move || confirm(&handle(select), index)}
+            />
+        </visibility>
     }
 }
 

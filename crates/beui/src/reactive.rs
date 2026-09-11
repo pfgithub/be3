@@ -133,13 +133,11 @@ pub fn set_component_name(name: &'static str) {
 pub fn component(name: &'static str, f: impl FnOnce() -> NodeId) -> NodeId {
     let shadow = with_document(Document::reserve_shadow);
     let scope = Scope::new();
-    let previous = CURRENT_COMPONENT.with(|cell| cell.replace(Some(shadow)));
     let outer_name = COMPONENT_NAME.with(|cell| cell.take());
-    let root = scope.run(f);
+    let root = in_component(Some(shadow), || scope.run(f));
     let name = COMPONENT_NAME
         .with(|cell| cell.replace(outer_name))
         .unwrap_or(name);
-    CURRENT_COMPONENT.with(|cell| cell.set(previous));
     with_document(|document| {
         document.finish_shadow(shadow, name, root, Vec::new());
         document.register_node_scope(shadow, scope);
@@ -300,6 +298,130 @@ impl ClickCallback {
         if slot.is_none() {
             *slot = Some(handler);
         }
+    }
+}
+
+struct ComponentGuard(Option<NodeId>);
+
+impl Drop for ComponentGuard {
+    fn drop(&mut self) {
+        CURRENT_COMPONENT.with(|cell| cell.set(self.0));
+    }
+}
+
+fn in_component<R>(owner: Option<NodeId>, f: impl FnOnce() -> R) -> R {
+    let _guard = ComponentGuard(CURRENT_COMPONENT.with(|cell| cell.replace(owner)));
+    f()
+}
+
+pub struct Render<H = ()> {
+    owner: Option<NodeId>,
+    render: Box<dyn FnOnce(H) -> NodeId>,
+}
+
+impl<H> Render<H> {
+    pub fn new(render: impl FnOnce(H) -> NodeId + 'static) -> Self {
+        Self {
+            owner: CURRENT_COMPONENT.with(Cell::get),
+            render: Box::new(render),
+        }
+    }
+
+    pub fn call(self, handle: H) -> NodeId {
+        in_component(self.owner, || (self.render)(handle))
+    }
+}
+
+pub struct RenderFn<H> {
+    owner: Option<NodeId>,
+    render: Rc<dyn Fn(H) -> NodeId>,
+}
+
+impl<H> RenderFn<H> {
+    pub fn new(render: impl Fn(H) -> NodeId + 'static) -> Self {
+        Self {
+            owner: CURRENT_COMPONENT.with(Cell::get),
+            render: Rc::new(render),
+        }
+    }
+
+    pub fn call(&self, handle: H) -> NodeId {
+        in_component(self.owner, || (self.render)(handle))
+    }
+}
+
+impl<H> Clone for RenderFn<H> {
+    fn clone(&self) -> Self {
+        Self {
+            owner: self.owner,
+            render: self.render.clone(),
+        }
+    }
+}
+
+pub struct Func<V, R>(Rc<dyn Fn(V) -> R>);
+
+impl<V, R> Func<V, R> {
+    pub fn new(function: impl Fn(V) -> R + 'static) -> Self {
+        Self(Rc::new(function))
+    }
+
+    pub fn call(&self, value: V) -> R {
+        (self.0)(value)
+    }
+}
+
+impl<V, R> Clone for Func<V, R> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+
+pub trait IntoFunc<V, R> {
+    fn into_func(self) -> Func<V, R>;
+}
+
+impl<V, R, F: Fn(V) -> R + 'static> IntoFunc<V, R> for F {
+    fn into_func(self) -> Func<V, R> {
+        Func::new(self)
+    }
+}
+
+impl<V, R> IntoFunc<V, R> for Func<V, R> {
+    fn into_func(self) -> Func<V, R> {
+        self
+    }
+}
+
+pub trait IntoRender<H> {
+    fn into_render(self) -> Render<H>;
+}
+
+impl<H, F: FnOnce(H) -> NodeId + 'static> IntoRender<H> for F {
+    fn into_render(self) -> Render<H> {
+        Render::new(self)
+    }
+}
+
+impl<H> IntoRender<H> for Render<H> {
+    fn into_render(self) -> Render<H> {
+        self
+    }
+}
+
+pub trait IntoRenderFn<H> {
+    fn into_render_fn(self) -> RenderFn<H>;
+}
+
+impl<H, F: Fn(H) -> NodeId + 'static> IntoRenderFn<H> for F {
+    fn into_render_fn(self) -> RenderFn<H> {
+        RenderFn::new(self)
+    }
+}
+
+impl<H> IntoRenderFn<H> for RenderFn<H> {
+    fn into_render_fn(self) -> RenderFn<H> {
+        self
     }
 }
 
@@ -487,14 +609,14 @@ pub fn spacer() -> NodeId {
 }
 
 #[component]
-pub fn show(condition: Prop<bool>, then: Option<Box<dyn FnOnce() -> NodeId>>) -> NodeId {
+pub fn show(condition: Prop<bool>, then: Option<Render>) -> NodeId {
     let mut then = then;
     let visibility = with_document(|document| document.create_visibility(false));
     let built: Rc<Cell<Option<NodeId>>> = Rc::new(Cell::new(None));
     condition.apply(move |visible| {
         if visible && built.get().is_none() {
             let build = then.take().expect("show requires a `then` callback");
-            let child = in_new_scope(build);
+            let child = in_new_scope(|| build.call(()));
             built.set(Some(child));
             with_document(|document| document.set_visibility_child(visibility, child));
         }
@@ -503,50 +625,41 @@ pub fn show(condition: Prop<bool>, then: Option<Box<dyn FnOnce() -> NodeId>>) ->
     visibility
 }
 
-type ForEachView<T> = Box<dyn Fn(&T) -> (NodeId, Prop<ItemSize>)>;
-
 #[component]
 pub fn for_each<T, K>(
     spacing: f32,
     items: Prop<Vec<T>>,
-    key: Option<Box<dyn Fn(&T) -> K>>,
-    view: Option<ForEachView<T>>,
+    key: Option<Func<T, K>>,
+    view: Option<RenderFn<T>>,
+    #[prop(default = ItemSize::Intrinsic)] item_size: ItemSize,
 ) -> NodeId
 where
-    T: 'static,
+    T: Clone + 'static,
     K: Hash + Eq + 'static,
 {
     let key = key.expect("for_each requires a `key` callback");
     let view = view.expect("for_each requires a `view` callback");
     let parent = view! { <column spacing={spacing} /> };
-    let existing: Rc<RefCell<HashMap<K, (NodeId, ItemSize)>>> =
-        Rc::new(RefCell::new(HashMap::new()));
+    let existing: Rc<RefCell<HashMap<K, NodeId>>> = Rc::new(RefCell::new(HashMap::new()));
     items.apply(move |items| {
         let mut existing = existing.borrow_mut();
         let mut next = Vec::with_capacity(items.len());
         for item in &items {
-            let entry = existing.remove(&key(item)).unwrap_or_else(|| {
-                let size: Rc<Cell<Option<ItemSize>>> = Rc::new(Cell::new(None));
-                let sink = size.clone();
-                let node = in_new_scope(|| {
-                    let (node, item_size) = view(item);
-                    sink.set(Some(item_size.get()));
-                    node
-                });
-                (node, size.get().expect("view must set an item size"))
-            });
-            next.push((key(item), entry));
+            let node = existing
+                .remove(&key.call(item.clone()))
+                .unwrap_or_else(|| in_new_scope(|| view.call(item.clone())));
+            next.push((key.call(item.clone()), node));
         }
         with_document(|document| {
-            for (removed, _) in existing.values() {
+            for removed in existing.values() {
                 document.remove_child(parent, *removed);
                 document.remove_node(*removed);
             }
-            for (_, (child, _)) in &next {
+            for (_, child) in &next {
                 document.remove_child(parent, *child);
             }
-            for (_, (child, size)) in &next {
-                document.append_child(parent, *child, *size);
+            for (_, child) in &next {
+                document.append_child(parent, *child, item_size);
             }
         });
         existing.clear();

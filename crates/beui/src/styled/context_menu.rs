@@ -4,7 +4,8 @@ use crate::base::TextAlign;
 use crate::color::Color32;
 use crate::node::NodeId;
 use crate::reactive::{
-    Callback, FillBuilder, OutlineBuilder, PaddingBuilder, Prop, SizedBuilder, TextBuilder,
+    create_memo, Callback, FillBuilder, OutlineBuilder, PaddingBuilder, Prop, SizedBuilder,
+    TextBuilder,
 };
 use crate::styled::theme::{
     ACCENT_SOFT, BORDER, BORDER_WIDTH, FONT_BODY, RADIUS, SURFACE_RAISED, TEXT, TEXT_MUTED,
@@ -27,8 +28,8 @@ pub fn context_menu(
         <unstyled::context_menu
             region={region}
             items={items}
-            row={std::rc::Rc::new(|handle| view! { <menu_row handle={handle} /> })}
-            panel={std::rc::Rc::new(|content| view! { <menu_panel content={content} /> })}
+            row={|handle| view! { <menu_row handle={handle} /> }}
+            panel={|content| view! { <menu_panel content={content} /> }}
             on_select={move |path| on_select.call(path)}
         />
     }
@@ -36,18 +37,18 @@ pub fn context_menu(
 
 #[component]
 fn menu_row(handle: MenuRowHandle) -> NodeId {
-    let row = handle;
-    let color = if row.item.disabled { TEXT_MUTED } else { TEXT };
-    let hovered = row.hovered;
-    let focused = row.focused;
-    let fill_color = Prop::Dynamic(Box::new(move || {
-        row_background(focused.get(), hovered.get())
-    }));
+    let MenuRowHandle {
+        item,
+        hovered,
+        focused,
+    } = handle;
+    let color = if item.disabled { TEXT_MUTED } else { TEXT };
+    let fill_color = create_memo(move || row_background(focused.get(), hovered.get()));
     view! {
         <fill color={fill_color} radius={RADIUS}>
             <padding horizontal={PADDING_HORIZONTAL} vertical={PADDING_VERTICAL}>
                 <text
-                    string={row.item.label}
+                    string={item.label}
                     font_size={FONT_BODY}
                     color={color}
                     align={TextAlign::Start}

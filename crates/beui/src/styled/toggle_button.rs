@@ -5,14 +5,14 @@ use crate::color::Color32;
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
-    component_detail, create_signal, Callback, FillBuilder, OutlineBuilder, PaddingBuilder, Prop,
-    TextBuilder,
+    component_detail, create_memo, create_signal, Callback, FillBuilder, OutlineBuilder,
+    PaddingBuilder, Prop, TextBuilder,
 };
 use crate::styled::theme::{
     ACCENT, ACCENT_SOFT, BORDER, FONT_BODY, RADIUS, SURFACE, SURFACE_RAISED, TEXT,
 };
 use crate::unstyled;
-use crate::unstyled::ToggleBuilder;
+use crate::unstyled::{ToggleBuilder, ToggleHandle};
 
 #[component]
 pub fn toggle_button(
@@ -31,32 +31,35 @@ pub fn toggle_button(
         <toggle
             checked={pressed}
             on_change={move |pressed| on_change.call(pressed)}
-            content={Box::new(move |handle: unstyled::ToggleHandle| {
-            let fill_color = {
-                let checked = handle.checked.clone();
-                let hovered = handle.hovered.clone();
-                Prop::Dynamic(Box::new(move || fill_for(checked.get(), hovered.get())))
-            };
-            let border_color = Prop::Dynamic(Box::new(move || {
-                if handle.checked.get() {
-                    ACCENT
-                } else {
-                    BORDER
-                }
-            }));
+            content={move |handle| view! { <toggle_button_face handle={handle} label={label_text} /> }}
+        />
+    }
+}
 
-            view! {
-                <outline color={ACCENT} width={2.0} radius={RADIUS} offset={3.0} visible={handle.focused}>
-                    <outline color={border_color} width={1.0} radius={RADIUS} offset={0.0} visible={true}>
-                        <fill color={fill_color} radius={RADIUS}>
-                            <padding horizontal={14.0} vertical={8.0}>
-                                <text string={label_text} font_size={FONT_BODY} color={TEXT} />
-                            </padding>
-                        </fill>
-                    </outline>
-                </outline>
-            }
-        })} />
+#[component]
+fn toggle_button_face(handle: ToggleHandle, label: Prop<String>) -> NodeId {
+    let ToggleHandle {
+        checked,
+        hovered,
+        focused,
+        ..
+    } = handle;
+    let fill_color = create_memo({
+        let checked = checked.clone();
+        move || fill_for(checked.get(), hovered.get())
+    });
+    let border_color = create_memo(move || if checked.get() { ACCENT } else { BORDER });
+
+    view! {
+        <outline color={ACCENT} width={2.0} radius={RADIUS} offset={3.0} visible={focused}>
+            <outline color={border_color} width={1.0} radius={RADIUS} offset={0.0} visible={true}>
+                <fill color={fill_color} radius={RADIUS}>
+                    <padding horizontal={14.0} vertical={8.0}>
+                        <text string={label} font_size={FONT_BODY} color={TEXT} />
+                    </padding>
+                </fill>
+            </outline>
+        </outline>
     }
 }
 

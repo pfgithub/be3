@@ -6,23 +6,18 @@ use crate::node::NodeId;
 use beui_macros::{component, view};
 
 use crate::reactive::{
-    component_state, create_effect, create_selector, create_signal, current_component, intrinsic,
-    set_component_state, Callback, ColumnBuilder, FocusableBuilder, NodeRef, Prop, ReadSignal,
-    Selector, WriteSignal,
+    component_state, create_effect, create_memo, create_selector, create_signal, current_component,
+    intrinsic, set_component_state, Callback, ColumnBuilder, FocusableBuilder, NodeRef, ReadSignal,
+    RenderFn, Selector, WriteSignal,
 };
 use crate::unstyled;
 use crate::unstyled::button::ButtonHandle;
-use std::rc::Rc as StdRc;
 
 pub struct MenuRowHandle {
     pub item: MenuItem,
     pub hovered: ReadSignal<bool>,
     pub focused: ReadSignal<bool>,
 }
-
-pub type MenuRow = StdRc<dyn Fn(MenuRowHandle) -> NodeId>;
-
-pub type MenuPanel = StdRc<dyn Fn(NodeId) -> NodeId>;
 
 #[derive(Clone)]
 pub struct MenuItem {
@@ -68,8 +63,8 @@ struct State {
 #[component]
 pub(crate) fn menu_list(
     items: Vec<MenuItem>,
-    row: Option<MenuRow>,
-    panel: Option<MenuPanel>,
+    row: Option<RenderFn<MenuRowHandle>>,
+    panel: Option<RenderFn<NodeId>>,
     parent: Option<(NodeRef, NodeId)>,
 ) -> NodeId {
     let menu = current_component();
@@ -80,10 +75,10 @@ pub(crate) fn menu_list(
         let active = active.clone();
         move || active.get()
     });
-    let root_tab_stop = {
+    let root_tab_stop = create_memo({
         let active = active.clone();
-        Prop::Dynamic(Box::new(move || active.get().is_none()))
-    };
+        move || active.get().is_none()
+    });
     let rows: Vec<Row> = items
         .iter()
         .enumerate()
@@ -121,31 +116,28 @@ fn build_row(
     index: usize,
     item: &MenuItem,
     activation: &Selector<Option<usize>>,
-    row: &MenuRow,
-    panel: &MenuPanel,
+    row: &RenderFn<MenuRowHandle>,
+    panel: &RenderFn<NodeId>,
     parent: &Option<(NodeRef, NodeId)>,
 ) -> Row {
     let disabled = item.disabled;
-    let tab_stop = {
-        let activation = activation.clone();
-        Prop::Dynamic(Box::new(move || activation.is_selected(&Some(index))))
-    };
+    let tab_stop = activation.memo(Some(index));
     let content = {
         let row = row.clone();
         let item = item.clone();
-        Box::new(move |button: ButtonHandle| {
+        move |button: ButtonHandle| {
             let hovered = button.hovered.clone();
             create_effect(move || {
                 if hovered.get() {
                     hover_menu_list_row(menu, index);
                 }
             });
-            row(MenuRowHandle {
+            row.call(MenuRowHandle {
                 item,
                 hovered: button.hovered,
                 focused: button.focused,
             })
-        })
+        }
     };
     let parent = parent.clone();
     let button = view! {
@@ -182,7 +174,7 @@ fn build_row(
             anchor={OverlayAnchor::Node(button)}
             placement={Placement::RightStart}
         >
-            {panel(view! {
+            {panel.call(view! {
                 <menu_list
                     node_ref={&content}
                     items={item.children.clone()}

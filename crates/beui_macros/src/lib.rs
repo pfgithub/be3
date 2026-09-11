@@ -14,10 +14,90 @@ struct Prop {
     inner_ty: Option<Type>,
     optional_reactive_inner_ty: Option<Type>,
     reactive_inner_ty: Option<Type>,
+    render: Option<Render>,
+    optional_render: Option<Render>,
+    func_args: Option<Vec<Type>>,
+    optional_func_args: Option<Vec<Type>>,
     is_children: bool,
     callback_args: Option<Vec<Type>>,
     is_click_callback: bool,
     default: Option<Expr>,
+}
+
+struct Render {
+    once: bool,
+    handle: Option<Type>,
+}
+
+fn render_kind(ty: &Type) -> Option<Render> {
+    if is_named_type(ty, "Render") {
+        Some(Render {
+            once: true,
+            handle: generic_inner(ty, "Render"),
+        })
+    } else if is_named_type(ty, "RenderFn") {
+        Some(Render {
+            once: false,
+            handle: generic_inner(ty, "RenderFn"),
+        })
+    } else {
+        None
+    }
+}
+
+fn func_args(ty: &Type) -> Option<Vec<Type>> {
+    if !is_named_type(ty, "Func") {
+        return None;
+    }
+    let args = generic_args(ty, "Func")?;
+    (args.len() == 2).then_some(args)
+}
+
+fn func_setter(
+    ident: &Ident,
+    args: &[Type],
+    wrap: impl Fn(proc_macro2::TokenStream) -> proc_macro2::TokenStream,
+) -> proc_macro2::TokenStream {
+    let (value, result) = (&args[0], &args[1]);
+    let stored = wrap(quote! { ::beui::reactive::IntoFunc::into_func(value) });
+    quote! {
+        pub fn #ident(mut self, value: impl ::beui::reactive::IntoFunc<#value, #result>) -> Self {
+            self.#ident = Some(#stored);
+            self
+        }
+    }
+}
+
+fn render_setter(
+    ident: &Ident,
+    render: &Render,
+    wrap: impl Fn(proc_macro2::TokenStream) -> proc_macro2::TokenStream,
+) -> proc_macro2::TokenStream {
+    let (signature, build) = match (&render.handle, render.once) {
+        (Some(handle), true) => (
+            quote! { ::beui::reactive::IntoRender<#handle> },
+            quote! { ::beui::reactive::IntoRender::into_render(value) },
+        ),
+        (Some(handle), false) => (
+            quote! { ::beui::reactive::IntoRenderFn<#handle> },
+            quote! { ::beui::reactive::IntoRenderFn::into_render_fn(value) },
+        ),
+        (None, true) => (
+            quote! { ::core::ops::FnOnce() -> ::beui::NodeId + 'static },
+            quote! { ::beui::reactive::Render::new(move |()| value()) },
+        ),
+        (None, false) => (
+            quote! { ::core::ops::Fn() -> ::beui::NodeId + 'static },
+            quote! { ::beui::reactive::RenderFn::new(move |()| value()) },
+        ),
+    };
+    let stored = wrap(build);
+    quote! {
+        pub fn #ident(mut self, value: impl #signature) -> Self {
+            self.#ident = Some(#stored);
+            self
+        }
+    }
 }
 
 fn take_prop_default(attrs: &mut Vec<Attribute>) -> Option<Expr> {
@@ -146,6 +226,8 @@ pub fn component(attr: TokenStream, item: TokenStream) -> TokenStream {
                 .as_ref()
                 .and_then(|inner| generic_inner(inner, "Prop"));
             let reactive_inner_ty = generic_inner(ty, "Prop");
+            let optional_render = inner_ty.as_ref().and_then(render_kind);
+            let optional_func_args = inner_ty.as_ref().and_then(func_args);
             let is_children = is_named_type(ty, "Children");
             Prop {
                 ident,
@@ -153,6 +235,10 @@ pub fn component(attr: TokenStream, item: TokenStream) -> TokenStream {
                 inner_ty,
                 optional_reactive_inner_ty,
                 reactive_inner_ty,
+                render: render_kind(ty),
+                optional_render,
+                func_args: func_args(ty),
+                optional_func_args,
                 is_children,
                 callback_args: generic_args(ty, "Callback"),
                 is_click_callback: is_named_type(ty, "ClickCallback"),
@@ -176,6 +262,14 @@ pub fn component(attr: TokenStream, item: TokenStream) -> TokenStream {
                     self
                 }
             }
+        } else if let Some(render) = &prop.optional_render {
+            render_setter(ident, render, |build| quote! { Some(#build) })
+        } else if let Some(render) = &prop.render {
+            render_setter(ident, render, |build| build)
+        } else if let Some(args) = &prop.optional_func_args {
+            func_setter(ident, args, |build| quote! { Some(#build) })
+        } else if let Some(args) = &prop.func_args {
+            func_setter(ident, args, |build| build)
         } else if let Some(inner_ty) = &prop.optional_reactive_inner_ty {
             quote! {
                 pub fn #ident(mut self, value: impl ::beui::reactive::IntoProp<#inner_ty>) -> Self {

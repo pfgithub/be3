@@ -7,7 +7,7 @@ use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
     self, component_detail, component_state, create_signal, set_component_state, untrack, Callback,
-    ClickCatcherBuilder, FocusableBuilder, Prop, ReadSignal,
+    ClickCatcherBuilder, FocusableBuilder, Prop, ReadSignal, Render,
 };
 
 pub struct ToggleHandle {
@@ -16,8 +16,6 @@ pub struct ToggleHandle {
     pub active: ReadSignal<bool>,
     pub focused: ReadSignal<bool>,
 }
-
-pub type ToggleContent = Box<dyn FnOnce(ToggleHandle) -> NodeId>;
 
 struct State {
     focusable: NodeId,
@@ -30,7 +28,7 @@ struct State {
 #[component]
 pub fn toggle(
     checked: Prop<bool>,
-    content: Option<ToggleContent>,
+    content: Option<Render<ToggleHandle>>,
     on_change: Callback<bool>,
 ) -> NodeId {
     let (checked_read, set_checked) = create_signal(false);
@@ -49,7 +47,7 @@ pub fn toggle(
     });
 
     let content_node = content.map(|build| {
-        build(ToggleHandle {
+        build.call(ToggleHandle {
             checked: checked_read.clone(),
             hovered: hovered.clone(),
             active: active.clone(),

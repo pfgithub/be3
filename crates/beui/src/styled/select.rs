@@ -5,7 +5,8 @@ use crate::color::Color32;
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
-    Callback, FillBuilder, OutlineBuilder, PaddingBuilder, Prop, SizedBuilder, TextBuilder,
+    create_memo, Callback, FillBuilder, OutlineBuilder, PaddingBuilder, Prop, SizedBuilder,
+    TextBuilder,
 };
 use crate::styled::theme::{
     ACCENT, ACCENT_SOFT, BORDER, BORDER_WIDTH, FONT_BODY, RADIUS, SURFACE, SURFACE_RAISED, TEXT,
@@ -42,29 +43,27 @@ pub fn select(
             search_selection_color={ACCENT_SOFT}
             search_caret_color={ACCENT}
             search_padding_horizontal={PADDING_HORIZONTAL}
-            search_content={Box::new(|handle| view! { <search_field handle={handle} /> })}
-            trigger={Box::new(move |handle| view! {
-                <select_trigger options={trigger_options} handle={handle} />
-            })}
-            option={Box::new(|handle| view! { <select_option handle={handle} /> })}
-            popup={Box::new(|content| view! { <select_popup content={content} /> })}
+            search_content={|handle| view! { <search_field handle={handle} /> }}
+            trigger={move |handle| view! { <select_trigger options={trigger_options} handle={handle} /> }}
+            option={|handle| view! { <select_option handle={handle} /> }}
+            popup={|content| view! { <select_popup content={content} /> }}
         />
     }
 }
 
 #[component]
 fn select_trigger(options: Vec<String>, handle: SelectTriggerHandle) -> NodeId {
-    let label_text = {
-        let selected = handle.selected;
-        Prop::Dynamic(Box::new(move || trigger_label(&options, selected.get())))
-    };
-    let focused = handle.focused;
-    let border = {
+    let SelectTriggerHandle {
+        selected,
+        hovered,
+        focused,
+        ..
+    } = handle;
+    let label_text = create_memo(move || trigger_label(&options, selected.get()));
+    let border = create_memo({
         let focused = focused.clone();
-        Prop::Dynamic(Box::new(move || {
-            border_color(focused.get(), handle.hovered.get())
-        }))
-    };
+        move || border_color(focused.get(), hovered.get())
+    });
     view! {
         <outline color={ACCENT} width={FOCUS_RING_WIDTH} radius={RADIUS} offset={FOCUS_RING_OFFSET} visible={focused}>
             <sized width={TRIGGER_WIDTH} height={HEIGHT}>
@@ -88,10 +87,12 @@ fn select_trigger(options: Vec<String>, handle: SelectTriggerHandle) -> NodeId {
 
 #[component]
 fn search_field(handle: TextInputHandle) -> NodeId {
-    let field = handle.field;
-    let border = Prop::Dynamic(Box::new(move || {
-        border_color(handle.focused.get(), handle.hovered.get())
-    }));
+    let TextInputHandle {
+        field,
+        hovered,
+        focused,
+    } = handle;
+    let border = create_memo(move || border_color(focused.get(), hovered.get()));
     view! {
         <sized height={HEIGHT}>
             <outline color={border} width={BORDER_WIDTH} radius={RADIUS} offset={0.0} visible={true}>
@@ -103,17 +104,18 @@ fn search_field(handle: TextInputHandle) -> NodeId {
 
 #[component]
 fn select_option(handle: SelectOptionHandle) -> NodeId {
-    let option = handle;
-    let highlighted = option.highlighted;
-    let hovered = option.hovered;
-    let fill_color = Prop::Dynamic(Box::new(move || {
-        option_background(highlighted.get(), hovered.get())
-    }));
+    let SelectOptionHandle {
+        label,
+        highlighted,
+        hovered,
+        ..
+    } = handle;
+    let fill_color = create_memo(move || option_background(highlighted.get(), hovered.get()));
     view! {
         <fill color={fill_color} radius={RADIUS}>
             <padding horizontal={PADDING_HORIZONTAL} vertical={OPTION_PADDING_VERTICAL}>
                 <text
-                    string={option.label}
+                    string={label}
                     font_size={FONT_BODY}
                     color={TEXT}
                     align={TextAlign::Start}

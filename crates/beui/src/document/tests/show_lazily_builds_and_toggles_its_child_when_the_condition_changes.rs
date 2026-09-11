@@ -1,47 +1,40 @@
 use super::*;
 use crate::reactive::{
-    build, create_signal, view, ButtonBuilder, ColumnBuilder, ShowBuilder, TextBuilder,
+    build, create_signal, view, ButtonBuilder, ColumnBuilder, NodeRef, ShowBuilder, TextBuilder,
 };
 
 #[test]
 fn show_lazily_builds_and_toggles_its_child_when_the_condition_changes() {
     let builds = std::rc::Rc::new(std::cell::Cell::new(0));
     let sink = builds.clone();
-    let toggle_id = std::rc::Rc::new(std::cell::Cell::new(None));
-    let sink_toggle = toggle_id.clone();
-    let panel_id = std::rc::Rc::new(std::cell::Cell::new(None));
-    let sink_panel = panel_id.clone();
+    let (toggle, panel) = (NodeRef::new(), NodeRef::new());
 
-    let document = build(move || {
-        let (visible, set_visible) = create_signal(false);
-
-        let toggle = view! {
-            <button on_click={move || {
-                set_visible.update(|visible| *visible = !*visible)
-            }}>
-                <text string={"toggle".to_string()} />
-            </button>
-        };
-        sink_toggle.set(Some(toggle));
-
-        let panel = view! {
-            <show condition={visible} then={Box::new(move || {
-                sink.set(sink.get() + 1);
-                view! { <text string={"panel".to_string()} /> }
-            })} />
-        };
-        sink_panel.set(Some(panel));
-
-        view! {
-            <column spacing={0.0}>
-                {toggle}
-                {panel}
-            </column>
+    let document = build({
+        let (toggle, panel) = (toggle.clone(), panel.clone());
+        move || {
+            let (visible, set_visible) = create_signal(false);
+            view! {
+                <column spacing={0.0}>
+                    <button
+                        node_ref={&toggle}
+                        on_click={move || set_visible.update(|visible| *visible = !*visible)}
+                    >
+                        <text string={"toggle".to_string()} />
+                    </button>
+                    <show
+                        node_ref={&panel}
+                        condition={visible}
+                        then={move || {
+                            sink.set(sink.get() + 1);
+                            view! { <text string={"panel".to_string()} /> }
+                        }}
+                    />
+                </column>
+            }
         }
     });
 
-    let toggle = toggle_id.get().expect("toggle button was created");
-    let panel = panel_id.get().expect("show() node was created");
+    let (toggle, panel) = (toggle.get(), panel.get());
     let mut harness = Harness::new(document);
     harness.frame(Vec::new());
     let visibility = harness.document().shadow_root(panel);

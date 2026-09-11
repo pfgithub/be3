@@ -6,8 +6,8 @@ use crate::base::TextAlign;
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
-    component_detail, create_signal, Callback, CenteredRowBuilder, Children, FillBuilder,
-    OutlineBuilder, PaddingBuilder, Prop, SizedBuilder, TextBuilder,
+    component_detail, create_memo, create_signal, Callback, CenteredRowBuilder, Children,
+    FillBuilder, OutlineBuilder, PaddingBuilder, Prop, ReadSignal, SizedBuilder, TextBuilder,
 };
 use crate::styled::theme::{
     ACCENT, FONT_HEADING, FONT_SMALL, RADIUS, SURFACE_RAISED, TEXT, TEXT_MUTED,
@@ -42,34 +42,48 @@ pub fn accordion(
         <unstyled::disclosure
             spacing={SPACING}
             on_toggle={move |open| on_toggle.call(open)}
-            header={Box::new(move |handle: DisclosureHandle| {
-                let header_color = Prop::Dynamic(Box::new(move || header_fill(handle.hovered.get())));
-                let marker_glyph = Prop::Dynamic(Box::new(move || glyph(handle.open.get()).to_owned()));
-                view! {
-                    <outline color={ACCENT} width={2.0} radius={RADIUS} offset={2.0} visible={handle.focused}>
-                        <fill color={header_color} radius={RADIUS}>
-                            <padding horizontal={PADDING_HORIZONTAL} vertical={PADDING_VERTICAL}>
-                                <centered_row spacing={SPACING}>
-                                    <sized width={MARKER_WIDTH}>
-                                        <text
-                                            string={marker_glyph}
-                                            font_size={FONT_SMALL}
-                                            color={TEXT_MUTED}
-                                            monospace={true}
-                                            align={TextAlign::Center}
-                                        />
-                                    </sized>
-                                    @percent(100.0) <text string={title_text} font_size={FONT_HEADING} color={TEXT} align={TextAlign::Start} />
-                                </centered_row>
-                            </padding>
-                        </fill>
-                    </outline>
-                }
-            })}
+            header={move |handle| view! { <accordion_header handle={handle} title={title_text} /> }}
             open={open}
         >
             {child}
         </unstyled::disclosure>
+    }
+}
+
+#[component]
+fn accordion_header(handle: DisclosureHandle, title: ReadSignal<String>) -> NodeId {
+    let DisclosureHandle {
+        hovered,
+        open,
+        focused,
+        ..
+    } = handle;
+    let header_color = create_memo(move || header_fill(hovered.get()));
+    let marker_glyph = create_memo(move || glyph(open.get()).to_owned());
+    view! {
+        <outline color={ACCENT} width={2.0} radius={RADIUS} offset={2.0} visible={focused}>
+            <fill color={header_color} radius={RADIUS}>
+                <padding horizontal={PADDING_HORIZONTAL} vertical={PADDING_VERTICAL}>
+                    <centered_row spacing={SPACING}>
+                        <sized width={MARKER_WIDTH}>
+                            <text
+                                string={marker_glyph}
+                                font_size={FONT_SMALL}
+                                color={TEXT_MUTED}
+                                monospace={true}
+                                align={TextAlign::Center}
+                            />
+                        </sized>
+                        @percent(100.0) <text
+                            string={title}
+                            font_size={FONT_HEADING}
+                            color={TEXT}
+                            align={TextAlign::Start}
+                        />
+                    </centered_row>
+                </padding>
+            </fill>
+        </outline>
     }
 }
 

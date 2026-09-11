@@ -1,48 +1,36 @@
 use super::*;
 use crate::reactive::{
-    build, create_signal, intrinsic, view, ButtonBuilder, ColumnBuilder, ForEachBuilder,
-    TextBuilder,
+    build, create_signal, view, ButtonBuilder, ColumnBuilder, ForEachBuilder, NodeRef, TextBuilder,
 };
 
 #[test]
 fn for_each_reuses_nodes_for_keys_that_persist_across_an_update() {
-    let list_id = std::rc::Rc::new(std::cell::Cell::new(None));
-    let sink_list = list_id.clone();
-    let shuffle_id = std::rc::Rc::new(std::cell::Cell::new(None));
-    let sink_shuffle = shuffle_id.clone();
-
-    let document = build(move || {
-        let (items, set_items) = create_signal(vec![1i64, 2, 3]);
-
-        let list = view! {
-            <for_each
-                spacing={0.0}
-                items={items}
-                key={Box::new(|value| *value)}
-                view={Box::new(|value| {
-                    intrinsic(view! { <text string={value.to_string()} /> })
-                })}
-            />
-        };
-        sink_list.set(Some(list));
-
-        let shuffle = view! {
-            <button on_click={move || set_items.set(vec![3, 2, 4])}>
-                <text string={"shuffle".to_string()} />
-            </button>
-        };
-        sink_shuffle.set(Some(shuffle));
-
-        view! {
-            <column spacing={0.0}>
-                {shuffle}
-                {list}
-            </column>
+    let (list, shuffle) = (NodeRef::new(), NodeRef::new());
+    let document = build({
+        let (list, shuffle) = (list.clone(), shuffle.clone());
+        move || {
+            let (items, set_items) = create_signal(vec![1i64, 2, 3]);
+            view! {
+                <column spacing={0.0}>
+                    <button
+                        node_ref={&shuffle}
+                        on_click={move || set_items.set(vec![3, 2, 4])}
+                    >
+                        <text string={"shuffle".to_string()} />
+                    </button>
+                    <for_each
+                        node_ref={&list}
+                        spacing={0.0}
+                        items={items}
+                        key={|value: i64| value}
+                        view={|value: i64| view! { <text string={value.to_string()} /> }}
+                    />
+                </column>
+            }
         }
     });
 
-    let list = list_id.get().expect("the list container was created");
-    let shuffle = shuffle_id.get().expect("the shuffle button was created");
+    let (list, shuffle) = (list.get(), shuffle.get());
     let mut harness = Harness::new(document);
     harness.frame(Vec::new());
     let list = harness.document().shadow_root(list);

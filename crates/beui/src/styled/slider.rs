@@ -5,11 +5,12 @@ use crate::color::Color32;
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
-    current_component, shadow_detail, Callback, CenteredRowBuilder, FillBuilder, OutlineBuilder,
-    Prop, SizedBuilder,
+    component_detail, create_memo, Callback, CenteredRowBuilder, FillBuilder, OutlineBuilder, Prop,
+    SizedBuilder,
 };
 use crate::styled::theme::{ACCENT, ACCENT_HOVER, KNOB, RADIUS, TRACK};
 use crate::unstyled;
+use crate::unstyled::SliderHandle;
 
 const HEIGHT: f32 = 20.0;
 const TRACK_HEIGHT: f32 = 6.0;
@@ -21,40 +22,43 @@ const FOCUS_RING_OFFSET: f32 = 3.0;
 
 #[component]
 pub fn slider(value: Prop<f32>, on_change: Callback<f32>) -> NodeId {
-    let shadow = current_component();
-
     view! {
         <unstyled::slider
             value={value}
             on_change={move |value| on_change.call(value)}
-            content={Box::new(move |handle: unstyled::SliderHandle| {
-            let filled_percent = {
+            content={move |handle: SliderHandle| {
                 let slider_value = handle.value.clone();
-                Prop::Dynamic(Box::new(move || filled_size(slider_value.get())))
-            };
-            let rest_percent = {
-                let slider_value = handle.value.clone();
-                Prop::Dynamic(Box::new(move || rest_size(slider_value.get())))
-            };
-            let knob_color = Prop::Dynamic(Box::new(move || knob_fill_color(handle.dragging.get())));
+                component_detail(move || detail(slider_value.get()));
+                view! { <slider_track handle={handle} /> }
+            }}
+        />
+    }
+}
 
-            shadow_detail(shadow, {
-                let slider_value = handle.value.clone();
-                move || detail(slider_value.get())
-            });
+#[component]
+fn slider_track(handle: SliderHandle) -> NodeId {
+    let SliderHandle {
+        value,
+        dragging,
+        focused,
+    } = handle;
+    let filled_percent = create_memo({
+        let value = value.clone();
+        move || filled_size(value.get())
+    });
+    let rest_percent = create_memo(move || rest_size(value.get()));
+    let knob_color = create_memo(move || knob_fill_color(dragging.get()));
 
-            view! {
-                <outline color={ACCENT} width={FOCUS_RING_WIDTH} radius={RADIUS} offset={FOCUS_RING_OFFSET} visible={handle.focused}>
-                    <sized height={HEIGHT}>
-                        <centered_row spacing={0.0}>
-                            @percent(filled_percent) <sized height={TRACK_HEIGHT}><fill color={ACCENT} radius={TRACK_RADIUS}></fill></sized>
-                            <sized width={KNOB_SIZE} height={KNOB_SIZE}><fill color={knob_color} radius={KNOB_RADIUS}></fill></sized>
-                            @percent(rest_percent) <sized height={TRACK_HEIGHT}><fill color={TRACK} radius={TRACK_RADIUS}></fill></sized>
-                        </centered_row>
-                    </sized>
-                </outline>
-            }
-        })} />
+    view! {
+        <outline color={ACCENT} width={FOCUS_RING_WIDTH} radius={RADIUS} offset={FOCUS_RING_OFFSET} visible={focused}>
+            <sized height={HEIGHT}>
+                <centered_row spacing={0.0}>
+                    @percent(filled_percent) <sized height={TRACK_HEIGHT}><fill color={ACCENT} radius={TRACK_RADIUS}></fill></sized>
+                    <sized width={KNOB_SIZE} height={KNOB_SIZE}><fill color={knob_color} radius={KNOB_RADIUS}></fill></sized>
+                    @percent(rest_percent) <sized height={TRACK_HEIGHT}><fill color={TRACK} radius={TRACK_RADIUS}></fill></sized>
+                </centered_row>
+            </sized>
+        </outline>
     }
 }
 

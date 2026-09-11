@@ -13,8 +13,9 @@ use crate::input::{CursorIcon, PointerPress};
 use crate::node::NodeId;
 use crate::reactive::{
     in_new_scope, set_component_state, Callback, ClickCatcherBuilder, ColumnBuilder, NodeRef, Prop,
+    RenderFn,
 };
-use crate::unstyled::menu::{self, MenuItem, MenuListBuilder, MenuPanel, MenuRow};
+use crate::unstyled::menu::{self, MenuItem, MenuListBuilder, MenuRowHandle};
 
 struct State {
     overlay: NodeId,
@@ -25,12 +26,12 @@ struct State {
 pub fn context_menu(
     region: NodeId,
     items: Prop<Vec<MenuItem>>,
-    row: Option<MenuRow>,
-    panel: Option<MenuPanel>,
+    row: Option<RenderFn<MenuRowHandle>>,
+    panel: Option<RenderFn<NodeId>>,
     on_select: Callback<Vec<usize>>,
 ) -> NodeId {
-    let row = row.unwrap_or_else(|| Rc::new(|_| view! { <column spacing={0.0} /> }));
-    let panel = panel.unwrap_or_else(|| Rc::new(|content| content));
+    let row = row.unwrap_or_else(|| RenderFn::new(|_| view! { <column spacing={0.0} /> }));
+    let panel = panel.unwrap_or_else(|| RenderFn::new(|content| content));
     let overlay = NodeRef::new();
     let content: Rc<Cell<Option<NodeId>>> = Rc::new(Cell::new(None));
 
@@ -69,7 +70,7 @@ pub fn context_menu(
         let replacement = in_new_scope({
             let (menu, row, panel) = (menu.clone(), row.clone(), panel.clone());
             move || {
-                panel(view! {
+                panel.call(view! {
                     <menu_list node_ref={&menu} items={items} row={row} panel={panel.clone()} />
                 })
             }

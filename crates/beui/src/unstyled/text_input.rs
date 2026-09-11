@@ -20,8 +20,8 @@ use beui_macros::{component, view};
 
 use crate::reactive::{
     component_detail, component_state, copy_text, create_signal, set_component_state, Callback,
-    ClickCatcherBuilder, FocusableBuilder, NodeRef, PaddingBuilder, Prop, ReadSignal, TextBuilder,
-    WriteSignal,
+    ClickCatcherBuilder, FocusableBuilder, NodeRef, PaddingBuilder, Prop, ReadSignal, Render,
+    TextBuilder, WriteSignal,
 };
 
 const FONT_SIZE: f32 = 14.0;
@@ -35,8 +35,6 @@ pub struct TextInputHandle {
     pub hovered: ReadSignal<bool>,
     pub focused: ReadSignal<bool>,
 }
-
-pub type TextInputContent = Box<dyn FnOnce(TextInputHandle) -> NodeId>;
 
 struct Editor {
     core: Core,
@@ -58,7 +56,7 @@ type Handle = Rc<RefCell<Editor>>;
 #[component]
 pub fn text_input(
     value: Prop<String>,
-    content: Option<TextInputContent>,
+    content: Option<Render<TextInputHandle>>,
     placeholder: Prop<String>,
     #[prop(default = FONT_SIZE)] font_size: Prop<f32>,
     #[prop(default = Color32::WHITE)] color: Prop<Color32>,
@@ -164,7 +162,7 @@ pub fn text_input(
                         </padding>
                     };
                     match content {
-                        Some(build) => build(TextInputHandle { field, hovered, focused }),
+                        Some(build) => build.call(TextInputHandle { field, hovered, focused }),
                         None => field,
                     }
                 }}

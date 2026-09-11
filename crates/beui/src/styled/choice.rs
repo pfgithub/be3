@@ -7,14 +7,13 @@ use beui_macros::{component, view};
 
 use crate::reactive::Memo;
 use crate::reactive::{
-    Callback, CenteredRowBuilder, FillBuilder, OutlineBuilder, PaddingBuilder, Prop, SizedBuilder,
-    SpacerBuilder, TextBuilder, VisibilityBuilder,
+    create_memo, CenteredRowBuilder, FillBuilder, OutlineBuilder, PaddingBuilder, Prop,
+    SizedBuilder, SpacerBuilder, TextBuilder, VisibilityBuilder,
 };
 use crate::styled::theme::{
     ACCENT, ACCENT_SOFT, BORDER, FONT_BODY, RADIUS, SURFACE_RAISED, TEXT, TEXT_MUTED,
 };
 use crate::unstyled;
-use crate::unstyled::ChoiceBuilder;
 use crate::unstyled::ChoiceOptionHandle;
 
 pub(super) use crate::unstyled::ChoiceKind as Kind;
@@ -24,25 +23,8 @@ const MARK_BOX: f32 = 18.0;
 const MARK_DOT: f32 = 8.0;
 const MARK_RADIUS: u8 = 9;
 
-pub(super) fn choice(
-    labels: Vec<String>,
-    selected: Prop<Option<usize>>,
-    kind: Kind,
-    on_change: Callback<Option<usize>>,
-) -> NodeId {
-    view! {
-        <choice
-            labels={labels}
-            selected={selected}
-            kind={kind}
-            on_change={move |selected| on_change.call(selected)}
-            option={Box::new(move |handle| view! { <choice_option kind={kind} handle={handle} /> })}
-        />
-    }
-}
-
 #[component]
-fn choice_option(kind: Kind, handle: ChoiceOptionHandle) -> NodeId {
+pub(super) fn choice_option(kind: Kind, handle: ChoiceOptionHandle) -> NodeId {
     let ChoiceOptionHandle {
         label,
         selected,
@@ -50,48 +32,43 @@ fn choice_option(kind: Kind, handle: ChoiceOptionHandle) -> NodeId {
         focused,
         ..
     } = handle;
-    let label_color = {
+    let label_color = create_memo({
         let selected = selected.clone();
-        Prop::Dynamic(Box::new(
-            move || {
-                if selected.get() {
-                    TEXT
-                } else {
-                    TEXT_MUTED
-                }
-            },
-        ))
-    };
+        move || if selected.get() { TEXT } else { TEXT_MUTED }
+    });
+    let checked = selected.clone();
+    let fill_color = create_memo(move || background(selected.get(), hovered.get()));
+    view! {
+        <outline color={ACCENT} width={2.0} radius={RADIUS} offset={1.0} visible={focused}>
+            <fill color={fill_color} radius={RADIUS}>
+                <padding horizontal={14.0} vertical={6.0}>
+                    <choice_label
+                        kind={kind}
+                        label={label}
+                        color={label_color}
+                        checked={checked}
+                    />
+                </padding>
+            </fill>
+        </outline>
+    }
+}
+
+#[component]
+fn choice_label(kind: Kind, label: String, color: Prop<Color32>, checked: Memo<bool>) -> NodeId {
     let align = if kind == Kind::Tabs {
         TextAlign::Center
     } else {
         TextAlign::Start
     };
-    let radio = kind == Kind::Radio;
-    let checked = selected.clone();
-    let fill_color = Prop::Dynamic(Box::new(move || background(selected.get(), hovered.get())));
+    if kind != Kind::Radio {
+        return view! { <text string={label} font_size={FONT_BODY} color={color} align={align} /> };
+    }
     view! {
-        <outline color={ACCENT} width={2.0} radius={RADIUS} offset={1.0} visible={focused}>
-            <fill color={fill_color} radius={RADIUS}>
-                <padding horizontal={14.0} vertical={6.0}>
-                    {{
-                        let label = view! {
-                            <text string={label} font_size={FONT_BODY} color={label_color} align={align} />
-                        };
-                        if !radio {
-                            label
-                        } else {
-                            view! {
-                                <centered_row spacing={MARK_SPACING}>
-                                    <radio_mark checked={checked} />
-                                    @percent(100.0) {label}
-                                </centered_row>
-                            }
-                        }
-                    }}
-                </padding>
-            </fill>
-        </outline>
+        <centered_row spacing={MARK_SPACING}>
+            <radio_mark checked={checked} />
+            @percent(100.0) <text string={label} font_size={FONT_BODY} color={color} align={align} />
+        </centered_row>
     }
 }
 

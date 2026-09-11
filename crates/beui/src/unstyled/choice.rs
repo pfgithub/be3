@@ -9,7 +9,7 @@ use crate::node::NodeId;
 use crate::reactive::{
     component_state, create_effect, create_selector, create_signal, current_component, intrinsic,
     set_component_name, set_component_state, set_shadow_detail, Callback, ListBuilder, Memo,
-    NodeRef, Prop, ReadSignal, WriteSignal,
+    NodeRef, Prop, ReadSignal, RenderFn, WriteSignal,
 };
 use crate::unstyled;
 use crate::unstyled::ButtonHandle;
@@ -32,8 +32,6 @@ pub struct ChoiceOptionHandle {
     pub active: ReadSignal<bool>,
     pub focused: ReadSignal<bool>,
 }
-
-pub type ChoiceOption = Box<dyn Fn(ChoiceOptionHandle) -> NodeId>;
 
 struct Option_ {
     button: NodeRef,
@@ -65,7 +63,7 @@ pub fn choice(
     selected: Prop<Option<usize>>,
     kind: ChoiceKind,
     on_change: Callback<Option<usize>>,
-    option: Option<ChoiceOption>,
+    option: Option<RenderFn<ChoiceOptionHandle>>,
 ) -> NodeId {
     set_component_name(kind_name(kind));
     let choice = current_component();
@@ -97,7 +95,7 @@ pub fn choice(
             let focused_signals = focused_signals.clone();
             Box::new(move |button: ButtonHandle| {
                 focused_signals.borrow_mut().push(button.focused.clone());
-                option(ChoiceOptionHandle {
+                option.call(ChoiceOptionHandle {
                     index,
                     label,
                     selected: is_selected,

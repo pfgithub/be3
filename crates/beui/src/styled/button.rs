@@ -6,7 +6,7 @@ use crate::color::Color32;
 use crate::base::TextAlign;
 use crate::node::NodeId;
 use crate::reactive::{
-    ClickCallback, FillBuilder, OutlineBuilder, PaddingBuilder, Prop, TextBuilder,
+    create_memo, ClickCallback, FillBuilder, OutlineBuilder, PaddingBuilder, Prop, TextBuilder,
 };
 use crate::styled::theme::{
     ACCENT, ACCENT_ACTIVE, ACCENT_HOVER, BORDER, BORDER_WIDTH, FONT_BODY, ON_ACCENT, RADIUS,
@@ -53,22 +53,38 @@ pub fn button(
     on_click: ClickCallback,
 ) -> NodeId {
     view! {
-        <unstyled::button disabled={disabled} on_click={move || on_click.call()} content={Box::new(move |handle: unstyled::ButtonHandle| {
-            let fill_color = Prop::Dynamic(Box::new(move || {
-                variant.fill(handle.hovered.get(), handle.active.get())
-            }));
-            view! {
-                <outline color={ACCENT} width={FOCUS_RING_WIDTH} radius={RADIUS + 4} offset={FOCUS_RING_OFFSET} visible={handle.focused}>
-                    <outline color={BORDER} width={BORDER_WIDTH} radius={RADIUS} offset={0.0} visible={variant == ButtonVariant::Secondary}>
-                        <fill color={fill_color} radius={RADIUS}>
-                            <padding horizontal={PADDING_HORIZONTAL} vertical={PADDING_VERTICAL}>
-                                <text string={label} font_size={FONT_BODY} color={variant.label()} align={TextAlign::Center} />
-                            </padding>
-                        </fill>
-                    </outline>
-                </outline>
-            }
-        })} />
+        <unstyled::button
+            disabled={disabled}
+            on_click={move || on_click.call()}
+            content={move |handle| view! {
+                <button_face handle={handle} variant={variant} label={label} />
+            }}
+        />
+    }
+}
+
+#[component]
+fn button_face(
+    handle: unstyled::ButtonHandle,
+    variant: ButtonVariant,
+    label: Prop<String>,
+) -> NodeId {
+    let unstyled::ButtonHandle {
+        hovered,
+        active,
+        focused,
+    } = handle;
+    let fill_color = create_memo(move || variant.fill(hovered.get(), active.get()));
+    view! {
+        <outline color={ACCENT} width={FOCUS_RING_WIDTH} radius={RADIUS + 4} offset={FOCUS_RING_OFFSET} visible={focused}>
+            <outline color={BORDER} width={BORDER_WIDTH} radius={RADIUS} offset={0.0} visible={variant == ButtonVariant::Secondary}>
+                <fill color={fill_color} radius={RADIUS}>
+                    <padding horizontal={PADDING_HORIZONTAL} vertical={PADDING_VERTICAL}>
+                        <text string={label} font_size={FONT_BODY} color={variant.label()} align={TextAlign::Center} />
+                    </padding>
+                </fill>
+            </outline>
+        </outline>
     }
 }
 

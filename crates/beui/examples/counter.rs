@@ -1,8 +1,8 @@
 use beui::reactive::{
-    build, component, create_memo, create_signal, intrinsic, view, ButtonBuilder, ColumnBuilder,
+    build, component, create_memo, create_signal, view, ButtonBuilder, ColumnBuilder,
     ForEachBuilder, RowBuilder, ShowBuilder, TextBuilder,
 };
-use beui::{App, ClickHandler, Color32, Context, Document, NodeId, Rect};
+use beui::{App, Color32, Context, Document, NodeId, Rect};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     beui::run("beui counter", CounterApp::new())
@@ -28,7 +28,7 @@ fn app() -> NodeId {
         create_memo(move || count.get() != 0)
     };
 
-    let decrement_click: ClickHandler = Box::new({
+    let decrement_click = {
         let set_count = set_count.clone();
         let set_history = set_history.clone();
         let count = count.clone();
@@ -40,9 +40,9 @@ fn app() -> NodeId {
             set_next_id.set(id + 1);
             set_history.update(|entries| entries.push((id, count.get())));
         }
-    });
+    };
 
-    let increment_click: ClickHandler = Box::new({
+    let increment_click = {
         let set_count = set_count.clone();
         let set_history = set_history.clone();
         let count = count.clone();
@@ -54,12 +54,12 @@ fn app() -> NodeId {
             set_next_id.set(id + 1);
             set_history.update(|entries| entries.push((id, count.get())));
         }
-    });
+    };
 
-    let reset_click: ClickHandler = Box::new(move || {
+    let reset_click = move || {
         set_count.set(0);
         set_history.set(Vec::new());
-    });
+    };
 
     let count_text = create_memo(move || count.get().to_string());
 
@@ -73,17 +73,17 @@ fn app() -> NodeId {
                 <button on_click={increment_click}>
                     <text string={"+".to_string()} />
                 </button>
-                <show condition={is_nonzero} then={Box::new(move || view! {
+                <show condition={is_nonzero} then={move || view! {
                     <button on_click={reset_click}>
                         <text string={"reset".to_string()} />
                     </button>
-                })} />
+                }} />
             </row>
             <for_each
                 spacing={4.0}
                 items={history}
-                key={Box::new(|(id, _)| *id)}
-                view={Box::new(|(_, value)| intrinsic(view! { <history_entry value={*value} /> }))}
+                key={|(id, _): (u64, i64)| id}
+                view={|(_, value): (u64, i64)| view! { <history_entry value={value} /> }}
             />
         </column>
     }

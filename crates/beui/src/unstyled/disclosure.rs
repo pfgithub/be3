@@ -4,7 +4,7 @@ use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
     component_detail, component_state, create_signal, set_component_state, untrack, Callback,
-    Children, ColumnBuilder, NodeRef, Prop, ReadSignal, VisibilityBuilder,
+    Children, ColumnBuilder, NodeRef, Prop, ReadSignal, Render, VisibilityBuilder,
 };
 use crate::unstyled;
 use crate::unstyled::button::ButtonHandle;
@@ -16,8 +16,6 @@ pub struct DisclosureHandle {
     pub open: ReadSignal<bool>,
 }
 
-pub type DisclosureHeader = Box<dyn FnOnce(DisclosureHandle) -> NodeId>;
-
 struct State {
     button: NodeRef,
     open: ReadSignal<bool>,
@@ -26,7 +24,7 @@ struct State {
 #[component]
 pub fn disclosure(
     spacing: f32,
-    header: DisclosureHeader,
+    header: Render<DisclosureHandle>,
     children: Children,
     open: Prop<bool>,
     on_toggle: Callback<bool>,
@@ -61,7 +59,7 @@ pub fn disclosure(
                     on_toggle.call(next);
                 }}
                 content={Box::new(move |handle: ButtonHandle| {
-                    header(DisclosureHandle {
+                    header.call(DisclosureHandle {
                         hovered: handle.hovered,
                         active: handle.active,
                         focused: handle.focused,

@@ -1,9 +1,10 @@
-use beui_macros::component;
+use beui_macros::{component, view};
 
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{Callback, Prop};
-use crate::styled::choice::{self, Kind};
+use crate::styled::choice::{self, ChoiceOptionBuilder, Kind};
+use crate::unstyled::ChoiceBuilder;
 
 #[component]
 pub fn listbox(
@@ -11,7 +12,15 @@ pub fn listbox(
     selected: Prop<Option<usize>>,
     on_change: Callback<Option<usize>>,
 ) -> NodeId {
-    choice::choice(labels, selected, Kind::Listbox, on_change)
+    view! {
+        <choice
+            labels={labels}
+            selected={selected}
+            kind={Kind::Listbox}
+            on_change={move |selected| on_change.call(selected)}
+            option={|handle| view! { <choice_option kind={Kind::Listbox} handle={handle} /> }}
+        />
+    }
 }
 
 pub fn listbox_selected(document: &Document, control: NodeId) -> Option<usize> {

@@ -7,7 +7,7 @@ use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
     self, component_detail, component_state, create_signal, set_component_state, untrack, Callback,
-    ClickCatcherBuilder, FocusableBuilder, Prop, ReadSignal,
+    ClickCatcherBuilder, FocusableBuilder, Prop, ReadSignal, Render,
 };
 
 const STEP: f32 = 0.05;
@@ -17,8 +17,6 @@ pub struct SliderHandle {
     pub dragging: ReadSignal<bool>,
     pub focused: ReadSignal<bool>,
 }
-
-pub type SliderContent = Box<dyn FnOnce(SliderHandle) -> NodeId>;
 
 struct State {
     focusable: NodeId,
@@ -30,7 +28,7 @@ struct State {
 #[component]
 pub fn slider(
     value: Prop<f32>,
-    content: Option<SliderContent>,
+    content: Option<Render<SliderHandle>>,
     on_change: Callback<f32>,
     on_drag_change: Callback<bool>,
     on_focus_change: Callback<bool>,
@@ -49,7 +47,7 @@ pub fn slider(
     });
 
     let content_node = content.map(|build| {
-        build(SliderHandle {
+        build.call(SliderHandle {
             value: value_read.clone(),
             dragging: dragging.clone(),
             focused: focused.clone(),

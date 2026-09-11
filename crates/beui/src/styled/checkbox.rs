@@ -6,15 +6,15 @@ use crate::color::Color32;
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
-    current_component, shadow_detail, Callback, CenteredRowBuilder, FillBuilder, OutlineBuilder,
-    Prop, SizedBuilder, SpacerBuilder, TextBuilder, VisibilityBuilder,
+    component_detail, create_memo, Callback, CenteredRowBuilder, FillBuilder, OutlineBuilder, Prop,
+    SizedBuilder, SpacerBuilder, TextBuilder, VisibilityBuilder,
 };
 use crate::styled::theme::{
     ACCENT, ACCENT_HOVER, BORDER, BORDER_WIDTH, CHIP_RADIUS, FONT_BODY, ON_ACCENT, RADIUS,
     SURFACE_RAISED, TEXT,
 };
 use crate::unstyled;
-use crate::unstyled::ToggleBuilder;
+use crate::unstyled::{ToggleBuilder, ToggleHandle};
 
 const BOX_SIZE: f32 = 18.0;
 const MARK_SIZE: f32 = 10.0;
@@ -25,51 +25,57 @@ const FOCUS_RING_OFFSET: f32 = 4.0;
 
 #[component]
 pub fn checkbox(label: Prop<String>, checked: Prop<bool>, on_change: Callback<bool>) -> NodeId {
-    let shadow = current_component();
-
     view! {
         <toggle
             checked={checked}
             on_change={move |checked| on_change.call(checked)}
-            content={Box::new(move |handle: unstyled::ToggleHandle| {
-            let fill_color = {
+            content={move |handle: ToggleHandle| {
                 let checked = handle.checked.clone();
-                let hovered = handle.hovered.clone();
-                Prop::Dynamic(Box::new(move || box_fill(checked.get(), hovered.get())))
-            };
-            let border_visible = {
-                let checked = handle.checked.clone();
-                Prop::Dynamic(Box::new(move || !checked.get()))
-            };
+                component_detail(move || detail(checked.get()).to_owned());
+                view! { <checkbox_face handle={handle} label={label} /> }
+            }}
+        />
+    }
+}
 
-            shadow_detail(shadow, {
-                let checked = handle.checked.clone();
-                move || detail(checked.get()).to_owned()
-            });
+#[component]
+fn checkbox_face(handle: ToggleHandle, label: Prop<String>) -> NodeId {
+    let ToggleHandle {
+        checked,
+        hovered,
+        focused,
+        ..
+    } = handle;
+    let fill_color = create_memo({
+        let (checked, hovered) = (checked.clone(), hovered);
+        move || box_fill(checked.get(), hovered.get())
+    });
+    let border_visible = create_memo({
+        let checked = checked.clone();
+        move || !checked.get()
+    });
 
-            view! {
-                <outline color={ACCENT} width={FOCUS_RING_WIDTH} radius={RADIUS} offset={FOCUS_RING_OFFSET} visible={handle.focused}>
-                    <centered_row spacing={SPACING}>
-                        <sized width={BOX_SIZE} height={BOX_SIZE}>
-                            <outline color={BORDER} width={BORDER_WIDTH} radius={CHIP_RADIUS} offset={0.0} visible={border_visible}>
-                                <fill color={fill_color} radius={CHIP_RADIUS}>
-                                    <centered_row spacing={0.0}>
-                                        @percent(100.0) <spacer />
-                                        <visibility visible={handle.checked}>
-                                            <sized width={MARK_SIZE} height={MARK_SIZE}>
-                                                <fill color={ON_ACCENT} radius={MARK_RADIUS}></fill>
-                                            </sized>
-                                        </visibility>
-                                        @percent(100.0) <spacer />
-                                    </centered_row>
-                                </fill>
-                            </outline>
-                        </sized>
-                        @percent(100.0) <text string={label} font_size={FONT_BODY} color={TEXT} align={TextAlign::Start} />
-                    </centered_row>
-                </outline>
-            }
-        })} />
+    view! {
+        <outline color={ACCENT} width={FOCUS_RING_WIDTH} radius={RADIUS} offset={FOCUS_RING_OFFSET} visible={focused}>
+            <centered_row spacing={SPACING}>
+                <sized width={BOX_SIZE} height={BOX_SIZE}>
+                    <outline color={BORDER} width={BORDER_WIDTH} radius={CHIP_RADIUS} offset={0.0} visible={border_visible}>
+                        <fill color={fill_color} radius={CHIP_RADIUS}>
+                            <centered_row spacing={0.0}>
+                                @percent(100.0) <spacer />
+                                <visibility visible={checked}>
+                                    <sized width={MARK_SIZE} height={MARK_SIZE}>
+                                        <fill color={ON_ACCENT} radius={MARK_RADIUS}></fill>
+                                    </sized>
+                                </visibility>
+                                @percent(100.0) <spacer />
+                            </centered_row>
+                        </fill>
+                    </outline>
+                </sized>
+                @percent(100.0) <text string={label} font_size={FONT_BODY} color={TEXT} align={TextAlign::Start} />
+            </centered_row>
+        </outline>
     }
 }
 

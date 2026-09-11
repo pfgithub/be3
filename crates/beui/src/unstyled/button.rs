@@ -7,7 +7,7 @@ use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
     self, component_state, create_signal, set_component_state, untrack, Callback, Children,
-    ClickCallback, ClickCatcherBuilder, FocusableBuilder, Prop, ReadSignal,
+    ClickCallback, ClickCatcherBuilder, FocusableBuilder, Prop, ReadSignal, Render,
 };
 
 pub struct ButtonHandle {
@@ -15,8 +15,6 @@ pub struct ButtonHandle {
     pub active: ReadSignal<bool>,
     pub focused: ReadSignal<bool>,
 }
-
-pub type ButtonContent = Box<dyn FnOnce(ButtonHandle) -> NodeId>;
 
 struct State {
     focusable: NodeId,
@@ -29,7 +27,7 @@ struct State {
 #[component]
 pub fn button(
     children: Children,
-    content: Option<ButtonContent>,
+    content: Option<Render<ButtonHandle>>,
     disabled: Prop<bool>,
     #[prop(default = true)] tab_stop: Prop<bool>,
     on_click: ClickCallback,
@@ -44,7 +42,7 @@ pub fn button(
     disabled.apply(move |disabled| set_disabled.set(disabled));
 
     let content_node = match content {
-        Some(build) => Some(build(ButtonHandle {
+        Some(build) => Some(build.call(ButtonHandle {
             hovered: hovered.clone(),
             active: active.clone(),
             focused: focused.clone(),
