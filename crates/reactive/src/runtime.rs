@@ -71,6 +71,16 @@ pub fn untrack<T>(f: impl FnOnce() -> T) -> T {
     f()
 }
 
+pub(crate) fn tracking() -> bool {
+    RUNTIME.with(|runtime| {
+        runtime
+            .observer
+            .borrow()
+            .upgrade()
+            .is_some_and(|observer| !observer.is_disposed())
+    })
+}
+
 pub fn batch<T>(f: impl FnOnce() -> T) -> T {
     let depth = RUNTIME.with(|runtime| runtime.depth.get());
     let guard = Reset::set(|runtime| &runtime.depth, depth + 1);

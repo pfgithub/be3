@@ -58,6 +58,36 @@ pure: writing a signal inside a memo panics, including inside `untrack`.
 `with` holds a shared borrow for the closure; `update` holds a mutable borrow.
 Do not access the same signal incompatibly from those closures.
 
+## Selectors
+
+A list of N rows that each ask "am I the selected one?" through a memo wakes all
+N of them every time the selection moves. `create_selector(|| ...)` turns that
+into two: it keeps one subscriber list per key that has been asked about, and
+when its source changes it notifies only the key that lost selection and the key
+that gained it.
+
+```rust
+let (selected, set_selected) = create_signal(Some(0usize));
+let selection = create_selector(move || selected.get());
+
+for index in 0..rows {
+    let selection = selection.clone();
+    create_effect(move || highlight(index, selection.is_selected(&Some(index))));
+}
+```
+
+`is_selected(&key)` subscribes the current computation to that key alone, never
+to the source, so a computation reading it reruns only when its own answer
+flips. `memo(key)` wraps one key in a `Memo<bool>` for props and handles that
+want a value rather than a call. Keys need `Clone + Eq + Hash`, and the source's
+own value is its key type, so an optional selection is a `Selector<Option<K>>`
+queried with `is_selected(&Some(key))`.
+
+Reads are current the moment they happen, including inside a batch that has not
+flushed yet, and a key is forgotten once the last computation watching it is
+disposed or stops reading it. Like memos, a selector must be created inside a
+scope, and its per-key notifications stop when that scope is disposed.
+
 ## Effects, batches, and ownership
 
 Create memos, effects, and cleanup callbacks inside `Scope::run` or another
@@ -102,7 +132,7 @@ value because it may already have mutated it. There is no transaction rollback.
 ## beui integration
 
 `beui::reactive` (re-exporting `create_signal`, `create_effect`, `create_memo`,
-`Scope`, `batch`, `untrack`, and `on_cleanup` from this crate) binds signals and
+`create_selector`, `Scope`, `batch`, `untrack`, and `on_cleanup` from this crate) binds signals and
 memos directly to `Document` nodes. Nothing in a view takes a `&mut Document`
 parameter, so tags nest the way JSX or solidjs would nest them: write the tree
 with `view!` inside a `#[component]`, and build the document with `build`, which

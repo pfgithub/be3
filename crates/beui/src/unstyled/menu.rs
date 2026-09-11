@@ -6,9 +6,9 @@ use crate::node::NodeId;
 use beui_macros::{component, view};
 
 use crate::reactive::{
-    component_state, create_effect, create_signal, current_component, intrinsic,
+    component_state, create_effect, create_selector, create_signal, current_component, intrinsic,
     set_component_state, Callback, ColumnBuilder, FocusableBuilder, NodeRef, Prop, ReadSignal,
-    WriteSignal,
+    Selector, WriteSignal,
 };
 use crate::unstyled;
 use crate::unstyled::button::ButtonHandle;
@@ -76,6 +76,10 @@ pub(crate) fn menu_list(
     let row = row.expect("menu_list requires a `row` builder");
     let panel = panel.expect("menu_list requires a `panel` builder");
     let (active, set_active) = create_signal(None);
+    let activation = create_selector({
+        let active = active.clone();
+        move || active.get()
+    });
     let root_tab_stop = {
         let active = active.clone();
         Prop::Dynamic(Box::new(move || active.get().is_none()))
@@ -83,7 +87,7 @@ pub(crate) fn menu_list(
     let rows: Vec<Row> = items
         .iter()
         .enumerate()
-        .map(|(index, item)| build_row(menu, index, item, &active, &row, &panel, &parent))
+        .map(|(index, item)| build_row(menu, index, item, &activation, &row, &panel, &parent))
         .collect();
     let lines: Vec<_> = rows
         .iter()
@@ -116,15 +120,15 @@ fn build_row(
     menu: NodeId,
     index: usize,
     item: &MenuItem,
-    active: &ReadSignal<Option<usize>>,
+    activation: &Selector<Option<usize>>,
     row: &MenuRow,
     panel: &MenuPanel,
     parent: &Option<(NodeRef, NodeId)>,
 ) -> Row {
     let disabled = item.disabled;
     let tab_stop = {
-        let active = active.clone();
-        Prop::Dynamic(Box::new(move || active.get() == Some(index)))
+        let activation = activation.clone();
+        Prop::Dynamic(Box::new(move || activation.is_selected(&Some(index))))
     };
     let content = {
         let row = row.clone();

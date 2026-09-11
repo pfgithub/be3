@@ -7,9 +7,9 @@ use crate::document::Document;
 use crate::input::{Key, KeyPress};
 use crate::node::NodeId;
 use crate::reactive::{
-    component_state, create_effect, create_memo, create_signal, current_component, intrinsic,
+    component_state, create_effect, create_selector, create_signal, current_component, intrinsic,
     set_component_state, Callback, ColumnBuilder, Memo, NodeRef, Prop, ReadSignal, ScrollBuilder,
-    VisibilityBuilder, WriteSignal,
+    Selector, VisibilityBuilder, WriteSignal,
 };
 use crate::unstyled;
 use crate::unstyled::button::{ButtonContent, ButtonHandle};
@@ -88,6 +88,10 @@ pub fn select(
     let popup = popup.unwrap_or_else(|| Box::new(|content| content));
 
     let (highlighted, set_highlighted) = create_signal(initial);
+    let highlight = create_selector({
+        let highlighted = highlighted.clone();
+        move || highlighted.get()
+    });
     let (selected, set_selected) = create_signal(initial);
 
     let trigger_view = trigger.unwrap_or_else(|| Box::new(|_| view! { <column spacing={0.0} /> }));
@@ -106,7 +110,7 @@ pub fn select(
     let rows: Vec<Row> = options
         .iter()
         .enumerate()
-        .map(|(index, label)| row(select, index, label, &option, &highlighted))
+        .map(|(index, label)| row(select, index, label, &option, &highlight))
         .collect();
     let items: Vec<_> = rows
         .iter()
@@ -190,14 +194,14 @@ fn row(
     index: usize,
     label: &str,
     option: &Rc<SelectOption>,
-    highlighted: &ReadSignal<Option<usize>>,
+    highlight: &Selector<Option<usize>>,
 ) -> Row {
     let content = {
         let option = option.clone();
         let label = label.to_owned();
-        let highlighted = highlighted.clone();
+        let highlight = highlight.clone();
         Box::new(move |button: ButtonHandle| {
-            let is_highlighted = create_memo(move || highlighted.get() == Some(index));
+            let is_highlighted = highlight.memo(Some(index));
             let hovered = button.hovered.clone();
             create_effect(move || {
                 if hovered.get() {

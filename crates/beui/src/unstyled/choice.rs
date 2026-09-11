@@ -7,7 +7,7 @@ use crate::document::Document;
 use crate::input::{Key, KeyPress};
 use crate::node::NodeId;
 use crate::reactive::{
-    component_state, create_effect, create_memo, create_signal, current_component, intrinsic,
+    component_state, create_effect, create_selector, create_signal, current_component, intrinsic,
     set_component_name, set_component_state, set_shadow_detail, Callback, ListBuilder, Memo,
     NodeRef, Prop, ReadSignal, WriteSignal,
 };
@@ -72,6 +72,14 @@ pub fn choice(
     let selected_prop = selected;
     let option = Rc::new(option.expect("choice requires an `option` builder"));
     let (selected, set_selected) = create_signal(None);
+    let selection = create_selector({
+        let selected = selected.clone();
+        move || selected.get()
+    });
+    let tab_stop_owner = create_selector({
+        let selected = selected.clone();
+        move || selected.get().unwrap_or(0)
+    });
 
     let mut options = Vec::new();
     let focused_signals: Rc<RefCell<Vec<ReadSignal<bool>>>> = Rc::default();
@@ -79,13 +87,10 @@ pub fn choice(
     for (index, label) in labels.iter().enumerate() {
         let button = NodeRef::new();
         let tab_stop = {
-            let selected = selected.clone();
-            Prop::Dynamic(Box::new(move || selected.get().unwrap_or(0) == index))
+            let tab_stop_owner = tab_stop_owner.clone();
+            Prop::Dynamic(Box::new(move || tab_stop_owner.is_selected(&index)))
         };
-        let is_selected = {
-            let selected = selected.clone();
-            create_memo(move || selected.get() == Some(index))
-        };
+        let is_selected = selection.memo(Some(index));
         let content = {
             let option = option.clone();
             let label = label.clone();

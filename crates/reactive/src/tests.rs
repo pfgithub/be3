@@ -3,11 +3,15 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::rc::Rc;
 
 use crate::{
-    batch, create_effect, create_memo, create_signal, on_cleanup, owner_scope, untrack, Scope,
+    batch, create_effect, create_memo, create_selector, create_signal, on_cleanup, owner_scope,
+    untrack, Scope,
 };
 
 mod a_panicking_effect_can_run_again;
 mod a_scope_opened_inside_an_effect_belongs_to_the_effects_owner;
+mod a_selector_forgets_keys_whose_watchers_were_disposed;
+mod a_selector_memo_tracks_one_key_without_watching_the_source;
+mod a_selector_only_reruns_the_keys_that_gained_or_lost_selection;
 mod all_cleanups_run_even_when_one_panics;
 mod cleanup_precedes_next_execution;
 mod cleanup_reads_do_not_become_dependencies;
@@ -30,6 +34,7 @@ mod panicking_update_still_invalidates_mutated_value;
 mod repeated_reads_only_subscribe_once;
 mod runaway_effects_are_stopped_and_scheduler_remains_usable;
 mod scopes_dispose_effects_and_run_cleanup_once;
+mod selector_reads_are_current_inside_a_batch;
 mod signals_track_changes_and_skip_equal_sets;
 mod untracked_memo_reads_still_refresh_without_subscribing;
 mod untracked_reads_do_not_subscribe;

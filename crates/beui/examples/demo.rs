@@ -1,7 +1,7 @@
 use beui::reactive::{
-    create_memo, create_signal, view, with_reactive_scope, CenteredRowBuilder, ColumnBuilder,
-    FillBuilder, OutlineBuilder, PaddingBuilder, Prop, ReadSignal, RowBuilder, ShowBuilder,
-    SpacerBuilder, VirtualListBuilder, VisibilityBuilder, WriteSignal,
+    create_memo, create_selector, create_signal, view, with_reactive_scope, CenteredRowBuilder,
+    ColumnBuilder, FillBuilder, OutlineBuilder, PaddingBuilder, Prop, ReadSignal, RowBuilder,
+    Selector, ShowBuilder, SpacerBuilder, VirtualListBuilder, VisibilityBuilder, WriteSignal,
 };
 use beui::styled::theme::{
     ACCENT, ACCENT_SOFT, BACKGROUND, RADIUS, SCROLLBAR_WIDTH, SEPARATOR_HEIGHT, SURFACE,
@@ -71,7 +71,7 @@ impl beui::App for DemoApp {
 #[derive(Clone)]
 struct Rows {
     set_status: WriteSignal<String>,
-    selected: ReadSignal<Option<usize>>,
+    selection: Selector<Option<usize>>,
     set_selected: WriteSignal<Option<usize>>,
     timings: ReadSignal<bool>,
     set_timings: WriteSignal<bool>,
@@ -82,11 +82,12 @@ struct Rows {
 impl Rows {
     fn new(set_status: WriteSignal<String>) -> Self {
         let (selected, set_selected) = create_signal(None);
+        let selection = create_selector(move || selected.get());
         let (timings, set_timings) = create_signal(true);
         let (compact, set_compact) = create_signal(false);
         Self {
             set_status,
-            selected,
+            selection,
             set_selected,
             timings,
             set_timings,
@@ -111,10 +112,7 @@ impl Rows {
 
 #[component]
 fn scroll_row(index: usize, rows: Rows, compact: bool) -> NodeId {
-    let is_selected = {
-        let selected = rows.selected.clone();
-        create_memo(move || selected.get() == Some(index))
-    };
+    let is_selected = rows.selection.memo(Some(index));
 
     let vertical = if compact {
         COMPACT_ROW_PADDING_VERTICAL
