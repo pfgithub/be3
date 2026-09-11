@@ -215,6 +215,50 @@ the tree (a test, or a sibling component holding its `NodeId`) can read it back
 with `component_state`. Prefer the capture: reaching for a `NodeId` to find
 state again is a sign the value should have been captured or passed as a prop.
 
+## Controlled state
+
+Anything a component would otherwise poke into a node after the fact is a prop
+on the base element instead, so the component owns a signal and the node follows
+it. `overlay` takes `open` and `anchor`, `focusable` takes `focused`,
+`text_input` takes `value`, and `scroll` takes `offset` and `reveal` (the index
+of the child to bring into view). `unstyled::button`, `unstyled::toggle` and
+`unstyled::text_input` forward `focused` to the `focusable` underneath them.
+
+These props are edge triggered: the effect behind them runs when the value it
+reads changes, so a component that wants to move focus, or close a popup, writes
+its signal and lets the effect do the work. Because the document can also change
+that state on its own — a click moves focus, a scrim click dismisses an overlay —
+pair the prop with the matching callback and write the signal back:
+`on_focus_change` for `focused` and `on_dismiss` for `open`. Without the write
+back the signal goes stale and the next write of the value it already holds
+changes nothing.
+
+A `Selector` is the natural source for `focused` in a list: keep one signal
+naming the row that should have focus and give each row `focused={selection
+.memo(Row(index))}`, so moving focus wakes only the row that lost it and the one
+that gained it.
+
+```rust
+<unstyled::button
+    focused={focus.memo(Focus::Row(index))}
+    on_focus_change={move |has_focus: bool| {
+        if !has_focus && state.focus.get_untracked() == Focus::Row(index) {
+            state.set_focus.set(Focus::Away);
+        }
+    }}
+/>
+```
+
+When the shape of a subtree depends on a value rather than a flag, `dynamic`
+rebuilds it: it holds one child, and every time its `value` changes it builds a
+replacement from `view` and removes the old one. Use it where a `show` would
+need the value itself rather than a boolean, like a menu whose items can be
+swapped out.
+
+```rust
+<dynamic value={items} view={move |items: Vec<MenuItem>| view! { <menu_list items={items} /> }} />
+```
+
 `@intrinsic`/`@fixed(size)`/`@percent(weight)` prefix a child inside `view!` to
 give it an `ItemSize` in a `row`/`column`. See
 `crates/beui/examples/counter.rs` for a full example and
@@ -276,9 +320,9 @@ panics with "node was removed" the next time one of its inputs changes.
 
 Effects created outside any component body — directly in `build`'s closure, for
 instance — belong to the document's root scope and live as long as the document.
-`show`, `for_each`, and `virtual_list` open a scope per child they build,
-registered against that child's node, so dropping a row or scrolling one out of
-view disposes exactly that row's effects. Any other code that builds a subtree
+`show`, `dynamic`, `for_each`, and `virtual_list` open a scope per child they
+build, registered against that child's node, so dropping a row or scrolling one
+out of view disposes exactly that row's effects. Any other code that builds a subtree
 it will later remove on its own must do the same, with `in_new_scope`; building
 it in the enclosing component's scope instead leaves the subtree's effects alive
 after `remove_node` and they panic the next time an input changes.
