@@ -85,7 +85,7 @@ use crate::input::{Event, Key, Modifiers, PointerButton, RawInput};
 
 use crate::base::list::{Direction, ItemSize};
 use crate::inspector::Inspector;
-use crate::reactive::{with_document, Prop};
+use crate::reactive::with_document;
 use crate::styled;
 use crate::unstyled;
 use beui_macros::view;

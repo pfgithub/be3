@@ -7,9 +7,9 @@ use crate::base::{ScrollPosition, TextAlign};
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
-    component, create_signal, intrinsic, view, with_reactive_scope, CenteredRowBuilder,
-    ClickCatcherBuilder, ColumnBuilder, FillBuilder, NodeRef, OutlineBuilder, PaddingBuilder, Prop,
-    ReadSignal, RowBuilder, ScrollBuilder, SpacerBuilder, WriteSignal,
+    component, create_memo, create_signal, intrinsic, view, with_reactive_scope,
+    CenteredRowBuilder, ClickCatcherBuilder, ColumnBuilder, FillBuilder, NodeRef, OutlineBuilder,
+    PaddingBuilder, ReadSignal, RowBuilder, ScrollBuilder, SpacerBuilder, WriteSignal,
 };
 use crate::styled::theme::{
     ACCENT, BORDER_WIDTH, CHIP_RADIUS, ON_ACCENT, RADIUS, SCROLLBAR_WIDTH, SEPARATOR_HEIGHT,
@@ -152,11 +152,11 @@ pub(crate) fn toggle_text(picking: bool) -> Color32 {
 
 #[component]
 fn pick_toggle(state: Rc<State>, picking: ReadSignal<bool>) -> NodeId {
-    let label_color = {
+    let label_color = create_memo({
         let picking = picking.clone();
-        Prop::Dynamic(Box::new(move || toggle_text(picking.get())))
-    };
-    let fill_color = Prop::Dynamic(Box::new(move || toggle_fill(picking.get())));
+        move || toggle_text(picking.get())
+    });
+    let fill_color = create_memo(move || toggle_fill(picking.get()));
     let picker = state;
     view! {
         <unstyled::pressable on_click={move || picker.toggle_picking()}>

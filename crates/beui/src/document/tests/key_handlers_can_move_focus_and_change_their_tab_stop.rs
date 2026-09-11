@@ -1,5 +1,5 @@
 use super::*;
-use crate::reactive::create_signal;
+use crate::reactive::{create_memo, create_signal};
 use crate::KeyPress;
 
 #[test]
@@ -12,7 +12,7 @@ fn key_handlers_can_move_focus_and_change_their_tab_stop() {
         let face = button_face(document, "First");
         view! {
             <unstyled::button
-                tab_stop={Prop::Dynamic(Box::new(move || !skipped.get()))}
+                tab_stop={create_memo(move || !skipped.get())}
                 on_key={move |press: KeyPress| {
                     if press.key != Key::ArrowRight || !press.pressed {
                         return false;

@@ -19,9 +19,9 @@ use crate::node::NodeId;
 use beui_macros::{component, view};
 
 use crate::reactive::{
-    component_detail, component_state, copy_text, create_signal, set_component_state, Callback,
-    ClickCatcherBuilder, FocusableBuilder, NodeRef, PaddingBuilder, Prop, ReadSignal, Render,
-    TextBuilder, WriteSignal,
+    component_detail, component_state, copy_text, create_memo, create_signal, set_component_state,
+    Callback, ClickCatcherBuilder, FocusableBuilder, Memo, NodeRef, PaddingBuilder, Prop,
+    ReadSignal, Render, TextBuilder, WriteSignal,
 };
 
 const FONT_SIZE: f32 = 14.0;
@@ -178,35 +178,28 @@ pub fn text_input(
     root
 }
 
-fn shown_string(value: &ReadSignal<String>, placeholder: Prop<String>) -> Prop<String> {
-    let (value, placeholder) = (value.clone(), reader(placeholder));
-    Prop::Dynamic(Box::new(move || match value.get() {
+fn shown_string(value: &ReadSignal<String>, placeholder: Prop<String>) -> Memo<String> {
+    let (value, placeholder) = (value.clone(), placeholder.reader());
+    create_memo(move || match value.get() {
         text if text.is_empty() => placeholder(),
         text => text,
-    }))
+    })
 }
 
 fn shown_color(
     value: &ReadSignal<String>,
     color: Prop<Color32>,
     placeholder_color: Prop<Color32>,
-) -> Prop<Color32> {
+) -> Memo<Color32> {
     let value = value.clone();
-    let (color, placeholder_color) = (reader(color), reader(placeholder_color));
-    Prop::Dynamic(Box::new(move || {
+    let (color, placeholder_color) = (color.reader(), placeholder_color.reader());
+    create_memo(move || {
         if value.get().is_empty() {
             placeholder_color()
         } else {
             color()
         }
-    }))
-}
-
-fn reader<T: Clone + 'static>(prop: Prop<T>) -> Box<dyn Fn() -> T> {
-    match prop {
-        Prop::Static(value) => Box::new(move || value.clone()),
-        Prop::Dynamic(read) => read,
-    }
+    })
 }
 
 fn handle(document: &Document, input: NodeId) -> &Handle {

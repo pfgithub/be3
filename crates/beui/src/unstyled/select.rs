@@ -7,9 +7,9 @@ use crate::document::Document;
 use crate::input::{Key, KeyPress};
 use crate::node::NodeId;
 use crate::reactive::{
-    component_state, create_effect, create_selector, create_signal, current_component, intrinsic,
-    set_component_state, Callback, ColumnBuilder, Memo, NodeRef, Prop, ReadSignal, Render,
-    RenderFn, ScrollBuilder, Selector, VisibilityBuilder, WriteSignal,
+    component_state, create_effect, create_selector, create_signal, intrinsic, set_component_state,
+    Callback, ColumnBuilder, Memo, NodeRef, Prop, ReadSignal, Render, RenderFn, ScrollBuilder,
+    Selector, VisibilityBuilder, WriteSignal,
 };
 use crate::unstyled;
 use crate::unstyled::button::ButtonHandle;
@@ -36,7 +36,7 @@ pub struct SelectOptionHandle {
 
 struct Row {
     button: NodeRef,
-    visibility: NodeId,
+    visibility: NodeRef,
     label: String,
     visible: ReadSignal<bool>,
     set_visible: WriteSignal<bool>,
@@ -74,7 +74,6 @@ pub fn select(
     option: Option<RenderFn<SelectOptionHandle>>,
     popup: Option<Render<NodeId>>,
 ) -> NodeId {
-    let select = current_component();
     let selected_prop = selected;
     let initial = selected_prop.peek().filter(|index| *index < options.len());
     let option = option.unwrap_or_else(|| RenderFn::new(|_| view! { <column spacing={0.0} /> }));
@@ -87,90 +86,25 @@ pub fn select(
     });
     let (selected, set_selected) = create_signal(initial);
 
-    let trigger_view =
-        trigger.unwrap_or_else(|| Render::new(|_| view! { <column spacing={0.0} /> }));
-    let trigger_content = {
-        let selected = selected.clone();
-        move |handle: ButtonHandle| {
-            trigger_view.call(SelectTriggerHandle {
-                selected,
-                hovered: handle.hovered,
-                active: handle.active,
-                focused: handle.focused,
-            })
-        }
-    };
-
-    let rows: Vec<Row> = options
-        .iter()
-        .enumerate()
-        .map(|(index, label)| row(select, index, label, &option, &highlight))
-        .collect();
-    let items: Vec<_> = rows
-        .iter()
-        .map(|row| intrinsic(row.visibility))
-        .collect::<Vec<_>>();
-
-    let (trigger, overlay, search, list) = (
-        NodeRef::new(),
-        NodeRef::new(),
-        NodeRef::new(),
-        NodeRef::new(),
-    );
-
-    let root = view! {
-        <column spacing={0.0}>
-            <unstyled::button
-                node_ref={&trigger}
-                content={trigger_content}
-                on_click={move || open(&handle(select))}
-                on_key={move |press: KeyPress| trigger_key(&handle(select), press)}
-            />
-            <overlay
-                node_ref={&overlay}
-                anchor={OverlayAnchor::Node(trigger.get())}
-                placement={Placement::BelowStart}
-                on_dismiss={{
-                    let trigger = trigger.clone();
-                    move || unstyled::focus_button(trigger.get())
-                }}
-            >
-                {popup.call(view! {
-                    <column spacing={6.0}>
-                        <unstyled::text_input
-                            node_ref={&search}
-                            value={String::new()}
-                            placeholder={search_placeholder}
-                            font_size={search_font_size}
-                            color={search_color}
-                            placeholder_color={search_placeholder_color}
-                            selection_color={search_selection_color}
-                            caret_color={search_caret_color}
-                            padding_horizontal={search_padding_horizontal}
-                            content={search_content.unwrap_or_else(|| Render::new(|handle: TextInputHandle| handle.field))}
-                            on_change={move |text: String| filter(&handle(select), &text)}
-                            on_submit={move |_text: String| {
-                                let state = handle(select);
-                                if let Some(index) = state.highlighted.get_untracked() {
-                                    confirm(&state, index);
-                                }
-                            }}
-                            on_key_override={move |press: KeyPress| navigate(&handle(select), press)}
-                        />
-                        @fixed(OPTIONS_MAX_HEIGHT) <scroll node_ref={&list} children={items} />
-                    </column>
-                })}
-            </overlay>
-        </column>
-    };
-
     let state: Handle = Rc::new(State {
-        trigger,
-        overlay,
-        search,
-        list,
-        rows,
-        selected,
+        trigger: NodeRef::new(),
+        overlay: NodeRef::new(),
+        search: NodeRef::new(),
+        list: NodeRef::new(),
+        rows: options
+            .iter()
+            .map(|label| {
+                let (visible, set_visible) = create_signal(true);
+                Row {
+                    button: NodeRef::new(),
+                    visibility: NodeRef::new(),
+                    label: label.clone(),
+                    visible,
+                    set_visible,
+                }
+            })
+            .collect(),
+        selected: selected.clone(),
         set_selected,
         highlighted,
         set_highlighted,
@@ -178,44 +112,100 @@ pub fn select(
     });
     set_component_state(state.clone());
 
-    selected_prop.apply(move |selected| apply_requested_selection(&state, selected));
+    let trigger_view =
+        trigger.unwrap_or_else(|| Render::new(|_| view! { <column spacing={0.0} /> }));
+    let trigger_content = move |handle: ButtonHandle| {
+        trigger_view.call(SelectTriggerHandle {
+            selected,
+            hovered: handle.hovered,
+            active: handle.active,
+            focused: handle.focused,
+        })
+    };
+
+    let items: Vec<_> = state
+        .rows
+        .iter()
+        .enumerate()
+        .map(|(index, row)| {
+            intrinsic(view! {
+                <select_row
+                    node_ref={&row.visibility}
+                    state={state.clone()}
+                    index={index}
+                    label={row.label.clone()}
+                    option={option.clone()}
+                    highlight={highlight.clone()}
+                    visible={row.visible.clone()}
+                    button_ref={row.button.clone()}
+                />
+            })
+        })
+        .collect();
+
+    let root = {
+        let (open_state, key_state, filter_state, submit_state, navigate_state) = (
+            state.clone(),
+            state.clone(),
+            state.clone(),
+            state.clone(),
+            state.clone(),
+        );
+        let dismiss_trigger = state.trigger.clone();
+        view! {
+            <column spacing={0.0}>
+                <unstyled::button
+                    node_ref={&state.trigger}
+                    content={trigger_content}
+                    on_click={move || open(&open_state)}
+                    on_key={move |press: KeyPress| trigger_key(&key_state, press)}
+                />
+                <overlay
+                    node_ref={&state.overlay}
+                    anchor={OverlayAnchor::Node(state.trigger.get())}
+                    placement={Placement::BelowStart}
+                    on_dismiss={move || unstyled::focus_button(dismiss_trigger.get())}
+                >
+                    {popup.call(view! {
+                        <column spacing={6.0}>
+                            <unstyled::text_input
+                                node_ref={&state.search}
+                                value={String::new()}
+                                placeholder={search_placeholder}
+                                font_size={search_font_size}
+                                color={search_color}
+                                placeholder_color={search_placeholder_color}
+                                selection_color={search_selection_color}
+                                caret_color={search_caret_color}
+                                padding_horizontal={search_padding_horizontal}
+                                content={search_content.unwrap_or_else(|| Render::new(|handle: TextInputHandle| handle.field))}
+                                on_change={move |text: String| filter(&filter_state, &text)}
+                                on_submit={move |_text: String| {
+                                    if let Some(index) = submit_state.highlighted.get_untracked() {
+                                        confirm(&submit_state, index);
+                                    }
+                                }}
+                                on_key_override={move |press: KeyPress| navigate(&navigate_state, press)}
+                            />
+                            @fixed(OPTIONS_MAX_HEIGHT) <scroll node_ref={&state.list} children={items} />
+                        </column>
+                    })}
+                </overlay>
+            </column>
+        }
+    };
+
+    selected_prop.apply({
+        let state = state.clone();
+        move |selected| apply_requested_selection(&state, selected)
+    });
 
     root
 }
 
-fn row(
-    select: NodeId,
-    index: usize,
-    label: &str,
-    option: &RenderFn<SelectOptionHandle>,
-    highlight: &Selector<Option<usize>>,
-) -> Row {
-    let (visible, set_visible) = create_signal(true);
-    let button = NodeRef::new();
-    let visibility = view! {
-        <select_row
-            select={select}
-            index={index}
-            label={label.to_owned()}
-            option={option.clone()}
-            highlight={highlight.clone()}
-            visible={visible.clone()}
-            button_ref={button.clone()}
-        />
-    };
-
-    Row {
-        button,
-        visibility,
-        label: label.to_owned(),
-        visible,
-        set_visible,
-    }
-}
-
 #[component]
 fn select_row(
-    select: NodeId,
+    state: Handle,
     index: usize,
     label: String,
     option: RenderFn<SelectOptionHandle>,
@@ -224,6 +214,7 @@ fn select_row(
     button_ref: Option<NodeRef>,
 ) -> NodeId {
     let button_ref = button_ref.unwrap_or_default();
+    let (hover_state, click_state) = (state.clone(), state);
     view! {
         <visibility visible={visible}>
             <unstyled::button
@@ -233,7 +224,7 @@ fn select_row(
                     let hovered = button.hovered.clone();
                     create_effect(move || {
                         if hovered.get() {
-                            handle(select).set_highlighted.set(Some(index));
+                            hover_state.set_highlighted.set(Some(index));
                         }
                     });
                     option.call(SelectOptionHandle {
@@ -244,14 +235,10 @@ fn select_row(
                         focused: button.focused,
                     })
                 }}
-                on_click={move || confirm(&handle(select), index)}
+                on_click={move || confirm(&click_state, index)}
             />
         </visibility>
     }
-}
-
-fn handle(select: NodeId) -> Handle {
-    component_state::<Handle, _>(select, Rc::clone)
 }
 
 pub fn select_selected(document: &Document, select: NodeId) -> Option<usize> {
@@ -268,7 +255,7 @@ pub fn select_open(document: &Document, select: NodeId) -> bool {
 }
 
 pub fn set_select_open(select: NodeId, opened: bool) {
-    let state = handle(select);
+    let state = component_state::<Handle, _>(select, Rc::clone);
     if opened {
         open(&state);
     } else {
@@ -277,7 +264,9 @@ pub fn set_select_open(select: NodeId, opened: bool) {
 }
 
 pub fn focus_select(select: NodeId) {
-    unstyled::focus_button(handle(select).trigger.get());
+    unstyled::focus_button(component_state::<Handle, _>(select, |state| {
+        state.trigger.get()
+    }));
 }
 
 pub fn select_trigger(document: &Document, select: NodeId) -> NodeId {
@@ -413,6 +402,6 @@ fn navigate(state: &State, press: KeyPress) -> bool {
 
 fn reveal_highlighted(state: &State) {
     if let Some(index) = state.highlighted.get_untracked() {
-        reveal_scroll_item(state.list.get(), state.rows[index].visibility);
+        reveal_scroll_item(state.list.get(), state.rows[index].visibility.get());
     }
 }

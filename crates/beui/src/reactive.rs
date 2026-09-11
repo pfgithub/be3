@@ -151,14 +151,13 @@ pub fn component(name: &'static str, f: impl FnOnce() -> NodeId) -> NodeId {
     shadow
 }
 
-pub fn current_component() -> NodeId {
+fn current_component() -> NodeId {
     CURRENT_COMPONENT
         .with(Cell::get)
-        .expect("current_component() called outside of a #[component] body")
+        .expect("a component binding was used outside of a #[component] body")
 }
 
-pub fn set_shadow_detail(shadow: NodeId, detail: impl Into<String>) {
-    let detail = detail.into();
+fn set_detail(shadow: NodeId, detail: String) {
     with_document(|document| {
         if document.contains(shadow) {
             document.set_component_detail(shadow, detail);
@@ -171,11 +170,8 @@ pub fn set_shadow_detail(shadow: NodeId, detail: impl Into<String>) {
 }
 
 pub fn component_detail(detail: impl Fn() -> String + 'static) {
-    shadow_detail(current_component(), detail);
-}
-
-pub fn shadow_detail(shadow: NodeId, detail: impl Fn() -> String + 'static) {
-    create_effect(move || set_shadow_detail(shadow, detail()));
+    let shadow = current_component();
+    create_effect(move || set_detail(shadow, detail()));
 }
 
 pub fn set_component_state<T: 'static>(state: T) {
@@ -455,6 +451,16 @@ impl<T: 'static> Prop<T> {
             Prop::Static(value) => value.clone(),
             Prop::Dynamic(read) => read(),
         })
+    }
+
+    pub fn reader(self) -> Box<dyn Fn() -> T>
+    where
+        T: Clone,
+    {
+        match self {
+            Prop::Static(value) => Box::new(move || value.clone()),
+            Prop::Dynamic(read) => read,
+        }
     }
 
     pub fn map<U: 'static>(self, f: impl Fn(T) -> U + 'static) -> Prop<U> {

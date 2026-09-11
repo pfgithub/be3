@@ -7,9 +7,9 @@ use crate::document::Document;
 use crate::input::{Key, KeyPress};
 use crate::node::NodeId;
 use crate::reactive::{
-    component_state, create_effect, create_selector, create_signal, current_component, intrinsic,
-    set_component_name, set_component_state, set_shadow_detail, Callback, ListBuilder, Memo,
-    NodeRef, Prop, ReadSignal, RenderFn, WriteSignal,
+    component_detail, component_state, create_effect, create_selector, create_signal, intrinsic,
+    set_component_name, set_component_state, Callback, ListBuilder, Memo, NodeRef, Prop,
+    ReadSignal, RenderFn, WriteSignal,
 };
 use crate::unstyled;
 use crate::unstyled::ButtonHandle;
@@ -45,7 +45,6 @@ struct Typeahead {
 }
 
 struct State {
-    shadow: NodeId,
     options: Vec<Option_>,
     focused: Rc<RefCell<Vec<ReadSignal<bool>>>>,
     selected: ReadSignal<Option<usize>>,
@@ -66,9 +65,8 @@ pub fn choice(
     option: Option<RenderFn<ChoiceOptionHandle>>,
 ) -> NodeId {
     set_component_name(kind_name(kind));
-    let choice = current_component();
     let selected_prop = selected;
-    let option = Rc::new(option.expect("choice requires an `option` builder"));
+    let option = option.expect("choice requires an `option` builder");
     let (selected, set_selected) = create_signal(None);
     let selection = create_selector({
         let selected = selected.clone();
@@ -79,66 +77,65 @@ pub fn choice(
         move || selected.get().unwrap_or(0)
     });
 
-    let mut options = Vec::new();
-    let focused_signals: Rc<RefCell<Vec<ReadSignal<bool>>>> = Rc::default();
-    let mut buttons = Vec::new();
-    for (index, label) in labels.iter().enumerate() {
-        let button = NodeRef::new();
-        let tab_stop = {
-            let tab_stop_owner = tab_stop_owner.clone();
-            Prop::Dynamic(Box::new(move || tab_stop_owner.is_selected(&index)))
-        };
-        let is_selected = selection.memo(Some(index));
-        let content = {
-            let option = option.clone();
-            let label = label.clone();
-            let focused_signals = focused_signals.clone();
-            Box::new(move |button: ButtonHandle| {
-                focused_signals.borrow_mut().push(button.focused.clone());
-                option.call(ChoiceOptionHandle {
-                    index,
-                    label,
-                    selected: is_selected,
-                    hovered: button.hovered,
-                    active: button.active,
-                    focused: button.focused,
-                })
-            })
-        };
-        let node = view! {
-            <unstyled::button
-                node_ref={&button}
-                tab_stop={tab_stop}
-                content={content}
-                on_click={move || select(&handle(choice), Some(index))}
-                on_key={move |press: KeyPress| key(&handle(choice), index, press)}
-                on_text={move |text: String| {
-                    let state = handle(choice);
-                    if state.kind == ChoiceKind::Listbox {
-                        typeahead(&state, index, &text);
-                    }
-                }}
-            />
-        };
-        buttons.push(intrinsic(node));
-        options.push(Option_ {
-            button,
-            label: label.clone(),
-        });
-    }
-
     let state: Handle = Rc::new(State {
-        shadow: choice,
-        options,
-        focused: focused_signals.clone(),
-        selected,
+        options: labels
+            .iter()
+            .map(|label| Option_ {
+                button: NodeRef::new(),
+                label: label.clone(),
+            })
+            .collect(),
+        focused: Rc::default(),
+        selected: selected.clone(),
         set_selected,
         kind,
         typeahead: RefCell::default(),
         on_change,
     });
     set_component_state(state.clone());
-    set_shadow_detail(choice, String::new());
+    component_detail({
+        let state = state.clone();
+        move || match selected.get() {
+            Some(index) => state.options[index].label.clone(),
+            None => String::new(),
+        }
+    });
+
+    let buttons: Vec<_> = labels
+        .iter()
+        .enumerate()
+        .map(|(index, label)| {
+            let option = option.clone();
+            let label = label.clone();
+            let is_selected = selection.memo(Some(index));
+            let (focus, click, key_press, text) =
+                (state.clone(), state.clone(), state.clone(), state.clone());
+            intrinsic(view! {
+                <unstyled::button
+                    node_ref={&state.options[index].button}
+                    tab_stop={tab_stop_owner.memo(index)}
+                    content={move |button: ButtonHandle| {
+                        focus.focused.borrow_mut().push(button.focused.clone());
+                        option.call(ChoiceOptionHandle {
+                            index,
+                            label,
+                            selected: is_selected,
+                            hovered: button.hovered,
+                            active: button.active,
+                            focused: button.focused,
+                        })
+                    }}
+                    on_click={move || select(&click, Some(index))}
+                    on_key={move |press: KeyPress| key(&key_press, index, press)}
+                    on_text={move |typed: String| {
+                        if text.kind == ChoiceKind::Listbox {
+                            typeahead(&text, index, &typed);
+                        }
+                    }}
+                />
+            })
+        })
+        .collect();
 
     if kind == ChoiceKind::Listbox {
         let state = state.clone();
@@ -163,10 +160,6 @@ pub fn choice(
     view! { <list direction={direction} spacing={6.0} children={buttons} /> }
 }
 
-fn handle(choice: NodeId) -> Handle {
-    component_state::<Handle, _>(choice, Rc::clone)
-}
-
 pub fn choice_selected(document: &Document, choice: NodeId) -> Option<usize> {
     document.component_state::<Handle>(choice).selected.get()
 }
@@ -176,7 +169,7 @@ pub fn choice_selected_signal(document: &Document, choice: NodeId) -> ReadSignal
 }
 
 pub fn focus_choice(choice: NodeId) {
-    let state = handle(choice);
+    let state = component_state::<Handle, _>(choice, Rc::clone);
     let index = state.selected.get_untracked().unwrap_or(0);
     if let Some(option) = state.options.get(index) {
         unstyled::focus_button(option.button.get());
@@ -188,11 +181,6 @@ fn sync_selected(state: &State, selected: Option<usize>) {
         return;
     }
     state.set_selected.set(selected);
-    let detail = match selected {
-        Some(index) => state.options[index].label.clone(),
-        None => String::new(),
-    };
-    set_shadow_detail(state.shadow, detail);
 }
 
 fn select(state: &State, selected: Option<usize>) {

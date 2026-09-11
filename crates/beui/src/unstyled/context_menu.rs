@@ -69,20 +69,24 @@ pub fn context_menu(
         let menu = NodeRef::new();
         let replacement = in_new_scope({
             let (menu, row, panel) = (menu.clone(), row.clone(), panel.clone());
+            let on_select = on_select.clone();
             move || {
                 panel.call(view! {
-                    <menu_list node_ref={&menu} items={items} row={row} panel={panel.clone()} />
+                    <menu_list
+                        node_ref={&menu}
+                        items={items}
+                        row={row}
+                        panel={panel.clone()}
+                        on_select={move |path: Vec<usize>| {
+                            on_select.call(path);
+                            close_overlay(overlay);
+                        }}
+                    />
                 })
             }
         });
         replace_overlay_content(overlay, replacement);
-        let menu = menu.get();
-        content.set(Some(menu));
-        let on_select = on_select.clone();
-        menu::menu_list_on_select(menu).set(move |path: Vec<usize>| {
-            on_select.call(path);
-            close_overlay(overlay);
-        });
+        content.set(Some(menu.get()));
     });
 
     catcher

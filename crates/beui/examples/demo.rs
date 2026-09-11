@@ -1,7 +1,7 @@
 use beui::reactive::{
-    create_memo, create_selector, create_signal, view, with_reactive_scope, CenteredRowBuilder,
-    ColumnBuilder, FillBuilder, OutlineBuilder, PaddingBuilder, Prop, ReadSignal, RowBuilder,
-    Selector, ShowBuilder, SpacerBuilder, VirtualListBuilder, VisibilityBuilder, WriteSignal,
+    build, create_memo, create_selector, create_signal, view, CenteredRowBuilder, ColumnBuilder,
+    FillBuilder, Memo, OutlineBuilder, PaddingBuilder, ReadSignal, RowBuilder, Selector,
+    ShowBuilder, SpacerBuilder, VirtualListBuilder, VisibilityBuilder, WriteSignal,
 };
 use beui::styled::theme::{
     ACCENT, ACCENT_SOFT, BACKGROUND, RADIUS, SCROLLBAR_WIDTH, SEPARATOR_HEIGHT, SURFACE,
@@ -38,10 +38,8 @@ struct DemoApp {
 
 impl DemoApp {
     fn new() -> Self {
-        let mut document = Document::new();
-        let (count, set_count) = create_signal(0i64);
-
-        let root = with_reactive_scope(&mut document, || {
+        let document = build(|| {
+            let (count, set_count) = create_signal(0i64);
             view! {
                 <fill color={BACKGROUND} radius={0}>
                     <column spacing={0.0}>
@@ -52,7 +50,6 @@ impl DemoApp {
                 </fill>
             }
         });
-        document.set_root(root);
 
         Self { document }
     }
@@ -112,57 +109,67 @@ impl Rows {
 
 #[component]
 fn scroll_row(index: usize, rows: Rows, compact: bool) -> NodeId {
-    let is_selected = rows.selection.memo(Some(index));
+    let selected = rows.selection.memo(Some(index));
+    let select_rows = rows.clone();
+    view! {
+        <unstyled::button
+            on_click={move || select_rows.select(index)}
+            content={move |handle| view! {
+                <scroll_row_face
+                    index={index}
+                    handle={handle}
+                    selected={selected}
+                    timings={rows.timings}
+                    compact={compact}
+                />
+            }}
+        />
+    }
+}
 
+#[component]
+fn scroll_row_face(
+    index: usize,
+    handle: unstyled::ButtonHandle,
+    selected: Memo<bool>,
+    timings: ReadSignal<bool>,
+    compact: bool,
+) -> NodeId {
+    let unstyled::ButtonHandle {
+        hovered, focused, ..
+    } = handle;
     let vertical = if compact {
         COMPACT_ROW_PADDING_VERTICAL
     } else {
         ROW_PADDING_VERTICAL
     };
-    let timings = rows.timings.clone();
-    let value_color = {
-        let is_selected = is_selected.clone();
-        Prop::Dynamic(Box::new(move || {
-            if is_selected.get() {
-                ACCENT
-            } else {
-                TEXT_MUTED
-            }
-        }))
-    };
+    let value_color = create_memo({
+        let selected = selected.clone();
+        move || if selected.get() { ACCENT } else { TEXT_MUTED }
+    });
+    let fill_color = create_memo(move || match (selected.get(), hovered.get()) {
+        (true, _) => ACCENT_SOFT,
+        (false, true) => SURFACE_RAISED,
+        (false, false) => Color32::TRANSPARENT,
+    });
 
     view! {
-        <unstyled::button
-            on_click={move || rows.select(index)}
-            content={Box::new(move |handle: unstyled::ButtonHandle| {
-                let hovered = handle.hovered;
-                let fill_color = Prop::Dynamic(Box::new(move || {
-                    match (is_selected.get(), hovered.get()) {
-                        (true, _) => ACCENT_SOFT,
-                        (false, true) => SURFACE_RAISED,
-                        (false, false) => Color32::TRANSPARENT,
-                    }
-                }));
-                view! {
-                    <outline color={ACCENT} width={2.0} radius={RADIUS} offset={0.0} visible={handle.focused}>
-                        <fill color={fill_color} radius={RADIUS}>
-                            <padding horizontal={ROW_PADDING_HORIZONTAL} vertical={vertical}>
-                                <centered_row spacing={12.0}>
-                                    @percent(100.0) <body content={format!("Row {index}")} />
-                                    <visibility visible={timings}>
-                                        <caption
-                                            content={format!("{} ms", 7 + index * 3 % 91)}
-                                            align={TextAlign::End}
-                                            color={value_color}
-                                        />
-                                    </visibility>
-                                </centered_row>
-                            </padding>
-                        </fill>
-                    </outline>
-                }
-            })}
-        />
+        <outline color={ACCENT} width={2.0} radius={RADIUS} offset={0.0} visible={focused}>
+            <fill color={fill_color} radius={RADIUS}>
+                <padding horizontal={ROW_PADDING_HORIZONTAL} vertical={vertical}>
+                    <centered_row spacing={12.0}>
+                        @percent(100.0) <body content={format!("Row {index}")} />
+                        <visibility visible={timings}>
+                            <caption
+                                content={format!("{} ms", 7 + index * 3 % 91)}
+                                align={TextAlign::End}
+                                color={value_color}
+                            />
+                        </visibility>
+                    </centered_row>
+                </padding>
+            </fill>
+        </outline>
     }
 }
 
@@ -237,16 +244,16 @@ fn sidebar() -> NodeId {
 fn main_panel(count: ReadSignal<i64>) -> NodeId {
     let (status_text, set_status_text) = create_signal("Nothing selected".to_string());
     let rows = Rows::new(set_status_text);
-    let row_height = {
+    let row_height = create_memo({
         let compact = rows.compact.clone();
-        Prop::Dynamic(Box::new(move || {
+        move || {
             if compact.get() {
                 COMPACT_ROW_HEIGHT
             } else {
                 ROW_HEIGHT
             }
-        }))
-    };
+        }
+    });
     let item_rows = rows.clone();
     let (scroll_position, set_scroll_position) = create_signal(ScrollPosition::ZERO);
 
@@ -273,11 +280,11 @@ fn main_panel(count: ReadSignal<i64>) -> NodeId {
                             item_height={row_height}
                             focus_color={ACCENT}
                             on_change={move |position| set_scroll_position.set(position)}
-                            item={Box::new(move |index| {
+                            item={move |index: usize| {
                                 let rows = item_rows.clone();
                                 let compact = rows.compact.get();
                                 view! { <scroll_row index={index} rows={rows} compact={compact} /> }
-                            })}
+                            }}
                         />
                         @fixed(SCROLLBAR_WIDTH) <scrollbar position={scroll_position} />
                     </row>
@@ -309,11 +316,11 @@ fn controls(rows: Rows) -> NodeId {
                     set_selected_tab.set(selected);
                 }} />
                 <column spacing={0.0}>
-                    <show condition={list_condition} then={Box::new(move || view! { <list_controls rows={list_rows} /> })} />
-                    <show condition={load_condition} then={Box::new(|| view! { <load_controls /> })} />
-                    <show condition={name_condition} then={Box::new(|| view! { <name_controls /> })} />
-                    <show condition={choices_condition} then={Box::new(|| view! { <choice_controls /> })} />
-                    <show condition={menus_condition} then={Box::new(|| view! { <menu_controls /> })} />
+                    <show condition={list_condition} then={move || view! { <list_controls rows={list_rows} /> }} />
+                    <show condition={load_condition} then={|| view! { <load_controls /> }} />
+                    <show condition={name_condition} then={|| view! { <name_controls /> }} />
+                    <show condition={choices_condition} then={|| view! { <choice_controls /> }} />
+                    <show condition={menus_condition} then={|| view! { <menu_controls /> }} />
                 </column>
             </column>
         </card>

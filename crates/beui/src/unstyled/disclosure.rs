@@ -58,14 +58,14 @@ pub fn disclosure(
                     set_open.set(next);
                     on_toggle.call(next);
                 }}
-                content={Box::new(move |handle: ButtonHandle| {
+                content={move |handle: ButtonHandle| {
                     header.call(DisclosureHandle {
                         hovered: handle.hovered,
                         active: handle.active,
                         focused: handle.focused,
                         open: open_for_header,
                     })
-                })}
+                }}
             />
             <visibility visible={open_read.clone()}>{content}</visibility>
         </column>
