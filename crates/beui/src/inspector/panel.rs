@@ -62,55 +62,22 @@ pub(crate) struct Panel {
     pub(crate) rows: Vec<Row>,
 }
 
-struct Built {
-    scroll: NodeId,
-    set_count: WriteSignal<String>,
-    set_picking: WriteSignal<bool>,
-    set_selection: WriteSignal<String>,
-    set_bounds: WriteSignal<String>,
-    rows: Vec<Row>,
-    panel: NodeId,
-}
-
 pub(crate) fn build(entries: &[Entry], summary: &Summary, state: &Rc<State>, offset: f32) -> Panel {
     let mut document = Document::new();
     document.inspectable = false;
 
-    let built = with_reactive_scope(&mut document, || {
-        build_tree(entries, summary, state, offset)
-    });
-    document.set_root(built.panel);
-
-    Panel {
-        document,
-        scroll: built.scroll,
-        set_count: built.set_count,
-        set_picking: built.set_picking,
-        set_selection: built.set_selection,
-        set_bounds: built.set_bounds,
-        rows: built.rows,
-    }
-}
-
-fn build_tree(entries: &[Entry], summary: &Summary, state: &Rc<State>, offset: f32) -> Built {
     let (count_text, set_count) = create_signal(total_label(summary.total));
     let (picking, set_picking) = create_signal(summary.picking);
     let (selection_text, set_selection) = create_signal(summary.selection.clone());
     let (bounds_text, set_bounds) = create_signal(summary.bounds.clone());
-
     let (position, set_position) = create_signal(ScrollPosition::ZERO);
-    let rows: Vec<Row> = entries.iter().map(|entry| row(entry, state)).collect();
-    let items: Vec<NodeId> = rows.iter().map(|row| row.row).collect();
-    let scroll = view! {
-        <scroll
-            offset={offset}
-            focus_color={ACCENT}
-            on_change={move |value| set_position.set(value)}
-            children={items.into_iter().map(intrinsic).collect::<Vec<_>>()}
-        />
-    };
+    let scroll = NodeRef::new();
+    let mut rows = Vec::new();
 
-    let panel = view! {
+    let root = with_reactive_scope(&mut document, || {
+        rows = entries.iter().map(|entry| row(entry, state)).collect();
+        let items: Vec<_> = rows.iter().map(|row| intrinsic(row.row)).collect();
+        view! {
         <row spacing={0.0}>
             @fixed(SEPARATOR_HEIGHT) <separator />
             @percent(100.0) <fill color={SURFACE} radius={0}>
@@ -125,7 +92,13 @@ fn build_tree(entries: &[Entry], summary: &Summary, state: &Rc<State>, offset: f
                     @fixed(SEPARATOR_HEIGHT) <separator />
                     @percent(100.0) <padding horizontal={BODY_PADDING} vertical={BODY_PADDING}>
                         <row spacing={BODY_SPACING}>
-                            @percent(100.0) {scroll}
+                            @percent(100.0) <scroll
+                                node_ref={&scroll}
+                                offset={offset}
+                                focus_color={ACCENT}
+                                on_change={move |value| set_position.set(value)}
+                                children={items}
+                            />
                             @fixed(SCROLLBAR_WIDTH) <scrollbar position={position} />
                         </row>
                     </padding>
@@ -139,16 +112,18 @@ fn build_tree(entries: &[Entry], summary: &Summary, state: &Rc<State>, offset: f
                 </column>
             </fill>
         </row>
-    };
+        }
+    });
+    document.set_root(root);
 
-    Built {
-        scroll,
+    Panel {
+        document,
+        scroll: scroll.get(),
         set_count,
         set_picking,
         set_selection,
         set_bounds,
         rows,
-        panel,
     }
 }
 

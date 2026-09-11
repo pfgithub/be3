@@ -93,7 +93,6 @@ pub(crate) struct Inspector {
     set_picking: WriteSignal<bool>,
     set_selection: WriteSignal<String>,
     set_bounds: WriteSignal<String>,
-    summary: Summary,
     offset: f32,
     pub(crate) width: f32,
     grabbed: Option<f32>,
@@ -121,7 +120,6 @@ impl Inspector {
             set_picking: panel.set_picking,
             set_selection: panel.set_selection,
             set_bounds: panel.set_bounds,
-            summary,
             offset: 0.0,
             width: DEFAULT_WIDTH,
             grabbed: None,
@@ -191,15 +189,34 @@ impl Inspector {
         let entries = tree::collect(target, &self.state);
         let summary = self.summary(target);
         if self.reshaped(&entries) {
-            let panel = panel::build(&entries, &summary, &self.state, self.offset);
-            self.adopt(panel);
-            self.entries = entries;
-            self.summary = summary;
-            return;
+            self.adopt(panel::build(&entries, &summary, &self.state, self.offset));
+        } else {
+            self.publish(&entries, &summary);
         }
+        self.entries = entries;
+    }
 
-        self.update(entries);
-        self.apply(summary);
+    fn publish(&mut self, entries: &[Entry], summary: &Summary) {
+        let Self {
+            document,
+            rows,
+            set_count,
+            set_picking,
+            set_selection,
+            set_bounds,
+            ..
+        } = self;
+        with_reactive_scope(document, || {
+            for (entry, row) in entries.iter().zip(rows.iter()) {
+                row.set_detail.set(entry.detail.clone());
+                row.set_size.set(entry.size.clone());
+                row.set_selected.set(entry.selected);
+            }
+            set_count.set(panel::total_label(summary.total));
+            set_picking.set(summary.picking);
+            set_selection.set(summary.selection.clone());
+            set_bounds.set(summary.bounds.clone());
+        });
     }
 
     fn summary(&self, target: &Document) -> Summary {
@@ -231,55 +248,6 @@ impl Inspector {
                 .iter()
                 .zip(&self.entries)
                 .any(|(entry, previous)| !entry.same_shape(previous))
-    }
-
-    fn update(&mut self, entries: Vec<Entry>) {
-        for (index, entry) in entries.into_iter().enumerate() {
-            let previous = &mut self.entries[index];
-            let row = &self.rows[index];
-            let detail = (entry.detail != previous.detail)
-                .then(|| (row.set_detail.clone(), entry.detail.clone()));
-            let size =
-                (entry.size != previous.size).then(|| (row.set_size.clone(), entry.size.clone()));
-            let selected = (entry.selected != previous.selected)
-                .then(|| (row.set_selected.clone(), entry.selected));
-            with_reactive_scope(&mut self.document, move || {
-                if let Some((set_detail, detail)) = detail {
-                    set_detail.set(detail);
-                }
-                if let Some((set_size, size)) = size {
-                    set_size.set(size);
-                }
-                if let Some((set_selected, selected)) = selected {
-                    set_selected.set(selected);
-                }
-            });
-            *previous = entry;
-        }
-    }
-
-    fn apply(&mut self, summary: Summary) {
-        if summary.total != self.summary.total {
-            let set_count = self.set_count.clone();
-            let text = panel::total_label(summary.total);
-            with_reactive_scope(&mut self.document, move || set_count.set(text));
-        }
-        if summary.picking != self.summary.picking {
-            let set_picking = self.set_picking.clone();
-            let picking = summary.picking;
-            with_reactive_scope(&mut self.document, move || set_picking.set(picking));
-        }
-        if summary.selection != self.summary.selection {
-            let set_selection = self.set_selection.clone();
-            let selection = summary.selection.clone();
-            with_reactive_scope(&mut self.document, move || set_selection.set(selection));
-        }
-        if summary.bounds != self.summary.bounds {
-            let set_bounds = self.set_bounds.clone();
-            let bounds = summary.bounds.clone();
-            with_reactive_scope(&mut self.document, move || set_bounds.set(bounds));
-        }
-        self.summary = summary;
     }
 
     fn pick(&mut self, target: &Document, ctx: &Context, content: Rect) {
