@@ -18,7 +18,6 @@ use beui_macros::component;
 const CARET_WIDTH: f32 = 1.0;
 const BLINK_INTERVAL: Duration = Duration::from_millis(530);
 const DEFAULT_FONT_SIZE: f32 = 14.0;
-const DEFAULT_PLACEHOLDER_COLOR: Color32 = Color32::from_gray(140);
 const DEFAULT_SELECTION_COLOR: Color32 = Color32::from_gray(80);
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -37,10 +36,8 @@ struct Placed {
 
 pub(crate) struct TextNode {
     content: String,
-    placeholder: String,
     font_size: f32,
     color: Color32,
-    placeholder_color: Color32,
     selection_color: Color32,
     caret_color: Color32,
     horizontal: TextAlign,
@@ -139,10 +136,6 @@ impl TextNode {
         placed
     }
 
-    fn showing_placeholder(&self) -> bool {
-        self.content.is_empty() && !self.placeholder.is_empty()
-    }
-
     fn caret_shown(&self) -> bool {
         let phase = (self.blink.elapsed().as_secs_f64() / BLINK_INTERVAL.as_secs_f64()) as u32;
         phase.is_multiple_of(2)
@@ -158,11 +151,7 @@ impl TextNode {
 
 impl Element for TextNode {
     fn measure(&self, _doc: &Document, painter: &Painter, available: Vec2) -> Vec2 {
-        let content = self.galley(painter, &self.content, available.x).size();
-        if self.placeholder.is_empty() {
-            return content;
-        }
-        content.max(self.galley(painter, &self.placeholder, available.x).size())
+        self.galley(painter, &self.content, available.x).size()
     }
 
     fn layout(
@@ -191,13 +180,7 @@ impl Element for TextNode {
             }
         }
 
-        if self.showing_placeholder() {
-            let galley = self.galley(&painter, &self.placeholder, rect.width());
-            let origin = self.origin(galley.size(), rect);
-            painter.galley(origin, galley, self.placeholder_color);
-        } else {
-            painter.galley(placed.origin, placed.galley.clone(), self.color);
-        }
+        painter.galley(placed.origin, placed.galley.clone(), self.color);
 
         if let Some(caret) = self.caret {
             if self.caret_shown() {
@@ -258,10 +241,8 @@ impl Document {
     ) -> NodeId {
         self.arena.insert(TextNode {
             content: content.into(),
-            placeholder: String::new(),
             font_size,
             color,
-            placeholder_color: DEFAULT_PLACEHOLDER_COLOR,
             selection_color: DEFAULT_SELECTION_COLOR,
             caret_color: color,
             horizontal: TextAlign::Start,
@@ -334,19 +315,6 @@ impl Document {
         }
     }
 
-    pub(crate) fn set_text_placeholder(&mut self, text: NodeId, placeholder: impl Into<String>) {
-        let value = placeholder.into();
-        if self.arena.get_as::<TextNode>(text).placeholder != value {
-            self.arena.get_mut_as::<TextNode>(text).placeholder = value;
-        }
-    }
-
-    pub(crate) fn set_text_placeholder_color(&mut self, text: NodeId, color: Color32) {
-        if self.arena.get_as::<TextNode>(text).placeholder_color != color {
-            self.arena.get_mut_as::<TextNode>(text).placeholder_color = color;
-        }
-    }
-
     pub(crate) fn set_text_selection_color(&mut self, text: NodeId, color: Color32) {
         if self.arena.get_as::<TextNode>(text).selection_color != color {
             self.arena.get_mut_as::<TextNode>(text).selection_color = color;
@@ -394,8 +362,6 @@ pub fn text(
     string: Prop<String>,
     #[prop(default = DEFAULT_FONT_SIZE)] font_size: Prop<f32>,
     #[prop(default = Color32::WHITE)] color: Prop<Color32>,
-    placeholder: Prop<String>,
-    #[prop(default = DEFAULT_PLACEHOLDER_COLOR)] placeholder_color: Prop<Color32>,
     #[prop(default = DEFAULT_SELECTION_COLOR)] selection_color: Prop<Color32>,
     #[prop(default = Color32::WHITE)] caret_color: Prop<Color32>,
     caret: Prop<Option<usize>>,
@@ -432,11 +398,6 @@ pub fn text(
     font_size
         .apply(move |value| with_document(|document| document.set_text_font_size(node, value)));
     color.apply(move |value| with_document(|document| document.set_text_color(node, value)));
-    placeholder
-        .apply(move |value| with_document(|document| document.set_text_placeholder(node, value)));
-    placeholder_color.apply(move |value| {
-        with_document(|document| document.set_text_placeholder_color(node, value));
-    });
     selection_color.apply(move |value| {
         with_document(|document| document.set_text_selection_color(node, value));
     });

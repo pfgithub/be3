@@ -25,6 +25,7 @@ use crate::reactive::{
 };
 
 const FONT_SIZE: f32 = 14.0;
+const PLACEHOLDER_COLOR: Color32 = Color32::from_gray(140);
 const WORD_CLICKS: u32 = 2;
 const LINE_CLICKS: u32 = 3;
 const ALL_CLICKS: u32 = 4;
@@ -61,7 +62,7 @@ pub fn text_input(
     placeholder: Prop<String>,
     #[prop(default = FONT_SIZE)] font_size: Prop<f32>,
     #[prop(default = Color32::WHITE)] color: Prop<Color32>,
-    placeholder_color: Prop<Color32>,
+    #[prop(default = PLACEHOLDER_COLOR)] placeholder_color: Prop<Color32>,
     selection_color: Prop<Color32>,
     caret_color: Prop<Color32>,
     padding_horizontal: Prop<f32>,
@@ -80,6 +81,8 @@ pub fn text_input(
     let (selection, set_selection) = create_signal(Vec::new());
     let text = NodeRef::new();
     let focusable = NodeRef::new();
+    let string = shown_string(&text_value, placeholder);
+    let color = shown_color(&text_value, color, placeholder_color);
 
     let editor: Handle = Rc::new(RefCell::new(Editor {
         core: core(&initial),
@@ -148,11 +151,9 @@ pub fn text_input(
                         <padding horizontal={padding_horizontal} vertical={padding_vertical}>
                             <text
                                 node_ref={&text}
-                                string={text_value.clone()}
+                                string={string}
                                 font_size={font_size}
                                 color={color}
-                                placeholder={placeholder}
-                                placeholder_color={placeholder_color}
                                 selection_color={selection_color}
                                 caret_color={caret_color}
                                 caret={caret}
@@ -177,6 +178,37 @@ pub fn text_input(
     });
 
     root
+}
+
+fn shown_string(value: &ReadSignal<String>, placeholder: Prop<String>) -> Prop<String> {
+    let (value, placeholder) = (value.clone(), reader(placeholder));
+    Prop::Dynamic(Box::new(move || match value.get() {
+        text if text.is_empty() => placeholder(),
+        text => text,
+    }))
+}
+
+fn shown_color(
+    value: &ReadSignal<String>,
+    color: Prop<Color32>,
+    placeholder_color: Prop<Color32>,
+) -> Prop<Color32> {
+    let value = value.clone();
+    let (color, placeholder_color) = (reader(color), reader(placeholder_color));
+    Prop::Dynamic(Box::new(move || {
+        if value.get().is_empty() {
+            placeholder_color()
+        } else {
+            color()
+        }
+    }))
+}
+
+fn reader<T: Clone + 'static>(prop: Prop<T>) -> Box<dyn Fn() -> T> {
+    match prop {
+        Prop::Static(value) => Box::new(move || value.clone()),
+        Prop::Dynamic(read) => read,
+    }
 }
 
 fn handle(document: &Document, input: NodeId) -> &Handle {
