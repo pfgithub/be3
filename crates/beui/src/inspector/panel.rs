@@ -47,6 +47,7 @@ pub(crate) struct Summary {
 }
 
 pub(crate) struct Row {
+    #[cfg(test)]
     pub(crate) row: NodeId,
     #[cfg(test)]
     pub(crate) marker: NodeRef,
@@ -58,10 +59,11 @@ type Entries = ReadSignal<HashMap<Key, Entry>>;
 
 pub(crate) struct Panel {
     pub(crate) document: Document,
-    pub(crate) scroll: NodeId,
     pub(crate) set_keys: WriteSignal<Vec<Key>>,
     pub(crate) set_entries: WriteSignal<HashMap<Key, Entry>>,
     pub(crate) set_summary: WriteSignal<Summary>,
+    pub(crate) set_reveal: WriteSignal<Option<usize>>,
+    #[cfg(test)]
     pub(crate) rows: Rows,
 }
 
@@ -70,7 +72,7 @@ pub(crate) fn build(state: &Rc<State>) -> Panel {
     let (entries, set_entries) = create_signal(HashMap::<Key, Entry>::new());
     let (summary, set_summary) = create_signal(Summary::default());
     let (position, set_position) = create_signal(ScrollPosition::ZERO);
-    let scroll = NodeRef::new();
+    let (reveal, set_reveal) = create_signal(None);
     let rows: Rows = Rc::default();
 
     let mut document = crate::reactive::build(|| {
@@ -104,8 +106,8 @@ pub(crate) fn build(state: &Rc<State>) -> Panel {
                     @percent(100.0) <padding horizontal={BODY_PADDING} vertical={BODY_PADDING}>
                         <row spacing={BODY_SPACING}>
                             @percent(100.0) <scroll
-                                node_ref={&scroll}
                                 focus_color={ACCENT}
+                                reveal={reveal}
                                 on_change={move |value| set_position.set(value)}
                             >
                                 <for_each
@@ -141,10 +143,11 @@ pub(crate) fn build(state: &Rc<State>) -> Panel {
 
     Panel {
         document,
-        scroll: scroll.get(),
         set_keys,
         set_entries,
         set_summary,
+        set_reveal,
+        #[cfg(test)]
         rows,
     }
 }
@@ -264,6 +267,7 @@ fn tree_row(row_key: Key, entries: Entries, state: Rc<State>, rows: Rows) -> Nod
     rows.borrow_mut().insert(
         key,
         Row {
+            #[cfg(test)]
             row,
             #[cfg(test)]
             marker,

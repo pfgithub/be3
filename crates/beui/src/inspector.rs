@@ -85,12 +85,12 @@ pub(crate) struct Inspector {
     pub(crate) document: Document,
     pub(crate) entries: Vec<Entry>,
     pub(crate) state: Rc<State>,
-    scroll: NodeId,
     set_keys: WriteSignal<Vec<Key>>,
     set_entries: WriteSignal<HashMap<Key, Entry>>,
     set_summary: WriteSignal<Summary>,
+    set_reveal: WriteSignal<Option<usize>>,
+    #[cfg(test)]
     rows: Rc<RefCell<HashMap<Key, panel::Row>>>,
-    offset: f32,
     pub(crate) width: f32,
     grabbed: Option<f32>,
     grip: bool,
@@ -104,13 +104,13 @@ impl Inspector {
         Self {
             document: panel.document,
             entries: Vec::new(),
+            #[cfg(test)]
             rows: panel.rows,
             state,
-            scroll: panel.scroll,
             set_keys: panel.set_keys,
             set_entries: panel.set_entries,
             set_summary: panel.set_summary,
-            offset: 0.0,
+            set_reveal: panel.set_reveal,
             width: DEFAULT_WIDTH,
             grabbed: None,
             grip: false,
@@ -169,7 +169,6 @@ impl Inspector {
         self.forget_removed(target);
         self.sync(target);
         self.document.show(ctx, panel);
-        self.offset = self.document.scroll_offset(self.scroll);
         self.pick(target, ctx, content);
         self.reveal();
         self.paint(target, ctx, content, panel);
@@ -271,29 +270,14 @@ impl Inspector {
         else {
             return;
         };
-        let Some(view) = self.document.node_rect(self.scroll) else {
-            return;
-        };
-        let rows = self.rows.borrow();
-        let Some((visible, rect)) = self.entries.iter().enumerate().find_map(|(at, entry)| {
-            Some((at, self.document.node_rect(rows.get(&entry.key)?.row)?))
-        }) else {
-            return;
-        };
-        drop(rows);
-
         self.state.reveal.set(None);
-        let height = rect.height();
-        let top = rect.top() + (index as f32 - visible as f32) * height;
-        let delta = if top < view.top() {
-            top - view.top()
-        } else if top + height > view.bottom() {
-            top + height - view.bottom()
-        } else {
-            return;
-        };
-        self.offset += delta;
-        self.document.set_scroll_offset(self.scroll, self.offset);
+        let Self {
+            document,
+            set_reveal,
+            ..
+        } = self;
+        with_reactive_scope(document, || set_reveal.set(Some(index)));
+        with_reactive_scope(document, || set_reveal.set(None));
         self.state.touch();
     }
 
