@@ -132,7 +132,7 @@ value because it may already have mutated it. There is no transaction rollback.
 ## beui integration
 
 `beui::reactive` (re-exporting `create_signal`, `create_effect`, `create_memo`,
-`create_selector`, `Scope`, `batch`, `untrack`, and `on_cleanup` from this crate) binds signals and
+`create_selector`, `Scope`, `batch`, `settle`, `untrack`, and `on_cleanup` from this crate) binds signals and
 memos directly to `Document` nodes. Nothing in a view takes a `&mut Document`
 parameter, so tags nest the way JSX or solidjs would nest them: write the tree
 with `view!` inside a `#[component]`, and build the document with `build`, which
@@ -175,9 +175,47 @@ elements, which do the same but without a shadow node of their own, and are the
 only place that touches `Document` directly. Every builder also accepts
 `test_id` and `node_ref`.
 
+Derive a prop that depends on other signals with `create_memo`, and pass the
+memo straight to the prop; a memo only wakes the property when its value
+actually changes.
+
+```rust
+let fill = create_memo(move || if hovered.get() { HOVER } else { REST });
+view! { <fill color={fill} radius={RADIUS}>{child}</fill> }
+```
+
+Props that build part of the tree are typed `Render<H>` when the component calls
+them once, `RenderFn<H>` when it may call them many times, and `Option<..>` when
+they have a default. Their setters take a bare closure, so a component hands
+part of its chrome to its caller the way JSX passes children as a function:
+
+```rust
+#[component]
+fn checkbox(label: Prop<String>, checked: Prop<bool>) -> NodeId {
+    view! {
+        <toggle
+            checked={checked}
+            content={move |handle| view! { <checkbox_face handle={handle} label={label} /> }}
+        />
+    }
+}
+```
+
+A render prop runs with the component that *wrote* it installed, not the one
+that calls it, so `component_detail` inside one labels the outer component.
+`Func<V, R>` is the same idea for a plain callback that returns a value, like
+`for_each`'s `key`. A prop of any of these three types also accepts an already
+built `Render`/`RenderFn`/`Func`, which is how a component forwards one it was
+given.
+
+State a component keeps for its own handlers belongs in an `Rc` the handlers
+capture; `set_component_state` additionally publishes it so that code outside
+the tree (a test, or a sibling component holding its `NodeId`) can read it back
+with `component_state`. Prefer the capture: reaching for a `NodeId` to find
+state again is a sign the value should have been captured or passed as a prop.
+
 `@intrinsic`/`@fixed(size)`/`@percent(weight)` prefix a child inside `view!` to
-give it an `ItemSize` in a `row`/`column`. `bind(|document| { ... })` is a
-lower-level escape hatch for driving a node property from an effect. See
+give it an `ItemSize` in a `row`/`column`. See
 `crates/beui/examples/counter.rs` for a full example and
 `crates/beui/src/document/tests/a_reactive_tree_can_nest_builder_calls_without_threading_the_document.rs`
 and `.../a_signal_write_from_a_click_handler_updates_its_bound_text_in_the_same_frame.rs`
@@ -209,6 +247,12 @@ effect) for the duration of the tree-building closure. `Document::show` installs
 itself before dispatching interaction events and flushes queued effects
 immediately after, before the frame's paint check, so a signal write from a
 click handler is visible in the same frame.
+
+`settle` runs a closure and then flushes the effects it queued even when an
+outer batch is still open. `virtual_list` builds each row inside one, because it
+measures the row immediately afterwards and the row's own props are applied by
+effects; without it a row would measure as empty and the list would build every
+item in the collection on its first frame.
 
 `with_document` asserts when no document is installed at all; nested calls are
 fine, and reach the same installed document. Event handlers are plain `FnMut`

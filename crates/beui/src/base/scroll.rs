@@ -9,8 +9,8 @@ use crate::painter::Painter;
 use crate::document::Document;
 use crate::node::{Element, InteractInput, NodeId};
 use crate::reactive::{
-    create_effect, create_signal, owner_scope, with_document, Callback, Children, Prop, RenderFn,
-    ScopeContext,
+    create_effect, create_signal, owner_scope, settle, with_document, Callback, Children, Prop,
+    RenderFn, ScopeContext,
 };
 use beui_macros::component;
 
@@ -218,7 +218,7 @@ fn build_item(
     index: usize,
 ) -> NodeId {
     let scope = crate::reactive::node_scope(doc, owner);
-    let item = scope.context().run(|| build(index));
+    let item = settle(|| scope.context().run(|| build(index)));
     doc.register_node_scope(item, scope);
     item
 }

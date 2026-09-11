@@ -85,10 +85,13 @@ use crate::input::{Event, Key, Modifiers, PointerButton, RawInput};
 
 use crate::base::list::{Direction, ItemSize};
 use crate::inspector::Inspector;
-use crate::reactive::with_document;
+use crate::reactive::{
+    build, intrinsic, with_document, ColumnBuilder, FillBuilder, NodeRef, PaddingBuilder,
+    SpacerBuilder, TextBuilder, VirtualListBuilder,
+};
 use crate::styled;
 use crate::unstyled;
-use beui_macros::view;
+use beui_macros::{component, view};
 
 const VIEWPORT: Vec2 = Vec2::new(400.0, 300.0);
 const WIDE_VIEWPORT: Vec2 = Vec2::new(1000.0, 600.0);
@@ -265,19 +268,25 @@ pub(crate) fn with_installed<R>(document: &mut Document, f: impl FnOnce(&mut Doc
     crate::reactive::with_reactive_scope(document, || crate::reactive::with_document(f))
 }
 
-pub(crate) fn button_face(document: &mut Document, label: &str) -> NodeId {
-    let text = document.create_text(label, 14.0, Color32::WHITE);
-    let padding = document.create_padding(20.0, 12.0);
-    document.set_padding_child(padding, text);
-    let fill = document.create_fill(Color32::from_gray(60), 4);
-    document.set_fill_child(fill, padding);
-    fill
+#[component]
+pub(crate) fn button_face(label: String) -> NodeId {
+    view! {
+        <fill color={Color32::from_gray(60)} radius={4}>
+            <padding horizontal={20.0} vertical={12.0}>
+                <text string={label} font_size={14.0} color={Color32::WHITE} />
+            </padding>
+        </fill>
+    }
 }
 
 pub(crate) fn labelled_button(document: &mut Document, label: &str) -> NodeId {
-    with_installed(document, |document| {
-        let face = button_face(document, label);
-        view! { <unstyled::button>{face}</unstyled::button> }
+    let label = label.to_owned();
+    with_installed(document, |_| {
+        view! {
+            <unstyled::button>
+                <button_face label={label} />
+            </unstyled::button>
+        }
     })
 }
 
@@ -292,22 +301,63 @@ pub(crate) fn counting_button(document: &mut Document, label: &str) -> (NodeId, 
 }
 
 pub(crate) fn virtual_list(built: &Rc<RefCell<Vec<usize>>>) -> (Document, NodeId) {
-    let mut document = Document::new();
-    let scroll = document.create_scroll();
+    let scroll = NodeRef::new();
     let sink = built.clone();
-    document.set_scroll_virtual_items(
-        scroll,
-        VIRTUAL_ITEM_COUNT,
-        VIRTUAL_ITEM_HEIGHT,
-        move |index| {
-            sink.borrow_mut().push(index);
-            with_document(|document| document.create_padding(0.0, VIRTUAL_ITEM_HEIGHT / 2.0))
-        },
-    );
-    let list = document.create_list(Direction::Vertical, 0.0);
-    document.append_child(list, scroll, ItemSize::Percent(100.0));
-    document.set_root(list);
-    (document, scroll)
+    let document = build({
+        let scroll = scroll.clone();
+        move || {
+            view! {
+                <column spacing={0.0}>
+                    @percent(100.0) <virtual_list
+                        node_ref={&scroll}
+                        count={VIRTUAL_ITEM_COUNT}
+                        item_height={VIRTUAL_ITEM_HEIGHT}
+                        item={move |index: usize| {
+                            sink.borrow_mut().push(index);
+                            view! {
+                                <padding horizontal={0.0} vertical={VIRTUAL_ITEM_HEIGHT / 2.0}>
+                                    <spacer />
+                                </padding>
+                            }
+                        }}
+                    />
+                </column>
+            }
+        }
+    });
+    (document, scroll.get())
+}
+
+pub(crate) struct HelloColumn {
+    pub(crate) document: Document,
+    pub(crate) padding: NodeId,
+    pub(crate) text: NodeId,
+}
+
+pub(crate) fn hello_column() -> HelloColumn {
+    let (padding, text) = (NodeRef::new(), NodeRef::new());
+    let document = build({
+        let (padding, text) = (padding.clone(), text.clone());
+        move || {
+            view! {
+                <column spacing={0.0}>
+                    <padding node_ref={&padding} horizontal={4.0} vertical={4.0}>
+                        <text
+                            node_ref={&text}
+                            string={"Hello".to_string()}
+                            font_size={14.0}
+                            color={Color32::WHITE}
+                        />
+                    </padding>
+                </column>
+            }
+        }
+    });
+    HelloColumn {
+        document,
+        padding: padding.get(),
+        text: text.get(),
+    }
 }
 
 pub(crate) fn text_of(document: &Document, id: NodeId) -> &str {
@@ -315,10 +365,11 @@ pub(crate) fn text_of(document: &Document, id: NodeId) -> &str {
 }
 
 pub(crate) fn toolbar(document: &mut Document, buttons: &[NodeId]) -> NodeId {
-    let list = document.create_list(Direction::Vertical, 8.0);
-    for button in buttons {
-        document.append_child(list, *button, ItemSize::Intrinsic);
-    }
+    let items: Vec<_> = buttons.iter().copied().map(intrinsic).collect();
+    let list = with_installed(
+        document,
+        |_| view! { <column spacing={8.0} children={items} /> },
+    );
     document.set_root(list);
     list
 }

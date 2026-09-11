@@ -8,8 +8,7 @@ fn key_handlers_can_move_focus_and_change_their_tab_stop() {
     let (skipped, set_skipped) = create_signal(false);
     let second = labelled_button(&mut document, "Second");
     let flag = unstyled::button_focused(&document, second);
-    let first = with_installed(&mut document, |document| {
-        let face = button_face(document, "First");
+    let first = with_installed(&mut document, |_| {
         view! {
             <unstyled::button
                 tab_stop={create_memo(move || !skipped.get())}
@@ -22,7 +21,7 @@ fn key_handlers_can_move_focus_and_change_their_tab_stop() {
                     true
                 }}
             >
-                {face}
+                <button_face label={"First".to_string()} />
             </unstyled::button>
         }
     });

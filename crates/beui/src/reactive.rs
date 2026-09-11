@@ -13,7 +13,7 @@ use crate::unstyled;
 pub use beui_macros::{component, view};
 pub use reactive::{
     batch, create_effect, create_memo, create_selector, create_signal, on_cleanup, owner_scope,
-    untrack, Effect, Memo, ReadSignal, Scope, ScopeContext, Selector, WriteSignal,
+    settle, untrack, Effect, Memo, ReadSignal, Scope, ScopeContext, Selector, WriteSignal,
 };
 
 thread_local! {

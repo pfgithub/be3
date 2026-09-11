@@ -90,6 +90,13 @@ pub fn batch<T>(f: impl FnOnce() -> T) -> T {
     result
 }
 
+pub fn settle<T>(f: impl FnOnce() -> T) -> T {
+    let result = batch(f);
+    let _guard = Reset::set(|runtime| &runtime.depth, 0);
+    flush();
+    result
+}
+
 pub(crate) fn enqueue(computation: &Rc<Computation>) {
     if !computation.queued.replace(true) {
         RUNTIME.with(|runtime| {

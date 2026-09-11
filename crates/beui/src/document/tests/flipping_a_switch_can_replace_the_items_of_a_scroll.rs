@@ -1,5 +1,5 @@
 use super::*;
-use crate::reactive::{view, with_reactive_scope};
+use crate::reactive::{build, create_memo, create_signal, view, NodeRef};
 use crate::styled::SwitchBuilder;
 
 #[test]
@@ -11,29 +11,43 @@ fn flipping_a_switch_can_replace_the_items_of_a_scroll() {
 
 fn check_compact_rows(inset: f32) {
     let built = Rc::new(RefCell::new(Vec::new()));
-    let mut document = Document::new();
-    let scroll = document.create_scroll();
-
-    let rebuilt = built.clone();
-    let switch = with_reactive_scope(&mut document, || {
-        view! {
-            <switch on={false} on_change={move |on: bool| {
-                let height = if on {
+    let (switch, scroll) = (NodeRef::new(), NodeRef::new());
+    let document = build({
+        let (switch, scroll, sink) = (switch.clone(), scroll.clone(), built.clone());
+        move || {
+            let (compact, set_compact) = create_signal(false);
+            let item_height = create_memo(move || {
+                if compact.get() {
                     VIRTUAL_ITEM_HEIGHT / 2.0
                 } else {
                     VIRTUAL_ITEM_HEIGHT
-                };
-                with_document(|document| install_scroll_items(document, scroll, height, &rebuilt));
-            }} />
+                }
+            });
+            let row_height = item_height.clone();
+            view! {
+                <column spacing={0.0}>
+                    <switch
+                        node_ref={&switch}
+                        on={false}
+                        on_change={move |on: bool| set_compact.set(on)}
+                    />
+                    @percent(100.0) <virtual_list
+                        node_ref={&scroll}
+                        count={VIRTUAL_ITEM_COUNT}
+                        item_height={item_height}
+                        item={move |index: usize| {
+                            sink.borrow_mut().push(index);
+                            let height = row_height.get() / 2.0;
+                            view! {
+                                <padding horizontal={0.0} vertical={height}><spacer /></padding>
+                            }
+                        }}
+                    />
+                </column>
+            }
         }
     });
-    let column = document.create_list(Direction::Vertical, 0.0);
-    document.append_child(column, switch, ItemSize::Intrinsic);
-    document.append_child(column, scroll, ItemSize::Percent(100.0));
-    document.set_root(column);
-
-    let first = built.clone();
-    install_scroll_items(&mut document, scroll, VIRTUAL_ITEM_HEIGHT, &first);
+    let (switch, scroll) = (switch.get(), scroll.get());
 
     let mut harness = Harness::new(document);
     harness.frame(Vec::new());
@@ -73,17 +87,4 @@ fn check_compact_rows(inset: f32) {
         harness.document.scroll_offset(scroll),
         index as f32 * VIRTUAL_ITEM_HEIGHT + inset
     );
-}
-
-fn install_scroll_items(
-    document: &mut Document,
-    scroll: NodeId,
-    height: f32,
-    built: &Rc<RefCell<Vec<usize>>>,
-) {
-    let sink = built.clone();
-    document.set_scroll_virtual_items(scroll, VIRTUAL_ITEM_COUNT, height, move |index| {
-        sink.borrow_mut().push(index);
-        with_document(|document| document.create_padding(0.0, height / 2.0))
-    });
 }

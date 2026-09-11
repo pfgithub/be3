@@ -1,8 +1,8 @@
 use std::rc::Rc;
 
 use block_editor_plugin::beui::reactive::{
-    create_memo, create_signal, view, with_reactive_scope, CenteredRowBuilder, ColumnBuilder,
-    FillBuilder, PaddingBuilder, WriteSignal,
+    build, create_memo, create_signal, view, with_reactive_scope, CenteredRowBuilder,
+    ColumnBuilder, FillBuilder, PaddingBuilder, WriteSignal,
 };
 use block_editor_plugin::beui::styled::theme::BACKGROUND;
 use block_editor_plugin::beui::styled::{ButtonBuilder, ButtonVariant, DisplayBuilder};
@@ -38,13 +38,13 @@ pub struct CounterUi {
 
 impl CounterUi {
     pub fn new(counter: Rc<dyn Counter>) -> Self {
-        let mut document = Document::new();
         let (count, set_count) = create_signal(counter.value());
+        let sink = set_count.clone();
 
-        let root = with_reactive_scope(&mut document, || {
-            let reset = step(&counter, &set_count, Counter::reset);
-            let decrement = step(&counter, &set_count, Counter::decrement);
-            let increment = step(&counter, &set_count, Counter::increment);
+        let document = build(move || {
+            let reset = step(&counter, &sink, Counter::reset);
+            let decrement = step(&counter, &sink, Counter::decrement);
+            let increment = step(&counter, &sink, Counter::increment);
 
             view! {
                 <fill color={BACKGROUND} radius={0}>
@@ -79,8 +79,6 @@ impl CounterUi {
                 </fill>
             }
         });
-
-        document.set_root(root);
 
         Self {
             document,

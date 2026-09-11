@@ -1,19 +1,29 @@
 use super::*;
+use crate::reactive::{build, ScrollBuilder};
 
 #[test]
 fn the_scroll_position_is_reported_to_its_listener() {
-    let mut document = Document::new();
-    let scroll = document.create_scroll();
-    for index in 0..100 {
-        let row = document.create_text(format!("Row {index}"), 14.0, Color32::WHITE);
-        document.append_scroll_item(scroll, row);
-    }
     let reported = Rc::new(Cell::new(None));
     let sink = reported.clone();
-    document.set_scroll_on_change(scroll, move |position| sink.set(Some(position)));
-    let list = document.create_list(Direction::Vertical, 0.0);
-    document.append_child(list, scroll, ItemSize::Percent(100.0));
-    document.set_root(list);
+    let rows: Vec<_> = (0..100).map(|index| format!("Row {index}")).collect();
+    let document = build(move || {
+        let items: Vec<_> = rows
+            .into_iter()
+            .map(|row| {
+                intrinsic(view! {
+                    <text string={row} font_size={14.0} color={Color32::WHITE} />
+                })
+            })
+            .collect();
+        view! {
+            <column spacing={0.0}>
+                @percent(100.0) <scroll
+                    on_change={move |position| sink.set(Some(position))}
+                    children={items}
+                />
+            </column>
+        }
+    });
     let mut harness = Harness::new(document);
 
     harness.frame(Vec::new());

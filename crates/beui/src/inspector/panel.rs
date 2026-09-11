@@ -7,9 +7,9 @@ use crate::base::{ScrollPosition, TextAlign};
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
-    component, create_memo, create_signal, intrinsic, view, with_reactive_scope,
-    CenteredRowBuilder, ClickCatcherBuilder, ColumnBuilder, FillBuilder, NodeRef, OutlineBuilder,
-    PaddingBuilder, ReadSignal, RowBuilder, ScrollBuilder, SpacerBuilder, WriteSignal,
+    component, create_memo, create_signal, intrinsic, view, CenteredRowBuilder,
+    ClickCatcherBuilder, ColumnBuilder, FillBuilder, NodeRef, OutlineBuilder, PaddingBuilder,
+    ReadSignal, RowBuilder, ScrollBuilder, SpacerBuilder, WriteSignal,
 };
 use crate::styled::theme::{
     ACCENT, BORDER_WIDTH, CHIP_RADIUS, ON_ACCENT, RADIUS, SCROLLBAR_WIDTH, SEPARATOR_HEIGHT,
@@ -63,9 +63,6 @@ pub(crate) struct Panel {
 }
 
 pub(crate) fn build(entries: &[Entry], summary: &Summary, state: &Rc<State>, offset: f32) -> Panel {
-    let mut document = Document::new();
-    document.inspectable = false;
-
     let (count_text, set_count) = create_signal(total_label(summary.total));
     let (picking, set_picking) = create_signal(summary.picking);
     let (selection_text, set_selection) = create_signal(summary.selection.clone());
@@ -74,7 +71,7 @@ pub(crate) fn build(entries: &[Entry], summary: &Summary, state: &Rc<State>, off
     let scroll = NodeRef::new();
     let mut rows = Vec::new();
 
-    let root = with_reactive_scope(&mut document, || {
+    let mut document = crate::reactive::build(|| {
         rows = entries.iter().map(|entry| row(entry, state)).collect();
         let items: Vec<_> = rows.iter().map(|row| intrinsic(row.row)).collect();
         view! {
@@ -114,7 +111,7 @@ pub(crate) fn build(entries: &[Entry], summary: &Summary, state: &Rc<State>, off
         </row>
         }
     });
-    document.set_root(root);
+    document.inspectable = false;
 
     Panel {
         document,
