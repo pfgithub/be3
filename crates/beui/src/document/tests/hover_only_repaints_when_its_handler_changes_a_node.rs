@@ -1,5 +1,5 @@
 use super::*;
-use crate::reactive::{bind, create_signal, ClickCatcherBuilder};
+use crate::reactive::{create_effect, create_signal, with_document, ClickCatcherBuilder};
 
 #[test]
 fn hover_only_repaints_when_its_handler_changes_a_node() {
@@ -25,15 +25,13 @@ fn hover_only_repaints_when_its_handler_changes_a_node() {
     assert_eq!(output.cursor_icon, crate::CursorIcon::PointingHand);
     assert_eq!((layouts.get(), paints.get()), (1, 1));
     with_installed(harness.document_mut(), |_| {
-        bind(move |document| {
-            document.set_fill_color(
-                fill,
-                if hover_paints.get() {
-                    Color32::BLACK
-                } else {
-                    Color32::WHITE
-                },
-            );
+        create_effect(move || {
+            let color = if hover_paints.get() {
+                Color32::BLACK
+            } else {
+                Color32::WHITE
+            };
+            with_document(|document| document.set_fill_color(fill, color));
         });
     });
     harness.frame(vec![Event::PointerGone]);

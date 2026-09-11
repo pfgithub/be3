@@ -103,34 +103,52 @@ value because it may already have mutated it. There is no transaction rollback.
 
 `beui::reactive` (re-exporting `create_signal`, `create_effect`, `create_memo`,
 `Scope`, `batch`, `untrack`, and `on_cleanup` from this crate) binds signals and
-memos directly to `Document` nodes. Its builder functions (`text`, `row`,
-`column`, `button`, `bind`, ...) do not take a `&mut Document` parameter, so
-calls nest the way JSX or solidjs would nest them: build the tree inside
-`build`, which supplies the document ambiently and returns the finished
-`Document`.
+memos directly to `Document` nodes. Nothing in a view takes a `&mut Document`
+parameter, so tags nest the way JSX or solidjs would nest them: write the tree
+with `view!` inside a `#[component]`, and build the document with `build`, which
+supplies the document ambiently and returns the finished `Document`.
 
 ```rust
-use beui::reactive::{build, button, column, create_signal, intrinsic, on_click, row, text};
+use beui::reactive::{
+    build, component, create_memo, create_signal, view, ButtonBuilder, ColumnBuilder, RowBuilder,
+    TextBuilder,
+};
 
+#[component]
 fn app() -> beui::NodeId {
     let (count, set_count) = create_signal(0i64);
-    let set_count_decrement = set_count.clone();
-    column(0.0, [intrinsic(row(8.0, [
-        intrinsic(button(text("-"), on_click(move || set_count_decrement.update(|count| *count -= 1)))),
-        intrinsic(text(count)), // updates itself when `count` changes
-        intrinsic(button(text("+"), on_click(move || set_count.update(|count| *count += 1)))),
-    ]))])
+    let decrement = set_count.clone();
+    let count_text = create_memo(move || count.get().to_string());
+    view! {
+        <column spacing={0.0}>
+            <row spacing={8.0}>
+                <button on_click={move || decrement.update(|count| *count -= 1)}>
+                    <text string={"-".to_string()} />
+                </button>
+                <text string={count_text} /> // updates itself when `count` changes
+                <button on_click={move || set_count.update(|count| *count += 1)}>
+                    <text string={"+".to_string()} />
+                </button>
+            </row>
+        </column>
+    }
 }
 
-let document = build(app);
+let document = build(|| view! { <app /> });
 ```
 
-`text(value)` accepts a plain `&str`/`String` or a `ReadSignal<T>`/`Memo<T>`
-(`T: ToString`); the reactive forms create an effect that keeps the node's
-content in sync. `bind(|document| { ... })` is the general form for driving
-other node properties (fill color, visibility, and so on) from an effect.
-`intrinsic`/`fixed`/`percent` pair a node with an `ItemSize` for `row`/
-`column`. See `crates/beui/examples/counter.rs` for a full example and
+`#[component]` turns a function into a `<tag>` usable from `view!`, by
+generating a `NameBuilder` that `view!` fills in. A prop typed `Prop<T>` accepts
+either a plain `T` or a signal or memo of `T`; the reactive forms create an
+effect that keeps that property in sync. `#[component(base)]` is for the base
+elements, which do the same but without a shadow node of their own, and are the
+only place that touches `Document` directly. Every builder also accepts
+`test_id` and `node_ref`.
+
+`@intrinsic`/`@fixed(size)`/`@percent(weight)` prefix a child inside `view!` to
+give it an `ItemSize` in a `row`/`column`. `bind(|document| { ... })` is a
+lower-level escape hatch for driving a node property from an effect. See
+`crates/beui/examples/counter.rs` for a full example and
 `crates/beui/src/document/tests/a_reactive_tree_can_nest_builder_calls_without_threading_the_document.rs`
 and `.../a_signal_write_from_a_click_handler_updates_its_bound_text_in_the_same_frame.rs`
 for the behavior they rely on.
@@ -148,24 +166,25 @@ Effects created outside any component body — directly in `build`'s closure, fo
 instance — belong to the document's root scope and live as long as the document.
 `show`, `for_each`, and `virtual_list` open a scope per child they build,
 registered against that child's node, so dropping a row or scrolling one out of
-view disposes exactly that row's effects.
+view disposes exactly that row's effects. Any other code that builds a subtree
+it will later remove on its own must do the same, with `in_new_scope`; building
+it in the enclosing component's scope instead leaves the subtree's effects alive
+after `remove_node` and they panic the next time an input changes.
 
-None of these functions hold `&mut Document` across a
-call boundary: each reads it back out of a thread-local (`with_document`)
-installed by whichever ambient context is active, and releases it before
-returning. `build` installs the document (and enters its scope, so `text`'s
-signal-bound form can create effects) for the duration of the tree-building
-closure. `Document::show` installs itself before dispatching interaction
-events and flushes queued effects immediately after, before the frame's paint
-check, so a signal write from a click handler is visible in the same frame.
+None of these functions hold `&mut Document` across a call boundary: each reads
+it back out of a thread-local (`with_document`) installed by whichever ambient
+context is active, and releases it before returning. `build` installs the
+document (and enters its scope, so a `Prop` bound to a signal can create its
+effect) for the duration of the tree-building closure. `Document::show` installs
+itself before dispatching interaction events and flushes queued effects
+immediately after, before the frame's paint check, so a signal write from a
+click handler is visible in the same frame.
 
-The ambient functions borrow the installed document out of thread-local
-storage for the duration of their callback, so calling one while another is
-already on the stack panics instead of aliasing. That only happens if code
-that already holds a real `&mut Document` (a click handler, which is handed
-one directly) also calls `with_document` or an ambient builder instead of
-using that parameter — do not do this; use the parameter (or the explicit,
-document-taking `unstyled`/`styled`/`Document` APIs) instead. Ambient calls
-nest safely everywhere else, including inside `build`'s closure and inside
-any effect body, because effects always run after the batch that queued them
-has released its borrow.
+`with_document` asserts when no document is installed at all; nested calls are
+fine, and reach the same installed document. Event handlers are plain `FnMut`
+closures with no document parameter, so they call ambient functions like any
+other code. Keep those calls at the leaves: a component should read and write
+node properties through props on base elements, and reach for `with_document`
+only inside a base element or to look up its own component state. Effects always
+run after the batch that queued them has released its borrow, so ambient calls
+inside an effect body nest safely too.

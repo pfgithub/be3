@@ -112,10 +112,6 @@ pub fn copy_text(text: impl Into<String>) {
     with_document(|document| document.copy_text(text));
 }
 
-pub fn bind(mut effect: impl FnMut(&mut Document) + 'static) {
-    create_effect(move || with_document(&mut effect));
-}
-
 pub(crate) fn node_scope(document: &Document, owner: Option<ScopeContext>) -> Scope {
     owner
         .or_else(owner_scope)

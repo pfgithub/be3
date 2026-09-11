@@ -16,21 +16,51 @@ The styled controls follow the keyboard conventions in the [W3C Authoring Practi
 
 Tab and Shift+Tab traverse visible controls in tree order and wrap within the document. Hidden panels and collapsed content are excluded. Changing a selection programmatically updates the group's Tab stop and moves focus with the selection when the group already contains focus. Programmatic changes do not pull focus from other controls. Empty groups have no Tab stop, and invalid selection updates are ignored.
 
-## New control APIs
+## Control props
 
-`styled::radio_group(document, labels, selected)` and `styled::listbox(document, labels, selected)` accept `Option<usize>` selections. Both provide matching `*_selected`, `set_*_selected`, `set_*_on_change`, and `focus_*` functions. `None` clears the selection; the first option becomes the entry point. Their change callbacks receive `Option<usize>`.
+Every control is a `#[component]`, so it is written as a tag inside `view!` and
+driven by reactive props rather than by setter calls. `<radio_group>` and
+`<listbox>` take `labels` and an `Option<usize>` `selected` prop and report
+changes through `on_change`; `None` clears the selection, and the first option
+becomes the entry point. `<toggle_button>` takes `label` and `pressed`, and its
+label stays stable as the pressed state changes. The demo's Choices tab shows
+all three.
 
-`styled::toggle_button(document, label, pressed)` provides `toggle_button_pressed`, `set_toggle_button_pressed`, `set_toggle_button_on_change`, and `focus_toggle_button`. Its label remains stable as the pressed state changes.
+`<select>` takes `options` and `selected` and opens a popup with a search box
+over the option list. `<context_menu>` wraps a `region` so a secondary click
+opens a menu built from the `items` prop, a `Vec<unstyled::MenuItem>`
+(`MenuItem::new` for a leaf, `MenuItem::with_children` for a submenu); its
+`on_select` callback receives the selected item's index path through any
+submenus. Changing `items` rebuilds the menu. Both controls sit on the `base`
+overlay element: an anchored, viewport-relative popup painted above the rest of
+the tree that traps Tab while open. The demo's Menus tab shows both.
 
-The demo's Choices tab shows all three controls and their change callbacks.
-
-`styled::select(document, options, selected)` opens a popup with a search box over the option list; it provides `select_selected`, `set_select_selected`, `select_open`, `set_select_open`, `set_select_on_change`, and `focus_select`. `styled::context_menu(document, region, items)` wraps an existing region so a secondary click opens a menu built from `unstyled::MenuItem` values (`MenuItem::new` for a leaf, `MenuItem::with_children` for a submenu); it provides `set_context_menu_items` and `set_context_menu_on_select`, whose callback receives the selected item's index path through any submenus. Both are built on a new `base` overlay primitive: an anchored, viewport-relative popup that beui did not have before, painted above the rest of the tree and traps Tab while open. The demo's Menus tab shows both.
+Reading a control's state back out, rather than owning the signal that drives
+it, is for tests and host integration: `*_selected`, `*_open`, `*_pressed`,
+`slider_value`, `text_input_value` and friends take `&Document` and a node.
+`focus_*` takes just the node and focuses the control ambiently.
 
 ## Composing controls and embedding beui
 
-Unstyled buttons expose `button_focusable`, `set_button_tab_stop`, and `set_button_on_key` for compound controls. Return `true` from a key handler only when it handles that key. `Document::set_focusable_tab_stop` removes an option from sequential Tab navigation while preserving pointer and programmatic focus. Unstyled controls expose focus-change callbacks so their owner can paint a focus indicator. `Document::focused_node` reports the current focus.
+The unstyled controls hand their interaction state to whoever renders their
+content: `<unstyled::button content={...}>` calls the content builder with a
+`ButtonHandle` carrying `hovered`, `active` and `focused` signals, and the
+text input and select equivalents do the same. Build reactive props out of
+those signals — including effects that react to a child's hover or focus —
+instead of querying the control's state back afterwards.
 
-`unstyled::set_text_input_on_key_override(document, input, handler)` lets a compound control (such as select's search box) intercept specific keys, such as arrows, before the text input's own key handling runs; returning `false` falls through to the text input's normal behavior.
+`tab_stop` is a prop on `<unstyled::button>` and `<focusable>`: set it to
+`false` to keep a control reachable by pointer and programmatic focus while
+removing it from sequential Tab navigation, which is how single-Tab-stop groups
+work. `on_key` returns `true` only for keys it handled. `<unstyled::text_input>`
+also takes `on_key_override`, which lets a compound control (such as select's
+search box) intercept arrows before the text input's own key handling runs;
+returning `false` falls through to the normal behavior. `Document::focused_node`
+reports the current focus.
+
+Use `node_ref={&a_node_ref}` on any tag when an enclosing component needs the
+`NodeId` of something nested inside its tree; `NodeRef::get` reads it back once
+the tree is built.
 
 A host sends `Event::Focus(false)` when its window or editor region loses focus. Text and paste arrive through `Event::Text`. Copy and cut return text in `FrameOutput::copied_text`; the host writes this to its clipboard. Both the desktop runner and the block editor integration handle these outputs. Clipboard access for other custom hosts belongs to their platform integration.
 
