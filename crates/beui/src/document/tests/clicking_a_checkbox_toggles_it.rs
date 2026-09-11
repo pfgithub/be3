@@ -1,20 +1,18 @@
 use super::*;
-use crate::reactive::{view, with_reactive_scope};
+use crate::reactive::view;
 use crate::styled::CheckboxBuilder;
 
 #[test]
 fn clicking_a_checkbox_toggles_it() {
-    let mut document = Document::new();
     let changes = Rc::new(RefCell::new(Vec::new()));
     let sink = changes.clone();
-    let checkbox = with_reactive_scope(&mut document, || {
-        view! {
+    let (document, [checkbox]) = toolbar_of(|| {
+        [view! {
             <checkbox label={"Show timings".to_string()} checked={false} on_change={move |checked| {
                 sink.borrow_mut().push(checked);
             }} />
-        }
+        }]
     });
-    toolbar(&mut document, &[checkbox]);
     let mut harness = Harness::new(document);
     harness.frame(Vec::new());
 

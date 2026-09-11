@@ -1,18 +1,15 @@
 use super::*;
-use crate::reactive::{view, with_reactive_scope};
+use crate::reactive::view;
 use crate::styled::SelectBuilder;
 
 #[test]
 fn escape_closes_an_open_select_popup_and_returns_focus_to_the_trigger() {
-    let mut document = Document::new();
     let options: Vec<String> = ["Apple", "Banana"]
         .iter()
         .map(|label| (*label).to_owned())
         .collect();
-    let select = with_reactive_scope(&mut document, || {
-        view! { <select options={options} selected={Some(0)} /> }
-    });
-    toolbar(&mut document, &[select]);
+    let (document, [select]) =
+        toolbar_of(|| [view! { <select options={options} selected={Some(0)} /> }]);
     let mut harness = Harness::new(document);
     harness.frame(Vec::new());
 

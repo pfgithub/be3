@@ -86,8 +86,8 @@ use crate::input::{Event, Key, Modifiers, PointerButton, RawInput};
 use crate::base::list::{Direction, ItemSize};
 use crate::inspector::Inspector;
 use crate::reactive::{
-    build, intrinsic, with_document, ColumnBuilder, FillBuilder, NodeRef, PaddingBuilder,
-    SpacerBuilder, TextBuilder, VirtualListBuilder,
+    build, intrinsic, with_document, ClickCallback, ColumnBuilder, FillBuilder, NodeRef,
+    PaddingBuilder, SpacerBuilder, TextBuilder, VirtualListBuilder,
 };
 use crate::styled;
 use crate::unstyled;
@@ -268,7 +268,7 @@ pub(crate) fn with_installed<R>(document: &mut Document, f: impl FnOnce(&mut Doc
     crate::reactive::with_reactive_scope(document, || crate::reactive::with_document(f))
 }
 
-#[component]
+#[component(base)]
 pub(crate) fn button_face(label: String) -> NodeId {
     view! {
         <fill color={Color32::from_gray(60)} radius={4}>
@@ -279,25 +279,13 @@ pub(crate) fn button_face(label: String) -> NodeId {
     }
 }
 
-pub(crate) fn labelled_button(document: &mut Document, label: &str) -> NodeId {
-    let label = label.to_owned();
-    with_installed(document, |_| {
-        view! {
-            <unstyled::button>
-                <button_face label={label} />
-            </unstyled::button>
-        }
-    })
-}
-
-pub(crate) fn counting_button(document: &mut Document, label: &str) -> (NodeId, Rc<Cell<u32>>) {
-    let button = labelled_button(document, label);
-    let clicks = Rc::new(Cell::new(0));
-    let counter = clicks.clone();
-    with_installed(document, |_| {
-        unstyled::set_button_on_click(button, move || counter.set(counter.get() + 1));
-    });
-    (button, clicks)
+#[component(base)]
+pub(crate) fn labelled_button(label: String, on_click: ClickCallback) -> NodeId {
+    view! {
+        <unstyled::button on_click={move || on_click.call()}>
+            <button_face label={label} />
+        </unstyled::button>
+    }
 }
 
 pub(crate) fn virtual_list(built: &Rc<RefCell<Vec<usize>>>) -> (Document, NodeId) {
@@ -362,6 +350,20 @@ pub(crate) fn hello_column() -> HelloColumn {
 
 pub(crate) fn text_of(document: &Document, id: NodeId) -> &str {
     document.text(id)
+}
+
+pub(crate) fn toolbar_of<const N: usize>(
+    controls: impl FnOnce() -> [NodeId; N],
+) -> (Document, [NodeId; N]) {
+    let built = Rc::new(Cell::new(None));
+    let sink = built.clone();
+    let document = build(move || {
+        let nodes = controls();
+        sink.set(Some(nodes));
+        view! { <column spacing={8.0} children={nodes.map(intrinsic)} /> }
+    });
+    let nodes = built.get().expect("the toolbar was built");
+    (document, nodes)
 }
 
 pub(crate) fn toolbar(document: &mut Document, buttons: &[NodeId]) -> NodeId {

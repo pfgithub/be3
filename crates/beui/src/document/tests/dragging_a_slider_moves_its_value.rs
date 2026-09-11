@@ -1,16 +1,13 @@
 use super::*;
-use crate::reactive::{view, with_reactive_scope};
+use crate::reactive::view;
 use crate::styled::SliderBuilder;
 
 #[test]
 fn dragging_a_slider_moves_its_value() {
-    let mut document = Document::new();
     let reported = Rc::new(Cell::new(0.0));
     let sink = reported.clone();
-    let slider = with_reactive_scope(&mut document, || {
-        view! { <slider value={0.0} on_change={move |value| sink.set(value)} /> }
-    });
-    toolbar(&mut document, &[slider]);
+    let (document, [slider]) =
+        toolbar_of(|| [view! { <slider value={0.0} on_change={move |value| sink.set(value)} /> }]);
     let mut harness = Harness::new(document);
     harness.frame(Vec::new());
 

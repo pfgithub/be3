@@ -1,13 +1,29 @@
 use super::*;
+use crate::reactive::{view, NodeRef, VisibilityBuilder};
 
 #[test]
 fn focus_loss_and_hidden_content_cancel_keyboard_activation() {
-    let mut document = Document::new();
-    let (button, clicks) = counting_button(&mut document, "Click");
-    let hidden = document.create_visibility(true);
-    document.set_visibility_child(hidden, button);
-    let after = labelled_button(&mut document, "After");
-    toolbar(&mut document, &[hidden, after]);
+    let clicks = Rc::new(Cell::new(0));
+    let counter = clicks.clone();
+    let button = NodeRef::new();
+    let (document, [hidden, _after]) = toolbar_of({
+        let button = button.clone();
+        move || {
+            [
+                view! {
+                    <visibility visible={true}>
+                        <labelled_button
+                            node_ref={&button}
+                            label={"Click".to_string()}
+                            on_click={move || counter.set(counter.get() + 1)}
+                        />
+                    </visibility>
+                },
+                view! { <labelled_button label={"After".to_string()} /> },
+            ]
+        }
+    });
+    let button = button.get();
     let mut harness = Harness::new(document);
     harness.key(Key::Tab, Modifiers::NONE);
     harness.frame(vec![key_event(Key::Space, true, Modifiers::NONE)]);

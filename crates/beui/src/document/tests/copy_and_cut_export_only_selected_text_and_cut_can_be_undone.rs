@@ -1,14 +1,11 @@
 use super::*;
-use crate::reactive::{view, with_reactive_scope};
+use crate::reactive::view;
 use crate::styled::TextInputBuilder;
 
 #[test]
 fn copy_and_cut_export_only_selected_text_and_cut_can_be_undone() {
-    let mut document = Document::new();
-    let input = with_reactive_scope(&mut document, || {
-        view! { <text_input value={"Hello world".to_string()} /> }
-    });
-    toolbar(&mut document, &[input]);
+    let (document, [input]) =
+        toolbar_of(|| [view! { <text_input value={"Hello world".to_string()} /> }]);
     let mut harness = Harness::new(document);
     harness.key(Key::Tab, Modifiers::NONE);
     let output = harness.frame(vec![key_event(Key::C, true, Modifiers::CTRL)]);

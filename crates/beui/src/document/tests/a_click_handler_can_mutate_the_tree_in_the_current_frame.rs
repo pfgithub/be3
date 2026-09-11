@@ -1,18 +1,25 @@
 use super::*;
+use crate::reactive::{build, view, FillBuilder, NodeRef};
 
 #[test]
 fn a_click_handler_can_mutate_the_tree_in_the_current_frame() {
-    let mut document = Document::new();
-    let button = labelled_button(&mut document, "replace");
-    document.set_root(button);
-    with_installed(&mut document, |_| {
-        unstyled::set_button_on_click(button, || {
-            with_document(|document| {
-                let replacement = document.create_fill(Color32::BLACK, 0);
-                document.set_root(replacement);
-            });
-        });
+    let button = NodeRef::new();
+    let document = build({
+        let button = button.clone();
+        move || {
+            view! {
+                <labelled_button
+                    node_ref={&button}
+                    label={"replace".to_string()}
+                    on_click={|| with_document(|document| {
+                        let replacement = view! { <fill color={Color32::BLACK} radius={0} /> };
+                        document.set_root(replacement);
+                    })}
+                />
+            }
+        }
     });
+    let button = button.get();
     let mut harness = Harness::new(document);
     harness.frame(vec![]);
     harness.click(harness.center(button));

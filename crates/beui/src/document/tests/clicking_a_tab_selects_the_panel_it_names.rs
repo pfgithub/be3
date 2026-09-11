@@ -1,20 +1,18 @@
 use super::*;
-use crate::reactive::{view, with_reactive_scope};
+use crate::reactive::view;
 use crate::styled::TabsBuilder;
 
 #[test]
 fn clicking_a_tab_selects_the_panel_it_names() {
-    let mut document = Document::new();
     let reported = Rc::new(Cell::new(0));
     let sink = reported.clone();
-    let tabs = with_reactive_scope(&mut document, || {
-        view! {
+    let (document, [tabs]) = toolbar_of(|| {
+        [view! {
             <tabs labels={vec!["List".to_string(), "Load".to_string()]} selected={0} on_change={move |selected| {
                 sink.set(selected);
             }} />
-        }
+        }]
     });
-    toolbar(&mut document, &[tabs]);
     let mut harness = Harness::new(document);
     harness.frame(Vec::new());
 

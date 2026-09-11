@@ -1,18 +1,25 @@
 use super::*;
-use crate::reactive::{view, with_reactive_scope};
+use crate::reactive::{view, NodeRef};
 use crate::styled::AccordionBuilder;
 
 #[test]
 fn accordion_headers_are_keyboard_operable_and_skip_collapsed_content() {
-    let mut document = Document::new();
-    let child = labelled_button(&mut document, "Child");
-    let child_focus = unstyled::button_focused(&document, child);
-    let accordion = with_reactive_scope(&mut document, || {
-        view! { <accordion title={"Options".to_string()} open={false}>{child}</accordion> }
+    let child = NodeRef::new();
+    let (document, [accordion, after]) = toolbar_of({
+        let child = child.clone();
+        move || {
+            [
+                view! {
+                    <accordion title={"Options".to_string()} open={false}>
+                        <labelled_button node_ref={&child} label={"Child".to_string()} />
+                    </accordion>
+                },
+                view! { <labelled_button label={"After".to_string()} /> },
+            ]
+        }
     });
-    let after = labelled_button(&mut document, "After");
+    let child_focus = unstyled::button_focused(&document, child.get());
     let after_focus = unstyled::button_focused(&document, after);
-    toolbar(&mut document, &[accordion, after]);
     let mut harness = Harness::new(document);
     harness.key(Key::Tab, Modifiers::NONE);
     harness.key(Key::Tab, Modifiers::NONE);

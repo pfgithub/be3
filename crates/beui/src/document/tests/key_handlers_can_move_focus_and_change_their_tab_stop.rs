@@ -1,31 +1,36 @@
 use super::*;
-use crate::reactive::{create_memo, create_signal};
+use crate::reactive::{create_memo, create_signal, NodeRef};
 use crate::KeyPress;
 
 #[test]
 fn key_handlers_can_move_focus_and_change_their_tab_stop() {
-    let mut document = Document::new();
     let (skipped, set_skipped) = create_signal(false);
-    let second = labelled_button(&mut document, "Second");
-    let flag = unstyled::button_focused(&document, second);
-    let first = with_installed(&mut document, |_| {
-        view! {
-            <unstyled::button
-                tab_stop={create_memo(move || !skipped.get())}
-                on_key={move |press: KeyPress| {
-                    if press.key != Key::ArrowRight || !press.pressed {
-                        return false;
-                    }
-                    set_skipped.set(true);
-                    unstyled::focus_button(second);
-                    true
-                }}
-            >
-                <button_face label={"First".to_string()} />
-            </unstyled::button>
+    let second = NodeRef::new();
+    let (document, [_first, _second]) = toolbar_of({
+        let second = second.clone();
+        move || {
+            let target = second.clone();
+            [
+                view! {
+                    <unstyled::button
+                        tab_stop={create_memo(move || !skipped.get())}
+                        on_key={move |press: KeyPress| {
+                            if press.key != Key::ArrowRight || !press.pressed {
+                                return false;
+                            }
+                            set_skipped.set(true);
+                            unstyled::focus_button(target.get());
+                            true
+                        }}
+                    >
+                        <button_face label={"First".to_string()} />
+                    </unstyled::button>
+                },
+                view! { <labelled_button node_ref={&second} label={"Second".to_string()} /> },
+            ]
         }
     });
-    toolbar(&mut document, &[first, second]);
+    let flag = unstyled::button_focused(&document, second.get());
     let mut harness = Harness::new(document);
     harness.key(Key::Tab, Modifiers::NONE);
     harness.key(Key::ArrowRight, Modifiers::NONE);

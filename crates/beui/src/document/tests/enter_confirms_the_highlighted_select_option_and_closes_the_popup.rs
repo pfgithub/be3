@@ -1,22 +1,22 @@
 use super::*;
-use crate::reactive::{view, with_reactive_scope};
+use crate::reactive::view;
 use crate::styled::SelectBuilder;
 
 #[test]
 fn enter_confirms_the_highlighted_select_option_and_closes_the_popup() {
-    let mut document = Document::new();
     let options: Vec<String> = ["Apple", "Banana"]
         .iter()
         .map(|label| (*label).to_owned())
         .collect();
     let changes = Rc::new(RefCell::new(Vec::new()));
     let sink = changes.clone();
-    let select = with_reactive_scope(&mut document, || {
-        view! { <select options={options} selected={None} on_change={move |selected| {
-            sink.borrow_mut().push(selected);
-        }} /> }
+    let (document, [select]) = toolbar_of(|| {
+        [
+            view! { <select options={options} selected={None} on_change={move |selected| {
+                sink.borrow_mut().push(selected);
+            }} /> },
+        ]
     });
-    toolbar(&mut document, &[select]);
     let mut harness = Harness::new(document);
     harness.frame(Vec::new());
 

@@ -1,23 +1,34 @@
 use super::*;
-use crate::reactive::{view, with_reactive_scope};
+use crate::reactive::{view, FillBuilder, NodeRef, SizedBuilder};
 use crate::styled::ContextMenuBuilder;
 
 #[test]
 fn tab_is_trapped_inside_an_open_context_menu() {
-    let mut document = Document::new();
-    let region = document.create_sized(Some(120.0), Some(60.0));
-    let fill = document.create_fill(Color32::from_gray(80), 4);
-    document.set_sized_child(region, fill);
-    let before = labelled_button(&mut document, "Before");
+    let region = NodeRef::new();
     let items = vec![
         unstyled::MenuItem::new("Copy"),
         unstyled::MenuItem::new("Paste"),
     ];
-    let menu = with_reactive_scope(&mut document, || {
-        view! { <context_menu region={region} items={items} /> }
+    let (document, [before, menu, after]) = toolbar_of({
+        let region = region.clone();
+        move || {
+            [
+                view! { <labelled_button label={"Before".to_string()} /> },
+                view! {
+                    <context_menu
+                        region={view! {
+                            <sized node_ref={&region} width={120.0} height={60.0}>
+                                <fill color={Color32::from_gray(80)} radius={4} />
+                            </sized>
+                        }}
+                        items={items}
+                    />
+                },
+                view! { <labelled_button label={"After".to_string()} /> },
+            ]
+        }
     });
-    let after = labelled_button(&mut document, "After");
-    toolbar(&mut document, &[before, menu, after]);
+    let region = region.get();
     let mut harness = Harness::new(document);
     harness.frame(Vec::new());
 

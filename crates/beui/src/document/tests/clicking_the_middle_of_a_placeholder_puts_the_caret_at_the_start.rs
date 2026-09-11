@@ -1,14 +1,12 @@
 use super::*;
-use crate::reactive::{view, with_reactive_scope};
+use crate::reactive::view;
 use crate::styled::TextInputBuilder;
 
 #[test]
 fn clicking_the_middle_of_a_placeholder_puts_the_caret_at_the_start() {
-    let mut document = Document::new();
-    let input = with_reactive_scope(&mut document, || {
-        view! { <text_input value={String::new()} placeholder={"Search".to_string()} /> }
+    let (document, [input]) = toolbar_of(|| {
+        [view! { <text_input value={String::new()} placeholder={"Search".to_string()} /> }]
     });
-    toolbar(&mut document, &[input]);
     let mut harness = Harness::new(document);
     harness.frame(Vec::new());
 

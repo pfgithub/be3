@@ -1,10 +1,18 @@
 use super::*;
+use crate::reactive::view;
 
 #[test]
 fn picking_a_node_leaves_the_document_alone() {
-    let mut document = Document::new();
-    let (button, clicks) = counting_button(&mut document, "Click me");
-    toolbar(&mut document, &[button]);
+    let clicks = Rc::new(Cell::new(0));
+    let counter = clicks.clone();
+    let (document, [_button]) = toolbar_of(|| {
+        [view! {
+            <labelled_button
+                label={"Click me".to_string()}
+                on_click={move || counter.set(counter.get() + 1)}
+            />
+        }]
+    });
     let mut harness = Harness::new(document);
 
     harness.toggle_inspector();

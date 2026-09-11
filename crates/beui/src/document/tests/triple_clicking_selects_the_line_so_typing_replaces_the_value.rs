@@ -1,14 +1,11 @@
 use super::*;
-use crate::reactive::{view, with_reactive_scope};
+use crate::reactive::view;
 use crate::styled::TextInputBuilder;
 
 #[test]
 fn triple_clicking_selects_the_line_so_typing_replaces_the_value() {
-    let mut document = Document::new();
-    let input = with_reactive_scope(&mut document, || {
-        view! { <text_input value={"hello world".to_string()} /> }
-    });
-    toolbar(&mut document, &[input]);
+    let (document, [input]) =
+        toolbar_of(|| [view! { <text_input value={"hello world".to_string()} /> }]);
     let mut harness = Harness::new(document);
     harness.frame(Vec::new());
 

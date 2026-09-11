@@ -1,13 +1,16 @@
 use super::*;
+use crate::reactive::view;
 
 #[test]
 fn shift_tab_moves_focus_to_the_previous_button() {
-    let mut document = Document::new();
-    let first = labelled_button(&mut document, "First");
-    let second = labelled_button(&mut document, "Second");
+    let (document, [first, second]) = toolbar_of(|| {
+        [
+            view! { <labelled_button label={"First".to_string()} /> },
+            view! { <labelled_button label={"Second".to_string()} /> },
+        ]
+    });
     let first_focused = unstyled::button_focused(&document, first);
     let second_focused = unstyled::button_focused(&document, second);
-    toolbar(&mut document, &[first, second]);
     let mut harness = Harness::new(document);
 
     harness.key(Key::Tab, Modifiers::NONE);

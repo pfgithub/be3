@@ -1,11 +1,19 @@
 use super::*;
+use crate::reactive::view;
 
 #[test]
 fn enter_activates_the_focused_button() {
-    let mut document = Document::new();
-    let (button, clicks) = counting_button(&mut document, "Click me");
+    let clicks = Rc::new(Cell::new(0));
+    let counter = clicks.clone();
+    let (document, [button]) = toolbar_of(|| {
+        [view! {
+            <labelled_button
+                label={"Click me".to_string()}
+                on_click={move || counter.set(counter.get() + 1)}
+            />
+        }]
+    });
     let active = unstyled::button_active(&document, button);
-    toolbar(&mut document, &[button]);
     let mut harness = Harness::new(document);
 
     harness.key(Key::Tab, Modifiers::NONE);

@@ -1,26 +1,25 @@
 use super::*;
-use crate::reactive::{view, with_document, with_reactive_scope};
+use crate::reactive::{view, TextBuilder};
 use crate::styled::ListRowBuilder;
 
 #[test]
 fn list_rows_and_pressables_activate_from_the_keyboard() {
-    let mut document = Document::new();
     let count = Rc::new(Cell::new(0));
-    let sink = count.clone();
-    let row = with_reactive_scope(&mut document, || {
-        let text = with_document(|document| document.create_text("Row", 14.0, Color32::WHITE));
-        view! { <list_row on_click={move || sink.set(sink.get() + 1)}>{text}</list_row> }
+    let (rows, presses) = (count.clone(), count.clone());
+    let (document, [_row, _pressable]) = toolbar_of(|| {
+        [
+            view! {
+                <list_row on_click={move || rows.set(rows.get() + 1)}>
+                    <text string={"Row".to_string()} font_size={14.0} color={Color32::WHITE} />
+                </list_row>
+            },
+            view! {
+                <unstyled::pressable on_click={move || presses.set(presses.get() + 1)}>
+                    <text string={"Press".to_string()} font_size={14.0} color={Color32::WHITE} />
+                </unstyled::pressable>
+            },
+        ]
     });
-    let sink = count.clone();
-    let pressable = with_reactive_scope(&mut document, || {
-        let text = with_document(|document| document.create_text("Press", 14.0, Color32::WHITE));
-        view! {
-            <unstyled::pressable on_click={move || sink.set(sink.get() + 1)}>
-                {text}
-            </unstyled::pressable>
-        }
-    });
-    toolbar(&mut document, &[row, pressable]);
     let mut harness = Harness::new(document);
     harness.key(Key::Tab, Modifiers::NONE);
     harness.key(Key::Enter, Modifiers::NONE);

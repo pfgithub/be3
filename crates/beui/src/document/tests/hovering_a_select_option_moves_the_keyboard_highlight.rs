@@ -1,18 +1,15 @@
 use super::*;
-use crate::reactive::{view, with_reactive_scope};
+use crate::reactive::view;
 use crate::styled::SelectBuilder;
 
 #[test]
 fn hovering_a_select_option_moves_the_keyboard_highlight() {
-    let mut document = Document::new();
     let options: Vec<String> = ["Apple", "Banana", "Cherry"]
         .iter()
         .map(|label| (*label).to_owned())
         .collect();
-    let select = with_reactive_scope(&mut document, || {
-        view! { <select options={options} selected={None} /> }
-    });
-    toolbar(&mut document, &[select]);
+    let (document, [select]) =
+        toolbar_of(|| [view! { <select options={options} selected={None} /> }]);
     let mut harness = Harness::new(document);
     harness.frame(Vec::new());
 

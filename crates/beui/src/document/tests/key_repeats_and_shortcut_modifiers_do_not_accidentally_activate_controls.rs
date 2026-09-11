@@ -1,10 +1,18 @@
 use super::*;
+use crate::reactive::view;
 
 #[test]
 fn key_repeats_and_shortcut_modifiers_do_not_accidentally_activate_controls() {
-    let mut document = Document::new();
-    let (button, clicks) = counting_button(&mut document, "Click");
-    toolbar(&mut document, &[button]);
+    let clicks = Rc::new(Cell::new(0));
+    let counter = clicks.clone();
+    let (document, [_button]) = toolbar_of(|| {
+        [view! {
+            <labelled_button
+                label={"Click".to_string()}
+                on_click={move || counter.set(counter.get() + 1)}
+            />
+        }]
+    });
     let mut harness = Harness::new(document);
     harness.key(Key::Tab, Modifiers::NONE);
     harness.key(Key::Enter, Modifiers::CTRL);

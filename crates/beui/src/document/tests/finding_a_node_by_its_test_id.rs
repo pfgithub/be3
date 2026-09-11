@@ -1,11 +1,19 @@
 use super::*;
+use crate::reactive::view;
 
 #[test]
 fn finding_a_node_by_its_test_id() {
-    let mut document = Document::new();
-    let (button, clicks) = counting_button(&mut document, "Click me");
-    document.set_test_id(button, "toolbar.button");
-    toolbar(&mut document, &[button]);
+    let clicks = Rc::new(Cell::new(0));
+    let counter = clicks.clone();
+    let (document, [_button]) = toolbar_of(|| {
+        [view! {
+            <labelled_button
+                label={"Click me".to_string()}
+                test_id={"toolbar.button"}
+                on_click={move || counter.set(counter.get() + 1)}
+            />
+        }]
+    });
     let mut harness = Harness::new(document);
     harness.frame(Vec::new());
 

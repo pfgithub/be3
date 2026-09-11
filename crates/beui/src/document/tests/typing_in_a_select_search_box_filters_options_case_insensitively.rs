@@ -1,18 +1,15 @@
 use super::*;
-use crate::reactive::{view, with_reactive_scope};
+use crate::reactive::view;
 use crate::styled::SelectBuilder;
 
 #[test]
 fn typing_in_a_select_search_box_filters_options_case_insensitively() {
-    let mut document = Document::new();
     let options: Vec<String> = ["Apple", "Banana", "Grape"]
         .iter()
         .map(|label| (*label).to_owned())
         .collect();
-    let select = with_reactive_scope(&mut document, || {
-        view! { <select options={options} selected={None} /> }
-    });
-    toolbar(&mut document, &[select]);
+    let (document, [select]) =
+        toolbar_of(|| [view! { <select options={options} selected={None} /> }]);
     let mut harness = Harness::new(document);
     harness.frame(Vec::new());
 
