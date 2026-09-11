@@ -244,6 +244,12 @@ impl Document {
         })
     }
 
+    pub(crate) fn set_list_direction(&mut self, list: NodeId, direction: Direction) {
+        if self.arena.get_as::<ListNode>(list).direction != direction {
+            self.arena.get_mut_as::<ListNode>(list).direction = direction;
+        }
+    }
+
     pub(crate) fn set_list_align(&mut self, list: NodeId, align: Align) {
         if self.arena.get_as::<ListNode>(list).align != align {
             self.arena.get_mut_as::<ListNode>(list).align = align;

@@ -7,6 +7,7 @@ use crate::{
     untrack, Scope,
 };
 
+mod a_context_reaches_the_effects_a_nested_scope_creates;
 mod a_panicking_effect_can_run_again;
 mod a_scope_opened_inside_an_effect_belongs_to_the_effects_owner;
 mod a_selector_forgets_keys_whose_watchers_were_disposed;
@@ -36,5 +37,6 @@ mod runaway_effects_are_stopped_and_scheduler_remains_usable;
 mod scopes_dispose_effects_and_run_cleanup_once;
 mod selector_reads_are_current_inside_a_batch;
 mod signals_track_changes_and_skip_equal_sets;
+mod the_nearest_context_shadows_the_ones_above_it;
 mod untracked_memo_reads_still_refresh_without_subscribing;
 mod untracked_reads_do_not_subscribe;

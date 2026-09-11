@@ -4,16 +4,17 @@ use beui::reactive::{
     ShowBuilder, SpacerBuilder, VirtualListBuilder, VisibilityBuilder, WriteSignal,
 };
 use beui::styled::theme::{
-    ACCENT, ACCENT_SOFT, BACKGROUND, RADIUS, SCROLLBAR_WIDTH, SEPARATOR_HEIGHT, SURFACE,
-    SURFACE_RAISED, TEXT_MUTED,
+    ACCENT, ACCENT_SOFT, BACKGROUND, NARROW_WIDTH, RADIUS, SCROLLBAR_WIDTH, SEPARATOR_HEIGHT,
+    SURFACE, SURFACE_RAISED, TEXT_MUTED,
 };
 use beui::styled::{
     AccordionBuilder, BodyBuilder, ButtonBuilder, ButtonVariant, CaptionBuilder, CardBuilder,
     CheckboxBuilder, ContextMenuBuilder, DisplayBuilder, HeadingBuilder, ListboxBuilder,
-    ParagraphBuilder, ProgressBuilder, RadioGroupBuilder, ScrollbarBuilder, SelectBuilder,
-    SeparatorBuilder, ShortcutBuilder, SliderBuilder, SwitchBuilder, TabsBuilder, TextInputBuilder,
-    TitleBuilder, ToggleButtonBuilder,
+    ParagraphBuilder, ProgressBuilder, RadioGroupBuilder, ResponsiveTabsBuilder, ScrollbarBuilder,
+    SelectBuilder, SeparatorBuilder, ShortcutBuilder, SliderBuilder, StackBuilder, SwitchBuilder,
+    TextInputBuilder, TitleBuilder, ToggleButtonBuilder,
 };
+use beui::unstyled::{narrower_than, ContainerBuilder};
 use beui::{unstyled, Color32, Context, Document, NodeId, Rect, ScrollPosition, TextAlign};
 use beui_macros::component;
 
@@ -22,8 +23,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 const HEADER_HEIGHT: f32 = 64.0;
+const COMPACT_HEADER_HEIGHT: f32 = 52.0;
 const HEADER_PADDING: f32 = 20.0;
 const BODY_PADDING: f32 = 20.0;
+const COMPACT_PADDING: f32 = 12.0;
+const BODY_SPACING: f32 = 20.0;
+const CARD_NARROW_WIDTH: f32 = 460.0;
+const TABS_NARROW_WIDTH: f32 = 380.0;
 const ICON_BUTTON_WIDTH: f32 = 44.0;
 const ROW_COUNT: usize = 10_000;
 const ROW_HEIGHT: f32 = 34.0;
@@ -42,11 +48,9 @@ impl DemoApp {
             let (count, set_count) = create_signal(0i64);
             view! {
                 <fill color={BACKGROUND} radius={0}>
-                    <column spacing={0.0}>
-                        @fixed(HEADER_HEIGHT) <demo_header set_count={set_count} />
-                        @fixed(SEPARATOR_HEIGHT) <separator/>
-                        @percent(100.0) <demo_body count={count} />
-                    </column>
+                    <container content={move |_| view! {
+                        <demo_shell count={count} set_count={set_count} />
+                    }} />
                 </fill>
             }
         });
@@ -174,16 +178,49 @@ fn scroll_row_face(
 }
 
 #[component]
+fn demo_shell(count: ReadSignal<i64>, set_count: WriteSignal<i64>) -> NodeId {
+    let narrow = narrower_than(NARROW_WIDTH);
+    let header_height = create_memo(move || {
+        if narrow.get() {
+            COMPACT_HEADER_HEIGHT
+        } else {
+            HEADER_HEIGHT
+        }
+    });
+    view! {
+        <column spacing={0.0}>
+            @fixed(header_height) <demo_header set_count={set_count} />
+            @fixed(SEPARATOR_HEIGHT) <separator/>
+            @percent(100.0) <demo_body count={count} />
+        </column>
+    }
+}
+
+#[component]
 fn demo_header(set_count: WriteSignal<i64>) -> NodeId {
     let reset_count = set_count.clone();
     let decrement_count = set_count.clone();
+    let narrow = narrower_than(NARROW_WIDTH);
+    let wide = create_memo({
+        let narrow = narrow.clone();
+        move || !narrow.get()
+    });
+    let horizontal = create_memo(move || {
+        if narrow.get() {
+            COMPACT_PADDING
+        } else {
+            HEADER_PADDING
+        }
+    });
     view! {
         <fill color={SURFACE} radius={0}>
-            <padding horizontal={HEADER_PADDING} vertical={0.0}>
+            <padding horizontal={horizontal} vertical={0.0}>
                 <centered_row spacing={10.0}>
                     <centered_row spacing={10.0}>
                         <title content={"beui".to_string()} />
-                        <caption content={"retained mode ui".to_string()} />
+                        <visibility visible={wide}>
+                            <caption content={"retained mode ui".to_string()} />
+                        </visibility>
                     </centered_row>
                     @percent(100.0) <spacer />
                     <button label={"Reset".to_string()} variant={ButtonVariant::Secondary} on_click={move || {
@@ -203,27 +240,48 @@ fn demo_header(set_count: WriteSignal<i64>) -> NodeId {
 
 #[component]
 fn demo_body(count: ReadSignal<i64>) -> NodeId {
+    let narrow = narrower_than(NARROW_WIDTH);
+    let horizontal = create_memo({
+        let narrow = narrow.clone();
+        move || {
+            if narrow.get() {
+                COMPACT_PADDING
+            } else {
+                BODY_PADDING
+            }
+        }
+    });
+    let vertical = create_memo(move || {
+        if narrow.get() {
+            COMPACT_PADDING
+        } else {
+            BODY_PADDING
+        }
+    });
     view! {
-        <padding horizontal={BODY_PADDING} vertical={BODY_PADDING}>
-            <row spacing={20.0}>
+        <padding horizontal={horizontal} vertical={vertical}>
+            <stack spacing={BODY_SPACING}>
                 @percent(32.0) <sidebar />
                 @percent(68.0) <main_panel count={count} />
-            </row>
+            </stack>
         </padding>
     }
 }
 
 #[component]
 fn sidebar() -> NodeId {
+    let narrow = narrower_than(NARROW_WIDTH);
+    let open = create_memo(move || !narrow.get());
+    let keyboard_open = open.clone();
     view! {
         <card>
             <column spacing={12.0}>
-                <accordion title={"About".to_string()} open={true}>
+                <accordion title={"About".to_string()} open={open}>
                     <paragraph content={"beui keeps a retained tree of nodes. Base nodes carry behaviour only, unstyled \
                          components compose them, and the styled components paint them.".to_string()} />
                 </accordion>
                 @fixed(SEPARATOR_HEIGHT) <separator/>
-                <accordion title={"Keyboard".to_string()} open={true}>
+                <accordion title={"Keyboard".to_string()} open={keyboard_open}>
                     <column spacing={12.0}>
                         <shortcut keys={"Tab".to_string()} description={"move focus to the next control".to_string()} />
                         <shortcut keys={"Shift+Tab".to_string()} description={"move focus back".to_string()} />
@@ -296,6 +354,15 @@ fn main_panel(count: ReadSignal<i64>) -> NodeId {
 
 #[component]
 fn controls(rows: Rows) -> NodeId {
+    view! {
+        <card>
+            <container content={move |_| view! { <control_panels rows={rows} /> }} />
+        </card>
+    }
+}
+
+#[component]
+fn control_panels(rows: Rows) -> NodeId {
     let (selected_tab, set_selected_tab) = create_signal(0usize);
 
     let list_rows = rows.clone();
@@ -310,20 +377,23 @@ fn controls(rows: Rows) -> NodeId {
     let menus_condition = create_memo(move || selected_tab.get() == 4);
 
     view! {
-        <card>
-            <column spacing={16.0}>
-                <tabs labels={vec!["List".to_string(), "Load".to_string(), "Name".to_string(), "Choices".to_string(), "Menus".to_string()]} selected={0} on_change={move |selected| {
+        <column spacing={16.0}>
+            <responsive_tabs
+                labels={vec!["List".to_string(), "Load".to_string(), "Name".to_string(), "Choices".to_string(), "Menus".to_string()]}
+                selected={0}
+                breakpoint={TABS_NARROW_WIDTH}
+                on_change={move |selected| {
                     set_selected_tab.set(selected);
-                }} />
-                <column spacing={0.0}>
-                    <show condition={list_condition} then={move || view! { <list_controls rows={list_rows} /> }} />
-                    <show condition={load_condition} then={|| view! { <load_controls /> }} />
-                    <show condition={name_condition} then={|| view! { <name_controls /> }} />
-                    <show condition={choices_condition} then={|| view! { <choice_controls /> }} />
-                    <show condition={menus_condition} then={|| view! { <menu_controls /> }} />
-                </column>
+                }}
+            />
+            <column spacing={0.0}>
+                <show condition={list_condition} then={move || view! { <list_controls rows={list_rows} /> }} />
+                <show condition={load_condition} then={|| view! { <load_controls /> }} />
+                <show condition={name_condition} then={|| view! { <name_controls /> }} />
+                <show condition={choices_condition} then={|| view! { <choice_controls /> }} />
+                <show condition={menus_condition} then={|| view! { <menu_controls /> }} />
             </column>
-        </card>
+        </column>
     }
 }
 
@@ -402,7 +472,7 @@ fn choice_controls() -> NodeId {
     let (pin_status_text, set_pin_status_text) = create_signal("Selection is unpinned".to_string());
 
     view! {
-        <row spacing={20.0}>
+        <stack spacing={20.0} breakpoint={CARD_NARROW_WIDTH}>
             @percent(50.0) <column spacing={8.0}>
                 <caption content={"Update mode".to_string()} />
                 <radio_group labels={vec!["Automatic".to_string(), "Manual".to_string(), "Scheduled".to_string()]} selected={Some(0)} on_change={move |selected| {
@@ -433,7 +503,7 @@ fn choice_controls() -> NodeId {
                 }} />
                 <caption content={color_status_text} />
             </column>
-        </row>
+        </stack>
     }
 }
 
@@ -460,7 +530,7 @@ fn menu_controls() -> NodeId {
     ];
 
     view! {
-        <row spacing={20.0}>
+        <stack spacing={20.0} breakpoint={CARD_NARROW_WIDTH}>
             @percent(50.0) <column spacing={8.0}>
                 <caption content={"Favorite fruit (type to search)".to_string()} />
                 <select options={fruits} selected={Some(0)} on_change={move |selected| {
@@ -496,6 +566,6 @@ fn menu_controls() -> NodeId {
                 }} />
                 <caption content={menu_status_text} />
             </column>
-        </row>
+        </stack>
     }
 }

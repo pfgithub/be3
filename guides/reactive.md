@@ -132,7 +132,8 @@ value because it may already have mutated it. There is no transaction rollback.
 ## beui integration
 
 `beui::reactive` (re-exporting `create_signal`, `create_effect`, `create_memo`,
-`create_selector`, `Scope`, `batch`, `settle`, `untrack`, and `on_cleanup` from this crate) binds signals and
+`create_selector`, `Scope`, `batch`, `settle`, `untrack`, `on_cleanup`,
+`provide_context`, and `use_context` from this crate) binds signals and
 memos directly to `Document` nodes. Nothing in a view takes a `&mut Document`
 parameter, so tags nest the way JSX or solidjs would nest them: write the tree
 with `view!` inside a `#[component]`, and build the document with `build`, which
@@ -220,6 +221,49 @@ give it an `ItemSize` in a `row`/`column`. See
 `crates/beui/src/document/tests/a_reactive_tree_can_nest_builder_calls_without_threading_the_document.rs`
 and `.../a_signal_write_from_a_click_handler_updates_its_bound_text_in_the_same_frame.rs`
 for the behavior they rely on.
+
+## Context
+
+`provide_context(value)` stores a value on the current scope, keyed by its type,
+and `use_context::<T>()` walks up the owner chain and returns the nearest one, or
+`None`. Because component scopes form the same tree the nodes do, a component
+reads whatever its ancestors provided, and the effects it creates later — a
+`show` branch that builds long after the first frame, for instance — see the same
+values, since a computation's execution scope is parented to the scope that
+created it. Provide a distinct wrapper type per concern rather than a bare `f32`,
+or two providers will collide on the same key.
+
+One ordering rule matters: `view!` builds a tag's children before the tag itself,
+so children written inside a provider's angle brackets are built *before* its
+body calls `provide_context`. A provider must therefore take the subtree it
+covers as a render prop, which the body calls after providing.
+
+## Containers and responsive layout
+
+Layout sizes are available reactively: `node_size(id)` returns a
+`ReadSignal<Vec2>` that the document updates from that node's laid-out rect.
+`Document::show` runs layout, publishes the sizes that changed, and lets the
+effects that woke up rebuild before it lays out again — up to a few passes per
+frame — so a size-driven change is visible in the frame that caused it rather
+than one frame later. The signal reads `Vec2::ZERO` until the first layout.
+
+`unstyled::container` ties the two together: it measures its own shadow node,
+provides that size as `ContainerSize`, and hands the signal to its `content`
+render prop. Anything below it can then ask `container_size()`, or
+`narrower_than(width)` for a `Memo<bool>` that is true when the nearest container
+is narrower than `width` (false when nothing provides a size, and false until the
+first layout). Queries answer for the nearest container, so a card that wraps its
+contents in a container gets answers about the card, not the window.
+
+`unstyled::stack` consumes that flag: it is a row that turns into a column, with
+its children falling back to intrinsic sizing, while the flag is true. It keeps
+the same nodes across the switch, so state inside them survives.
+`styled::stack` supplies `theme::NARROW_WIDTH` as the default breakpoint, and
+`styled::responsive_tabs` swaps a tab bar for a select below one.
+
+Measuring a node whose size depends on its own content — an intrinsically sized
+container whose children react to its width — can oscillate. Give containers a
+width that comes from their parent.
 
 Each `Document` owns a root `reactive::Scope` (`Document::reactive_scope`), and
 every `#[component]` owns a scope of its own, registered against the shadow node

@@ -3,7 +3,7 @@ use std::rc::Rc;
 use std::time::Instant;
 
 use crate::context::Context;
-use crate::geometry::{pos2, Rect};
+use crate::geometry::{pos2, Rect, Vec2};
 use crate::input::{Event, Key};
 
 use crate::inspector::Inspector;
@@ -12,6 +12,8 @@ use crate::layout;
 use crate::node::{Arena, NodeId};
 use crate::paint;
 use crate::painter::Shape;
+
+const SIZE_PASSES: usize = 4;
 
 pub struct Document {
     pub(crate) arena: Arena,
@@ -32,6 +34,12 @@ pub struct Document {
     next_paint: Option<Instant>,
     reactive_scope: ::reactive::Scope,
     node_scopes: HashMap<NodeId, Vec<::reactive::Scope>>,
+    sizes: HashMap<NodeId, SizeWatcher>,
+}
+
+struct SizeWatcher {
+    read: ::reactive::ReadSignal<Vec2>,
+    write: ::reactive::WriteSignal<Vec2>,
 }
 
 impl Document {
@@ -55,6 +63,7 @@ impl Document {
             next_paint: None,
             reactive_scope: ::reactive::Scope::new(),
             node_scopes: HashMap::new(),
+            sizes: HashMap::new(),
         }
     }
 
@@ -121,6 +130,7 @@ impl Document {
             self.detach_subtree(child, scopes);
         }
         self.arena.remove(id);
+        self.sizes.remove(&id);
         scopes.extend(self.node_scopes.remove(&id).unwrap_or_default());
         if self.root == Some(id) {
             self.root = None;
@@ -179,7 +189,7 @@ impl Document {
             self.arena.invalidate();
             self.viewport = Some((ctx.clone(), rect, scale));
         }
-        self.update_layout(ctx, rect);
+        self.settle_layout(ctx, rect);
         for (test_id, id) in &self.test_ids {
             if let Some(node_rect) = self.rects.get(id) {
                 ctx.publish_test_id(test_id, *node_rect);
@@ -202,7 +212,7 @@ impl Document {
         if let Some(text) = self.copied_text.take() {
             ctx.copy_text(text);
         }
-        self.update_layout(ctx, rect);
+        self.settle_layout(ctx, rect);
         let now = Instant::now();
         if self.paint_revision != self.arena.revision
             || self.next_paint.is_some_and(|deadline| deadline <= now)
@@ -227,6 +237,49 @@ impl Document {
             ctx.request_repaint_after(deadline.saturating_duration_since(Instant::now()));
         }
         ctx.extend(&self.shapes);
+    }
+
+    pub(crate) fn watch_size(&mut self, id: NodeId) -> ::reactive::ReadSignal<Vec2> {
+        let size = self.rects.get(&id).map_or(Vec2::ZERO, Rect::size);
+        self.sizes
+            .entry(id)
+            .or_insert_with(|| {
+                let (read, write) = ::reactive::create_signal(size);
+                SizeWatcher { read, write }
+            })
+            .read
+            .clone()
+    }
+
+    fn settle_layout(&mut self, ctx: &Context, rect: Rect) {
+        for _ in 0..SIZE_PASSES {
+            self.update_layout(ctx, rect);
+            if !self.publish_sizes() {
+                return;
+            }
+        }
+        self.update_layout(ctx, rect);
+    }
+
+    fn publish_sizes(&mut self) -> bool {
+        let changed: Vec<(::reactive::WriteSignal<Vec2>, Vec2)> = self
+            .sizes
+            .iter()
+            .filter_map(|(id, watcher)| {
+                let size = self.rects.get(id).map_or(Vec2::ZERO, Rect::size);
+                (watcher.read.get_untracked() != size).then(|| (watcher.write.clone(), size))
+            })
+            .collect();
+        if changed.is_empty() {
+            return false;
+        }
+        let _guard = crate::reactive::install(self);
+        crate::reactive::settle(|| {
+            for (write, size) in changed {
+                write.set(size);
+            }
+        });
+        true
     }
 
     pub(crate) fn viewport_rect(&self) -> Rect {

@@ -1,11 +1,13 @@
 mod button;
 mod choice;
+mod container;
 mod context_menu;
 mod disclosure;
 mod menu;
 mod pressable;
 mod select;
 mod slider;
+mod stack;
 mod text_input;
 mod toggle;
 
@@ -17,6 +19,7 @@ pub use choice::{
     choice_selected, choice_selected_signal, focus_choice, ChoiceBuilder, ChoiceKind,
     ChoiceOptionHandle,
 };
+pub use container::{container_size, narrower_than, ContainerBuilder, ContainerSize};
 pub use context_menu::{context_menu_menu, context_menu_overlay, ContextMenuBuilder};
 pub use disclosure::{
     disclosure_focused, disclosure_hovered, disclosure_open, disclosure_open_signal,
@@ -35,6 +38,7 @@ pub use select::{
 pub use slider::{
     focus_slider, slider_dragging, slider_focused, slider_value, SliderBuilder, SliderHandle,
 };
+pub use stack::StackBuilder;
 pub use text_input::{
     focus_text_input, set_text_input_value, text_input_focused, text_input_hovered,
     text_input_text, text_input_value, TextInputBuilder, TextInputHandle,

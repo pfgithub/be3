@@ -1,4 +1,6 @@
+use std::any::{Any, TypeId};
 use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 
 use crate::computation::Computation;
@@ -8,13 +10,16 @@ use crate::runtime::{batch, Context, RUNTIME};
 pub(crate) struct Owner {
     pub(crate) computation: Weak<Computation>,
     pub(crate) disposed: Cell<bool>,
+    parent: Weak<Owner>,
+    contexts: RefCell<HashMap<TypeId, Rc<dyn Any>>>,
     cleanups: RefCell<Vec<Box<dyn FnOnce()>>>,
 }
 
 impl Owner {
-    pub(crate) fn for_computation(computation: Weak<Computation>) -> Self {
+    pub(crate) fn for_computation(computation: Weak<Computation>, parent: Weak<Owner>) -> Self {
         Self {
             computation,
+            parent,
             ..Self::default()
         }
     }
@@ -57,6 +62,7 @@ impl Scope {
                 .as_ref()
                 .map(|parent| parent.computation.clone())
                 .unwrap_or_default(),
+            parent: parent.as_ref().map(Rc::downgrade).unwrap_or_default(),
             ..Owner::default()
         });
         if let Some(parent) = parent {
@@ -137,6 +143,29 @@ impl Drop for Scope {
 
 pub fn on_cleanup(cleanup: impl FnOnce() + 'static) {
     current_owner().add(cleanup);
+}
+
+pub fn provide_context<T: 'static>(value: T) {
+    current_owner()
+        .contexts
+        .borrow_mut()
+        .insert(TypeId::of::<T>(), Rc::new(value));
+}
+
+pub fn use_context<T: Clone + 'static>() -> Option<T> {
+    let mut owner = RUNTIME.with(|runtime| runtime.owner.borrow().upgrade());
+    while let Some(current) = owner {
+        let found = current
+            .contexts
+            .borrow()
+            .get(&TypeId::of::<T>())
+            .and_then(|value| value.downcast_ref::<T>().cloned());
+        if found.is_some() {
+            return found;
+        }
+        owner = current.parent.upgrade();
+    }
+    None
 }
 
 pub(crate) fn current_owner() -> Rc<Owner> {

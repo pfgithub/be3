@@ -7,13 +7,15 @@ use std::rc::Rc;
 use crate::base::{Align, Direction, ItemSize};
 use crate::color::Color32;
 use crate::document::Document;
+use crate::geometry::Vec2;
 use crate::node::{ClickHandler, Handler, NodeId};
 use crate::unstyled;
 
 pub use beui_macros::{component, view};
 pub use reactive::{
     batch, create_effect, create_memo, create_selector, create_signal, on_cleanup, owner_scope,
-    settle, untrack, Effect, Memo, ReadSignal, Scope, ScopeContext, Selector, WriteSignal,
+    provide_context, settle, untrack, use_context, Effect, Memo, ReadSignal, Scope, ScopeContext,
+    Selector, WriteSignal,
 };
 
 thread_local! {
@@ -107,6 +109,10 @@ pub fn build(f: impl FnOnce() -> NodeId) -> Document {
     document
 }
 
+pub fn node_size(node: NodeId) -> ReadSignal<Vec2> {
+    with_document(|document| document.watch_size(node))
+}
+
 pub fn copy_text(text: impl Into<String>) {
     let text = text.into();
     with_document(|document| document.copy_text(text));
@@ -151,7 +157,7 @@ pub fn component(name: &'static str, f: impl FnOnce() -> NodeId) -> NodeId {
     shadow
 }
 
-fn current_component() -> NodeId {
+pub fn current_component() -> NodeId {
     CURRENT_COMPONENT
         .with(Cell::get)
         .expect("a component binding was used outside of a #[component] body")
@@ -551,6 +557,10 @@ impl Children {
     pub(crate) fn into_first(self) -> Option<NodeId> {
         self.0.into_iter().next().map(|(child, _)| child)
     }
+
+    pub(crate) fn into_items(self) -> Vec<(NodeId, Prop<ItemSize>)> {
+        self.0
+    }
 }
 
 impl<I: IntoIterator<Item = (NodeId, Prop<ItemSize>)>> From<I> for Children {
@@ -571,17 +581,20 @@ pub use crate::base::visibility::VisibilityBuilder;
 
 #[component(base)]
 pub fn list(
-    direction: Direction,
+    #[prop(default = Direction::Vertical)] direction: Prop<Direction>,
     align: Option<Align>,
     spacing: f32,
     children: Children,
 ) -> NodeId {
     let list = with_document(|document| {
-        let list = document.create_list(direction, spacing);
+        let list = document.create_list(direction.peek(), spacing);
         if let Some(align) = align {
             document.set_list_align(list, align);
         }
         list
+    });
+    direction.apply(move |direction| {
+        with_document(|document| document.set_list_direction(list, direction));
     });
     children.mount(list);
     list

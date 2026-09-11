@@ -117,9 +117,10 @@ impl Computation {
             }
         }
         self.detach();
-        let old_owner = self
-            .execution_owner
-            .replace(Rc::new(Owner::for_computation(Rc::downgrade(self))));
+        let old_owner = self.execution_owner.replace(Rc::new(Owner::for_computation(
+            Rc::downgrade(self),
+            self.owner.clone(),
+        )));
         old_owner.dispose();
         if self.state.get() == State::Disposed {
             return;
