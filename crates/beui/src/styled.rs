@@ -21,7 +21,7 @@ pub mod theme;
 
 pub use accordion::{accordion_open, AccordionBuilder};
 pub use border::{BorderedBuilder, SeparatorBuilder};
-pub use button::{focus_button, ButtonBuilder, ButtonVariant};
+pub use button::{ButtonBuilder, ButtonVariant};
 pub use card::CardBuilder;
 pub use checkbox::{checkbox_checked, CheckboxBuilder};
 pub use chip::ChipBuilder;
@@ -30,22 +30,22 @@ pub use list_row::ListRowBuilder;
 pub use progress::ProgressBuilder;
 pub use responsive_tabs::{responsive_tabs_selected, ResponsiveTabsBuilder};
 pub use scrollbar::ScrollbarBuilder;
-pub use select::{focus_select, select_open, select_selected, set_select_open, SelectBuilder};
+pub use select::{select_open, select_selected, SelectBuilder};
 pub use shortcut::ShortcutBuilder;
 pub use slider::{slider_value, SliderBuilder};
 pub use stack::StackBuilder;
 pub use switch::{switch_on, SwitchBuilder};
-pub use tabs::{focus_tabs, tabs_selected, TabsBuilder};
+pub use tabs::{tabs_selected, TabsBuilder};
 pub use text::{
     BodyBuilder, CaptionBuilder, CodeBuilder, DisplayBuilder, HeadingBuilder, IconBuilder,
     IconSizedBuilder, ParagraphBuilder, TitleBuilder,
 };
-pub use text_input::{focus_text_input, text_input_value, TextInputBuilder};
+pub use text_input::{text_input_value, TextInputBuilder};
 
 mod choice;
 mod listbox;
 mod radio_group;
 mod toggle_button;
-pub use listbox::{focus_listbox, listbox_selected, ListboxBuilder};
-pub use radio_group::{focus_radio_group, radio_group_selected, RadioGroupBuilder};
-pub use toggle_button::{focus_toggle_button, toggle_button_pressed, ToggleButtonBuilder};
+pub use listbox::{listbox_selected, ListboxBuilder};
+pub use radio_group::{radio_group_selected, RadioGroupBuilder};
+pub use toggle_button::{toggle_button_pressed, ToggleButtonBuilder};

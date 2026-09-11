@@ -1,6 +1,5 @@
 use beui_macros::{component, view};
 
-use crate::base::shadow::shadow_root;
 use crate::color::Color32;
 use crate::document::Document;
 use crate::node::NodeId;
@@ -75,8 +74,4 @@ fn fill_for(pressed: bool, hovered: bool) -> Color32 {
 
 pub fn toggle_button_pressed(document: &Document, button: NodeId) -> bool {
     unstyled::toggle_checked(document, document.shadow_root(button)).get()
-}
-
-pub fn focus_toggle_button(button: NodeId) {
-    unstyled::focus_toggle(shadow_root(button));
 }

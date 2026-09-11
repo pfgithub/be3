@@ -6,7 +6,6 @@ use crate::painter::Painter;
 
 use crate::document::Document;
 use crate::node::{Element, InteractInput, NodeId};
-use crate::reactive::with_document;
 
 pub(crate) struct ShadowNode {
     pub(crate) name: &'static str,
@@ -126,10 +125,6 @@ impl Element for SlotNode {
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
-}
-
-pub(crate) fn shadow_root(shadow: NodeId) -> NodeId {
-    with_document(|document| document.shadow_root(shadow))
 }
 
 impl Document {

@@ -308,17 +308,6 @@ pub fn menu_list_row_submenu_content(
         .map(|submenu| submenu.content.get())
 }
 
-pub fn menu_list_row_submenu_overlay(
-    document: &Document,
-    menu: NodeId,
-    index: usize,
-) -> Option<NodeId> {
-    document.component_state::<Handle>(menu).rows[index]
-        .submenu
-        .as_ref()
-        .map(|submenu| submenu.overlay.get())
-}
-
 pub fn menu_list_root_focusable(document: &Document, menu: NodeId) -> NodeId {
     document.component_state::<Handle>(menu).root.get()
 }

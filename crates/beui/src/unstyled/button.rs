@@ -18,7 +18,6 @@ pub struct ButtonHandle {
 
 struct State {
     focusable: NodeId,
-    hovered: ReadSignal<bool>,
     active: ReadSignal<bool>,
     focused: ReadSignal<bool>,
 }
@@ -45,7 +44,7 @@ pub fn button(
 
     let content_node = match content {
         Some(build) => Some(build.call(ButtonHandle {
-            hovered: hovered.clone(),
+            hovered,
             active: active.clone(),
             focused: focused.clone(),
         })),
@@ -93,16 +92,11 @@ pub fn button(
 
     set_component_state(State {
         focusable,
-        hovered,
         active,
         focused,
     });
 
     focusable
-}
-
-pub fn button_hovered(document: &Document, button: NodeId) -> ReadSignal<bool> {
-    document.component_state::<State>(button).hovered.clone()
 }
 
 pub fn button_active(document: &Document, button: NodeId) -> ReadSignal<bool> {

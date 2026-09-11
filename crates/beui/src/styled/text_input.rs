@@ -1,6 +1,5 @@
 use beui_macros::{component, view};
 
-use crate::base::shadow::shadow_root;
 use crate::color::Color32;
 
 use crate::document::Document;
@@ -65,10 +64,6 @@ fn text_input_frame(handle: TextInputHandle) -> NodeId {
 
 pub fn text_input_value(document: &Document, input: NodeId) -> String {
     unstyled::text_input_value(document, document.shadow_root(input))
-}
-
-pub fn focus_text_input(input: NodeId) {
-    unstyled::focus_text_input(shadow_root(input));
 }
 
 fn border_color(focused: bool, hovered: bool) -> Color32 {

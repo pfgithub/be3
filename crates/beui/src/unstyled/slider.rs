@@ -1,12 +1,11 @@
 use beui_macros::{component, view};
 
-use crate::base::focusable::focus;
 use crate::input::{CursorIcon, Key, KeyPress, PointerPress};
 
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
-    self, component_detail, component_state, create_signal, set_component_state, untrack, Callback,
+    self, component_detail, create_signal, set_component_state, untrack, Callback,
     ClickCatcherBuilder, FocusableBuilder, Prop, ReadSignal, Render,
 };
 
@@ -16,13 +15,6 @@ pub struct SliderHandle {
     pub value: ReadSignal<f32>,
     pub dragging: ReadSignal<bool>,
     pub focused: ReadSignal<bool>,
-}
-
-struct State {
-    focusable: NodeId,
-    value: ReadSignal<f32>,
-    dragging: ReadSignal<bool>,
-    focused: ReadSignal<bool>,
 }
 
 #[component]
@@ -68,7 +60,8 @@ pub fn slider(
     let step_value = set_value.clone();
     let key_value = set_value.clone();
     let value_for_keys = value_read.clone();
-    let value_for_state = value_read.clone();
+
+    set_component_state(value_read.clone());
 
     let focusable = view! {
         <focusable
@@ -109,32 +102,13 @@ pub fn slider(
         </focusable>
     };
 
-    set_component_state(State {
-        focusable,
-        value: value_for_state,
-        dragging,
-        focused,
-    });
-
     focusable
 }
 
 pub fn slider_value(document: &Document, slider: NodeId) -> ReadSignal<f32> {
-    document.component_state::<State>(slider).value.clone()
-}
-
-pub fn slider_dragging(document: &Document, slider: NodeId) -> ReadSignal<bool> {
-    document.component_state::<State>(slider).dragging.clone()
-}
-
-pub fn slider_focused(document: &Document, slider: NodeId) -> ReadSignal<bool> {
-    document.component_state::<State>(slider).focused.clone()
+    document.component_state::<ReadSignal<f32>>(slider).clone()
 }
 
 fn detail(value: f32) -> String {
     format!("{value:.2}")
-}
-
-pub fn focus_slider(slider: NodeId) {
-    focus(component_state::<State, _>(slider, |state| state.focusable));
 }

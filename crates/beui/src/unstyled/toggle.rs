@@ -1,12 +1,11 @@
 use beui_macros::{component, view};
 
-use crate::base::focusable::focus;
 use crate::input::CursorIcon;
 
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
-    self, component_detail, component_state, create_signal, set_component_state, untrack, Callback,
+    self, component_detail, create_signal, set_component_state, untrack, Callback,
     ClickCatcherBuilder, FocusableBuilder, Prop, ReadSignal, Render,
 };
 
@@ -15,14 +14,6 @@ pub struct ToggleHandle {
     pub hovered: ReadSignal<bool>,
     pub active: ReadSignal<bool>,
     pub focused: ReadSignal<bool>,
-}
-
-struct State {
-    focusable: NodeId,
-    checked: ReadSignal<bool>,
-    hovered: ReadSignal<bool>,
-    active: ReadSignal<bool>,
-    focused: ReadSignal<bool>,
 }
 
 #[component]
@@ -65,6 +56,8 @@ pub fn toggle(
     };
     let key_toggle = toggle_checked.clone();
 
+    set_component_state(checked_read.clone());
+
     let focusable = view! {
         <focusable
             on_focus_change={move |focused: bool| set_focused.set(focused)}
@@ -82,31 +75,11 @@ pub fn toggle(
         </focusable>
     };
 
-    set_component_state(State {
-        focusable,
-        checked: checked_read,
-        hovered,
-        active,
-        focused,
-    });
-
     focusable
 }
 
 pub fn toggle_checked(document: &Document, toggle: NodeId) -> ReadSignal<bool> {
-    document.component_state::<State>(toggle).checked.clone()
-}
-
-pub fn toggle_hovered(document: &Document, toggle: NodeId) -> ReadSignal<bool> {
-    document.component_state::<State>(toggle).hovered.clone()
-}
-
-pub fn toggle_active(document: &Document, toggle: NodeId) -> ReadSignal<bool> {
-    document.component_state::<State>(toggle).active.clone()
-}
-
-pub fn toggle_focused(document: &Document, toggle: NodeId) -> ReadSignal<bool> {
-    document.component_state::<State>(toggle).focused.clone()
+    document.component_state::<ReadSignal<bool>>(toggle).clone()
 }
 
 fn detail(checked: bool) -> &'static str {
@@ -115,8 +88,4 @@ fn detail(checked: bool) -> &'static str {
     } else {
         "unchecked"
     }
-}
-
-pub fn focus_toggle(toggle: NodeId) {
-    focus(component_state::<State, _>(toggle, |state| state.focusable));
 }

@@ -4,9 +4,9 @@ use crate::document::Document;
 use crate::input::{Key, KeyPress};
 use crate::node::NodeId;
 use crate::reactive::{
-    component_state, create_effect, create_selector, create_signal, intrinsic, set_component_state,
-    Callback, ColumnBuilder, Memo, NodeRef, Prop, ReadSignal, Render, RenderFn, ScrollBuilder,
-    Selector, VisibilityBuilder, WriteSignal,
+    create_effect, create_selector, create_signal, intrinsic, set_component_state, Callback,
+    ColumnBuilder, Memo, NodeRef, Prop, ReadSignal, Render, RenderFn, ScrollBuilder, Selector,
+    VisibilityBuilder, WriteSignal,
 };
 use crate::unstyled;
 use crate::unstyled::button::ButtonHandle;
@@ -276,25 +276,8 @@ pub fn select_selected(document: &Document, select: NodeId) -> Option<usize> {
     document.component_state::<Handle>(select).selected.get()
 }
 
-pub fn select_selected_signal(document: &Document, select: NodeId) -> ReadSignal<Option<usize>> {
-    document.component_state::<Handle>(select).selected.clone()
-}
-
 pub fn select_open(document: &Document, select: NodeId) -> bool {
     document.component_state::<Handle>(select).open.get()
-}
-
-pub fn set_select_open(select: NodeId, opened: bool) {
-    let state = component_state::<Handle, _>(select, Rc::clone);
-    if opened {
-        open(&state);
-    } else {
-        state.set_open.set(false);
-    }
-}
-
-pub fn focus_select(select: NodeId) {
-    component_state::<Handle, _>(select, |state| state.set_focus.set(Focus::Trigger));
 }
 
 pub fn select_trigger(document: &Document, select: NodeId) -> NodeId {
@@ -303,10 +286,6 @@ pub fn select_trigger(document: &Document, select: NodeId) -> NodeId {
 
 pub fn select_search(document: &Document, select: NodeId) -> NodeId {
     document.component_state::<Handle>(select).search.get()
-}
-
-pub fn select_option_count(document: &Document, select: NodeId) -> usize {
-    document.component_state::<Handle>(select).rows.len()
 }
 
 pub fn select_option_button(document: &Document, select: NodeId, index: usize) -> NodeId {
@@ -320,13 +299,6 @@ pub fn select_highlighted(document: &Document, select: NodeId) -> Option<usize> 
         .component_state::<Handle>(select)
         .highlighted
         .get_untracked()
-}
-
-pub fn select_highlighted_signal(document: &Document, select: NodeId) -> ReadSignal<Option<usize>> {
-    document
-        .component_state::<Handle>(select)
-        .highlighted
-        .clone()
 }
 
 fn apply_requested_selection(state: &State, selected: Option<usize>) {

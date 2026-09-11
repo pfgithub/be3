@@ -1,4 +1,3 @@
-use crate::base::shadow::shadow_root;
 use crate::base::TextAlign;
 use crate::color::Color32;
 use crate::document::Document;
@@ -94,10 +93,6 @@ fn radio_mark(checked: Memo<bool>) -> NodeId {
 pub(super) fn selected_index(document: &Document, choice: NodeId) -> Option<usize> {
     let inner = document.shadow_root(choice);
     unstyled::choice_selected(document, inner)
-}
-
-pub(super) fn focus(choice: NodeId) {
-    unstyled::focus_choice(shadow_root(choice));
 }
 
 fn background(active: bool, hovered: bool) -> Color32 {

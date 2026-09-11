@@ -1,6 +1,5 @@
 use beui_macros::{component, view};
 
-use crate::base::shadow::shadow_root;
 use crate::color::Color32;
 
 use crate::base::TextAlign;
@@ -86,8 +85,4 @@ fn button_face(
             </outline>
         </outline>
     }
-}
-
-pub fn focus_button(button: NodeId) {
-    unstyled::focus_button(shadow_root(button));
 }

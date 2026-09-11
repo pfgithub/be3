@@ -3,8 +3,8 @@ use beui_macros::{component, view};
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
-    component_detail, component_state, create_signal, set_component_state, untrack, Callback,
-    Children, ColumnBuilder, NodeRef, Prop, ReadSignal, Render, VisibilityBuilder,
+    component_detail, create_signal, set_component_state, untrack, Callback, Children,
+    ColumnBuilder, Prop, ReadSignal, Render, VisibilityBuilder,
 };
 use crate::unstyled;
 use crate::unstyled::button::ButtonHandle;
@@ -17,7 +17,6 @@ pub struct DisclosureHandle {
 }
 
 struct State {
-    button: NodeRef,
     open: ReadSignal<bool>,
 }
 
@@ -47,12 +46,9 @@ pub fn disclosure(
     let open_for_header = open_read.clone();
     let open_for_click = open_read.clone();
 
-    let button = NodeRef::new();
-
     let root = view! {
         <column spacing={spacing}>
             <unstyled::button
-                node_ref={&button}
                 on_click={move || {
                     let next = !untrack(|| open_for_click.get());
                     set_open.set(next);
@@ -71,34 +67,11 @@ pub fn disclosure(
         </column>
     };
 
-    set_component_state(State {
-        button,
-        open: open_read,
-    });
+    set_component_state(State { open: open_read });
 
     root
 }
 
 pub fn disclosure_open(document: &Document, disclosure: NodeId) -> bool {
     document.component_state::<State>(disclosure).open.get()
-}
-
-pub fn disclosure_open_signal(document: &Document, disclosure: NodeId) -> ReadSignal<bool> {
-    document.component_state::<State>(disclosure).open.clone()
-}
-
-pub fn disclosure_hovered(document: &Document, disclosure: NodeId) -> ReadSignal<bool> {
-    let button = document.component_state::<State>(disclosure).button.get();
-    unstyled::button_hovered(document, button)
-}
-
-pub fn disclosure_focused(document: &Document, disclosure: NodeId) -> ReadSignal<bool> {
-    let button = document.component_state::<State>(disclosure).button.get();
-    unstyled::button_focused(document, button)
-}
-
-pub fn focus_disclosure(disclosure: NodeId) {
-    unstyled::focus_button(component_state::<State, _>(disclosure, |state| {
-        state.button.get()
-    }));
 }

@@ -28,7 +28,3 @@ pub fn tabs(labels: Vec<String>, selected: Prop<usize>, on_change: Callback<usiz
 pub fn tabs_selected(document: &Document, tabs: NodeId) -> usize {
     choice::selected_index(document, tabs).unwrap_or(0)
 }
-
-pub fn focus_tabs(tabs: NodeId) {
-    choice::focus(tabs);
-}

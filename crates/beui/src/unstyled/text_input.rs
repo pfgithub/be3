@@ -8,7 +8,6 @@ use text_editor_core::{
     TextBuffer, TextLanguage,
 };
 
-use crate::base::focusable::focus;
 use crate::color::Color32;
 use crate::input::{CursorIcon, Key, KeyPress, PointerPress};
 
@@ -19,9 +18,9 @@ use crate::node::NodeId;
 use beui_macros::{component, view};
 
 use crate::reactive::{
-    component_detail, component_state, copy_text, create_memo, create_signal, set_component_state,
-    Callback, ClickCatcherBuilder, FocusableBuilder, Memo, NodeRef, PaddingBuilder, Prop,
-    ReadSignal, Render, TextBuilder, WriteSignal,
+    component_detail, copy_text, create_memo, create_signal, set_component_state, Callback,
+    ClickCatcherBuilder, FocusableBuilder, Memo, NodeRef, PaddingBuilder, Prop, ReadSignal, Render,
+    TextBuilder, WriteSignal,
 };
 
 const FONT_SIZE: f32 = 14.0;
@@ -40,13 +39,11 @@ struct Editor {
     core: Core,
     dragging: bool,
     text: NodeRef,
-    focusable: NodeRef,
     value: ReadSignal<String>,
     set_value: WriteSignal<String>,
     set_caret: WriteSignal<Option<usize>>,
     set_selection: WriteSignal<Vec<Range<usize>>>,
     focused: ReadSignal<bool>,
-    hovered: ReadSignal<bool>,
     on_change: Callback<String>,
     on_submit: Callback<String>,
 }
@@ -80,7 +77,6 @@ pub fn text_input(
     let (caret, set_caret) = create_signal(None);
     let (selection, set_selection) = create_signal(Vec::new());
     let text = NodeRef::new();
-    let focusable = NodeRef::new();
     let string = shown_string(&text_value, placeholder);
     let color = shown_color(&text_value, color, placeholder_color);
 
@@ -88,13 +84,11 @@ pub fn text_input(
         core: core(&initial),
         dragging: false,
         text: text.clone(),
-        focusable: focusable.clone(),
         value: text_value.clone(),
         set_value,
         set_caret,
         set_selection,
         focused: focused.clone(),
-        hovered: hovered.clone(),
         on_change,
         on_submit,
     }));
@@ -106,7 +100,6 @@ pub fn text_input(
 
     let root = view! {
         <focusable
-            node_ref={&focusable}
             focused={focus_request}
             on_focus_change={{
                 let editor = editor.clone();
@@ -213,10 +206,6 @@ fn handle(document: &Document, input: NodeId) -> &Handle {
     document.component_state::<Handle>(input)
 }
 
-fn editor(input: NodeId) -> Handle {
-    component_state::<Handle, _>(input, Rc::clone)
-}
-
 pub fn text_input_text(document: &Document, input: NodeId) -> NodeId {
     handle(document, input).borrow().text.get()
 }
@@ -225,20 +214,8 @@ pub fn text_input_value(document: &Document, input: NodeId) -> String {
     text_of(&handle(document, input).borrow().core)
 }
 
-pub fn text_input_hovered(document: &Document, input: NodeId) -> ReadSignal<bool> {
-    handle(document, input).borrow().hovered.clone()
-}
-
 pub fn text_input_focused(document: &Document, input: NodeId) -> ReadSignal<bool> {
     handle(document, input).borrow().focused.clone()
-}
-
-pub fn set_text_input_value(input: NodeId, value: impl Into<String>) {
-    replace_all(&editor(input), value.into());
-}
-
-pub fn focus_text_input(input: NodeId) {
-    focus(editor(input).borrow().focusable.get());
 }
 
 fn replace_all(editor: &Handle, value: String) {

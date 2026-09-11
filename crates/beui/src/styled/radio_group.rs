@@ -26,7 +26,3 @@ pub fn radio_group(
 pub fn radio_group_selected(document: &Document, control: NodeId) -> Option<usize> {
     choice::selected_index(document, control)
 }
-
-pub fn focus_radio_group(control: NodeId) {
-    choice::focus(control);
-}

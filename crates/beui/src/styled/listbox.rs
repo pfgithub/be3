@@ -26,7 +26,3 @@ pub fn listbox(
 pub fn listbox_selected(document: &Document, control: NodeId) -> Option<usize> {
     choice::selected_index(document, control)
 }
-
-pub fn focus_listbox(control: NodeId) {
-    choice::focus(control);
-}

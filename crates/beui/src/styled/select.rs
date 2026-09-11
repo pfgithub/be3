@@ -148,16 +148,6 @@ pub fn select_open(document: &Document, select: NodeId) -> bool {
     unstyled::select_open(document, inner)
 }
 
-pub fn set_select_open(document: &Document, select: NodeId, opened: bool) {
-    let inner = document.shadow_root(select);
-    unstyled::set_select_open(inner, opened);
-}
-
-pub fn focus_select(document: &Document, select: NodeId) {
-    let inner = document.shadow_root(select);
-    unstyled::focus_select(inner);
-}
-
 fn trigger_label(options: &[String], selected: Option<usize>) -> String {
     selected
         .and_then(|index| options.get(index))
