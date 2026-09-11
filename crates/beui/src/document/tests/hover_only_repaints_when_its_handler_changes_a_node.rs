@@ -1,22 +1,27 @@
 use super::*;
-use crate::reactive::{create_effect, create_signal, with_document, ClickCatcherBuilder};
+use crate::reactive::{
+    build, create_effect, create_signal, view, with_document, ClickCatcherBuilder, FillBuilder,
+    NodeRef,
+};
 
 #[test]
 fn hover_only_repaints_when_its_handler_changes_a_node() {
-    let mut document = Document::new();
     let (hover_paints, set_hover_paints) = create_signal(false);
-    let fill = document.create_fill(Color32::WHITE, 0);
-    let catcher = with_installed(&mut document, |_| {
-        view! {
-            <click_catcher
-                cursor={crate::CursorIcon::PointingHand}
-                on_hover_change={move |hovered| set_hover_paints.set(hovered)}
-            >
-                {fill}
-            </click_catcher>
+    let fill = NodeRef::new();
+    let mut document = build({
+        let fill = fill.clone();
+        move || {
+            view! {
+                <click_catcher
+                    cursor={crate::CursorIcon::PointingHand}
+                    on_hover_change={move |hovered| set_hover_paints.set(hovered)}
+                >
+                    <fill node_ref={&fill} color={Color32::WHITE} radius={0} />
+                </click_catcher>
+            }
         }
     });
-    document.set_root(catcher);
+    let fill = fill.get();
     let (layouts, paints) = counted(&mut document, fill);
     let mut harness = Harness::new(document);
     harness.frame(vec![]);

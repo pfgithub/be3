@@ -1,10 +1,23 @@
 use super::*;
+use crate::reactive::{build, view, FillBuilder, NodeRef, TextBuilder};
 
 #[test]
 fn resizing_scaling_and_replacing_the_root_invalidate_the_cache() {
-    let mut document = Document::new();
-    let text = document.create_text("hello", 14.0, Color32::WHITE);
-    document.set_root(text);
+    let text = NodeRef::new();
+    let mut document = build({
+        let text = text.clone();
+        move || {
+            view! {
+                <text
+                    node_ref={&text}
+                    string={"hello".to_string()}
+                    font_size={14.0}
+                    color={Color32::WHITE}
+                />
+            }
+        }
+    });
+    let text = text.get();
     let (layouts, paints) = counted(&mut document, text);
     let mut harness = Harness::new(document);
     harness.frame(vec![]);
@@ -19,7 +32,9 @@ fn resizing_scaling_and_replacing_the_root_invalidate_the_cache() {
     assert!(output.changed);
     assert!(output.shapes().is_empty());
     assert!(harness.document.node_rect(text).is_none());
-    let fill = harness.document.create_fill(Color32::BLACK, 0);
+    let fill = with_installed(harness.document_mut(), |_| {
+        view! { <fill color={Color32::BLACK} radius={0} /> }
+    });
     harness.document.set_root(fill);
     assert!(harness.frame(vec![]).changed);
 }

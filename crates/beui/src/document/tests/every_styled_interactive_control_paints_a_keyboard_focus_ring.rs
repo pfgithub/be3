@@ -1,5 +1,5 @@
 use super::*;
-use crate::reactive::{view, with_document, with_reactive_scope};
+use crate::reactive::{view, TextBuilder};
 use crate::styled::{
     AccordionBuilder, ButtonBuilder, CheckboxBuilder, ListRowBuilder, ListboxBuilder,
     RadioGroupBuilder, SliderBuilder, SwitchBuilder, TabsBuilder, TextInputBuilder,
@@ -8,59 +8,45 @@ use crate::styled::{
 
 #[test]
 fn every_styled_interactive_control_paints_a_keyboard_focus_ring() {
-    let builders: &[fn(&mut Document) -> NodeId] = &[
-        |doc| {
-            with_reactive_scope(doc, || {
-                view! { <button label={"Button".to_string()} variant={styled::ButtonVariant::Primary} /> }
-            })
+    let controls: &[fn() -> NodeId] = &[
+        || {
+            view! {
+                <button label={"Button".to_string()} variant={styled::ButtonVariant::Primary} />
+            }
         },
-        |doc| {
-            with_reactive_scope(doc, || {
-                view! { <checkbox label={"Check".to_string()} checked={false} /> }
-            })
+        || view! { <checkbox label={"Check".to_string()} checked={false} /> },
+        || view! { <switch on={false} /> },
+        || view! { <slider value={0.5} /> },
+        || view! { <text_input value={"Text".to_string()} /> },
+        || view! { <tabs labels={vec!["One".to_string(), "Two".to_string()]} selected={0} /> },
+        || {
+            view! {
+                <radio_group labels={vec!["One".to_string(), "Two".to_string()]} selected={Some(0)} />
+            }
         },
-        |doc| with_reactive_scope(doc, || view! { <switch on={false} /> }),
-        |doc| with_reactive_scope(doc, || view! { <slider value={0.5} /> }),
-        |doc| with_reactive_scope(doc, || view! { <text_input value={"Text".to_string()} /> }),
-        |doc| {
-            with_reactive_scope(doc, || {
-                view! { <tabs labels={vec!["One".to_string(), "Two".to_string()]} selected={0} /> }
-            })
+        || {
+            view! {
+                <listbox labels={vec!["One".to_string(), "Two".to_string()]} selected={Some(0)} />
+            }
         },
-        |doc| {
-            with_reactive_scope(doc, || {
-                view! { <radio_group labels={vec!["One".to_string(), "Two".to_string()]} selected={Some(0)} /> }
-            })
+        || view! { <toggle_button label={"Toggle".to_string()} pressed={false} /> },
+        || {
+            view! {
+                <accordion title={"Header".to_string()} open={false}>
+                    <text string={"Content".to_string()} font_size={14.0} color={Color32::WHITE} />
+                </accordion>
+            }
         },
-        |doc| {
-            with_reactive_scope(doc, || {
-                view! { <listbox labels={vec!["One".to_string(), "Two".to_string()]} selected={Some(0)} /> }
-            })
-        },
-        |doc| {
-            with_reactive_scope(doc, || {
-                view! { <toggle_button label={"Toggle".to_string()} pressed={false} /> }
-            })
-        },
-        |doc| {
-            with_reactive_scope(doc, || {
-                let text =
-                    with_document(|document| document.create_text("Content", 14.0, Color32::WHITE));
-                view! { <accordion title={"Header".to_string()} open={false}>{text}</accordion> }
-            })
-        },
-        |doc| {
-            with_reactive_scope(doc, || {
-                let text =
-                    with_document(|document| document.create_text("Row", 14.0, Color32::WHITE));
-                view! { <list_row>{text}</list_row> }
-            })
+        || {
+            view! {
+                <list_row>
+                    <text string={"Row".to_string()} font_size={14.0} color={Color32::WHITE} />
+                </list_row>
+            }
         },
     ];
-    for build in builders {
-        let mut document = Document::new();
-        let control = build(&mut document);
-        toolbar(&mut document, &[control]);
+    for control in controls {
+        let (document, [control]) = toolbar_of(|| [control()]);
         let mut harness = Harness::new(document);
         let initial = harness.frame(vec![]);
         let focused = harness.frame(vec![key_event(Key::Tab, true, Modifiers::NONE)]);

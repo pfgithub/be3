@@ -1,10 +1,23 @@
 use super::*;
+use crate::reactive::{build, view, NodeRef, TextBuilder};
 
 #[test]
 fn dragging_the_inspector_edge_resizes_the_panel() {
-    let mut document = Document::new();
-    let text = document.create_text("Hello", 14.0, Color32::WHITE);
-    document.set_root(text);
+    let text = NodeRef::new();
+    let document = build({
+        let text = text.clone();
+        move || {
+            view! {
+                <text
+                    node_ref={&text}
+                    string={"Hello".to_string()}
+                    font_size={14.0}
+                    color={Color32::WHITE}
+                />
+            }
+        }
+    });
+    let text = text.get();
     let mut harness = Harness::sized(document, WIDE_VIEWPORT);
 
     harness.toggle_inspector();

@@ -2,9 +2,7 @@ use super::*;
 
 #[test]
 fn ctrl_shift_i_opens_and_closes_the_inspector() {
-    let mut document = Document::new();
-    let text = document.create_text("Hello", 14.0, Color32::WHITE);
-    document.set_root(text);
+    let HelloColumn { document, .. } = hello_column();
     let mut harness = Harness::new(document);
 
     harness.frame(Vec::new());

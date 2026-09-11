@@ -1,22 +1,32 @@
 use super::*;
-use crate::reactive::{view, with_reactive_scope};
+use crate::reactive::{build, intrinsic, view, NodeRef, ScrollBuilder, TextBuilder};
 use crate::styled::{SliderBuilder, TabsBuilder};
 
 #[test]
 fn unused_navigation_keys_scroll_the_nearest_ancestor() {
-    let mut document = Document::new();
-    let scroll = document.create_scroll();
-    let tabs = with_reactive_scope(&mut document, || {
-        view! { <tabs labels={vec!["One".to_string(), "Two".to_string()]} selected={0} /> }
+    let (scroll, tabs, slider) = (NodeRef::new(), NodeRef::new(), NodeRef::new());
+    let document = build({
+        let (scroll, tabs, slider) = (scroll.clone(), tabs.clone(), slider.clone());
+        move || {
+            let mut items = vec![
+                intrinsic(view! {
+                    <tabs
+                        node_ref={&tabs}
+                        labels={vec!["One".to_string(), "Two".to_string()]}
+                        selected={0}
+                    />
+                }),
+                intrinsic(view! { <slider node_ref={&slider} value={0.5} /> }),
+            ];
+            items.extend((0..20).map(|_| {
+                intrinsic(view! {
+                    <text string={"Content".to_string()} font_size={14.0} color={Color32::WHITE} />
+                })
+            }));
+            view! { <scroll node_ref={&scroll} children={items} /> }
+        }
     });
-    document.append_scroll_item(scroll, tabs);
-    let slider = with_reactive_scope(&mut document, || view! { <slider value={0.5} /> });
-    document.append_scroll_item(scroll, slider);
-    for _ in 0..20 {
-        let text = document.create_text("Content", 14.0, Color32::WHITE);
-        document.append_scroll_item(scroll, text);
-    }
-    document.set_root(scroll);
+    let (scroll, tabs, slider) = (scroll.get(), tabs.get(), slider.get());
     let mut harness = Harness::sized(document, Vec2::new(300.0, 100.0));
     harness.key(Key::Tab, Modifiers::NONE);
     harness.key(Key::Tab, Modifiers::NONE);

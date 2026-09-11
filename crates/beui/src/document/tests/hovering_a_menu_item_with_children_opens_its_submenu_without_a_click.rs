@@ -1,13 +1,10 @@
 use super::*;
-use crate::reactive::{view, with_reactive_scope};
+use crate::reactive::{view, NodeRef};
 use crate::styled::ContextMenuBuilder;
 
 #[test]
 fn hovering_a_menu_item_with_children_opens_its_submenu_without_a_click() {
-    let mut document = Document::new();
-    let region = document.create_sized(Some(120.0), Some(60.0));
-    let fill = document.create_fill(Color32::from_gray(80), 4);
-    document.set_sized_child(region, fill);
+    let region = NodeRef::new();
     let items = vec![unstyled::MenuItem::with_children(
         "Share",
         vec![
@@ -15,10 +12,15 @@ fn hovering_a_menu_item_with_children_opens_its_submenu_without_a_click() {
             unstyled::MenuItem::new("Link"),
         ],
     )];
-    let menu = with_reactive_scope(&mut document, || {
-        view! { <context_menu region={region} items={items} /> }
+    let (document, [menu]) = toolbar_of({
+        let region = region.clone();
+        move || {
+            [
+                view! { <context_menu region={view! { <menu_region node_ref={&region} /> }} items={items} /> },
+            ]
+        }
     });
-    toolbar(&mut document, &[menu]);
+    let region = region.get();
     let mut harness = Harness::new(document);
     harness.frame(Vec::new());
 

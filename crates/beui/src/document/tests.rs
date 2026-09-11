@@ -87,7 +87,7 @@ use crate::base::list::{Direction, ItemSize};
 use crate::inspector::Inspector;
 use crate::reactive::{
     build, intrinsic, with_document, ClickCallback, ColumnBuilder, FillBuilder, NodeRef,
-    PaddingBuilder, SpacerBuilder, TextBuilder, VirtualListBuilder,
+    PaddingBuilder, SizedBuilder, SpacerBuilder, TextBuilder, VirtualListBuilder,
 };
 use crate::styled;
 use crate::unstyled;
@@ -269,6 +269,15 @@ pub(crate) fn with_installed<R>(document: &mut Document, f: impl FnOnce(&mut Doc
 }
 
 #[component(base)]
+pub(crate) fn menu_region() -> NodeId {
+    view! {
+        <sized width={120.0} height={60.0}>
+            <fill color={Color32::from_gray(80)} radius={4} />
+        </sized>
+    }
+}
+
+#[component(base)]
 pub(crate) fn button_face(label: String) -> NodeId {
     view! {
         <fill color={Color32::from_gray(60)} radius={4}>
@@ -364,16 +373,6 @@ pub(crate) fn toolbar_of<const N: usize>(
     });
     let nodes = built.get().expect("the toolbar was built");
     (document, nodes)
-}
-
-pub(crate) fn toolbar(document: &mut Document, buttons: &[NodeId]) -> NodeId {
-    let items: Vec<_> = buttons.iter().copied().map(intrinsic).collect();
-    let list = with_installed(
-        document,
-        |_| view! { <column spacing={8.0} children={items} /> },
-    );
-    document.set_root(list);
-    list
 }
 
 use crate::node::{Element, InteractInput};

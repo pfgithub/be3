@@ -1,10 +1,14 @@
 use super::*;
+use crate::reactive::{build, view, FillBuilder, NodeRef};
 
 #[test]
 fn unchanged_input_reuses_layout_and_paint() {
-    let mut document = Document::new();
-    let fill = document.create_fill(Color32::WHITE, 0);
-    document.set_root(fill);
+    let fill = NodeRef::new();
+    let mut document = build({
+        let fill = fill.clone();
+        move || view! { <fill node_ref={&fill} color={Color32::WHITE} radius={0} /> }
+    });
+    let fill = fill.get();
     let (layouts, paints) = counted(&mut document, fill);
     let mut harness = Harness::new(document);
     assert!(harness.frame(vec![]).changed);

@@ -1,5 +1,6 @@
 use super::*;
 use crate::input::CursorIcon;
+use crate::reactive::with_document;
 
 fn slotted_shadow(document: &mut Document) -> NodeId {
     let slot = document.create_slot("content");
@@ -15,9 +16,7 @@ fn slotted_shadow(document: &mut Document) -> NodeId {
 
 #[test]
 fn the_inspector_separates_component_internals_from_slots() {
-    let mut document = Document::new();
-    let button = slotted_shadow(&mut document);
-    toolbar(&mut document, &[button]);
+    let (document, [_button]) = toolbar_of(|| [with_document(slotted_shadow)]);
     let mut harness = Harness::new(document);
 
     harness.toggle_inspector();

@@ -1,5 +1,5 @@
 use super::*;
-use crate::reactive::{create_signal, view, with_reactive_scope};
+use crate::reactive::{create_signal, view};
 use crate::styled::TextInputBuilder;
 
 #[test]
@@ -17,8 +17,8 @@ fn setting_the_value_of_a_text_input_reports_the_change() {
     let mut harness = Harness::new(document);
     harness.frame(Vec::new());
 
-    with_reactive_scope(harness.document_mut(), || {
-        set_value.set("typed for you".to_string())
+    with_installed(harness.document_mut(), |_| {
+        set_value.set("typed for you".to_string());
     });
 
     assert_eq!(reported.borrow().as_str(), "typed for you");

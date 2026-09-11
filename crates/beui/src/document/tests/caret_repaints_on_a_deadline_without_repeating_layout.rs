@@ -1,11 +1,24 @@
 use super::*;
+use crate::reactive::{build, view, NodeRef, TextBuilder};
 
 #[test]
 fn caret_repaints_on_a_deadline_without_repeating_layout() {
-    let mut document = Document::new();
-    let text = document.create_text("hello", 14.0, Color32::WHITE);
-    document.set_text_caret(text, Some(0));
-    document.set_root(text);
+    let text = NodeRef::new();
+    let mut document = build({
+        let text = text.clone();
+        move || {
+            view! {
+                <text
+                    node_ref={&text}
+                    string={"hello".to_string()}
+                    font_size={14.0}
+                    color={Color32::WHITE}
+                    caret={Some(0)}
+                />
+            }
+        }
+    });
+    let text = text.get();
     let (layouts, paints) = counted(&mut document, text);
     let mut harness = Harness::new(document);
     let output = harness.frame(vec![]);

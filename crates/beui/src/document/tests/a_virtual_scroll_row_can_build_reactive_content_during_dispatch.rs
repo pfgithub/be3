@@ -1,17 +1,25 @@
 use super::*;
-use crate::reactive::{view, TextBuilder};
+use crate::reactive::{build, view, NodeRef, TextBuilder, VirtualListBuilder};
 
 #[test]
 fn a_virtual_scroll_row_can_build_reactive_content_during_dispatch() {
-    let mut document = Document::new();
-    let scroll = document.create_scroll();
-    document.set_scroll_virtual_items(
-        scroll,
-        VIRTUAL_ITEM_COUNT,
-        VIRTUAL_ITEM_HEIGHT,
-        move |index| view! { <text string={format!("Row {index}")} /> },
-    );
-    document.set_root(scroll);
+    let scroll = NodeRef::new();
+    let document = build({
+        let scroll = scroll.clone();
+        move || {
+            view! {
+                <column spacing={0.0}>
+                    @percent(100.0) <virtual_list
+                        node_ref={&scroll}
+                        count={VIRTUAL_ITEM_COUNT}
+                        item_height={VIRTUAL_ITEM_HEIGHT}
+                        item={|index: usize| view! { <text string={format!("Row {index}")} /> }}
+                    />
+                </column>
+            }
+        }
+    });
+    let scroll = scroll.get();
 
     let mut harness = Harness::new(document);
     harness.frame(Vec::new());

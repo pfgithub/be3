@@ -1,5 +1,5 @@
 use super::*;
-use crate::reactive::{view, FillBuilder, NodeRef, SizedBuilder};
+use crate::reactive::{view, NodeRef};
 use crate::styled::ContextMenuBuilder;
 
 #[test]
@@ -16,11 +16,7 @@ fn tab_is_trapped_inside_an_open_context_menu() {
                 view! { <labelled_button label={"Before".to_string()} /> },
                 view! {
                     <context_menu
-                        region={view! {
-                            <sized node_ref={&region} width={120.0} height={60.0}>
-                                <fill color={Color32::from_gray(80)} radius={4} />
-                            </sized>
-                        }}
+                        region={view! { <menu_region node_ref={&region} /> }}
                         items={items}
                     />
                 },

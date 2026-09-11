@@ -1,29 +1,24 @@
 use super::*;
-use crate::reactive::{
-    create_memo, create_signal, view, with_reactive_scope, NodeRef, ShowBuilder,
-};
+use crate::reactive::{create_memo, create_signal, view, NodeRef, ShowBuilder};
 use crate::styled::SwitchBuilder;
 
 #[test]
 fn clicking_a_switch_moves_its_knob_and_survives_a_tab_round_trip() {
-    let mut document = Document::new();
-    let (tab, set_tab) = with_reactive_scope(&mut document, || create_signal(0usize));
+    let (tab, set_tab) = create_signal(0usize);
     let switch_ref = NodeRef::new();
 
-    let panel = with_reactive_scope(&mut document, || {
-        let condition = create_memo({
-            let tab = tab.clone();
-            move || tab.get() == 0
-        });
+    let (document, [_panel]) = toolbar_of({
         let switch_ref = switch_ref.clone();
-        view! {
-            <show
-                condition={condition}
-                then={move || view! { <switch node_ref={&switch_ref} on={false} /> }}
-            />
+        move || {
+            let condition = create_memo(move || tab.get() == 0);
+            [view! {
+                <show
+                    condition={condition}
+                    then={move || view! { <switch node_ref={&switch_ref} on={false} /> }}
+                />
+            }]
         }
     });
-    toolbar(&mut document, &[panel]);
     let mut harness = Harness::new(document);
     harness.frame(Vec::new());
 

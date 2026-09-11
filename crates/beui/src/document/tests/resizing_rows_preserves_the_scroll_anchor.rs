@@ -1,20 +1,41 @@
 use super::*;
+use crate::reactive::{build, intrinsic, view, NodeRef, PaddingBuilder, ScrollBuilder};
 
 #[test]
 fn resizing_rows_preserves_the_scroll_anchor() {
-    let mut document = Document::new();
-    let scroll = document.create_scroll();
-    let rows: Vec<_> = (0..100)
-        .map(|index| {
-            let row = document.create_padding(0.0, 10.0 + (index % 3) as f32);
-            document.append_scroll_item(scroll, row);
-            row
-        })
-        .collect();
-    document.set_root(scroll);
     let reported = Rc::new(Cell::new(None));
     let sink = reported.clone();
-    document.set_scroll_on_change(scroll, move |position| sink.set(Some(position)));
+    let scroll = NodeRef::new();
+    let rows: Vec<NodeRef> = (0..100).map(|_| NodeRef::new()).collect();
+    let document = build({
+        let (scroll, rows) = (scroll.clone(), rows.clone());
+        move || {
+            let items: Vec<_> = rows
+                .iter()
+                .enumerate()
+                .map(|(index, row)| {
+                    intrinsic(view! {
+                        <padding
+                            node_ref={row}
+                            horizontal={0.0}
+                            vertical={10.0 + (index % 3) as f32}
+                        >
+                            <spacer />
+                        </padding>
+                    })
+                })
+                .collect();
+            view! {
+                <scroll
+                    node_ref={&scroll}
+                    on_change={move |position| sink.set(Some(position))}
+                    children={items}
+                />
+            }
+        }
+    });
+    let scroll = scroll.get();
+    let rows: Vec<NodeId> = rows.iter().map(NodeRef::get).collect();
     let mut harness = Harness::new(document);
     harness.document.set_scroll_offset(scroll, 227.0);
     harness.frame(Vec::new());
