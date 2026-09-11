@@ -16,7 +16,7 @@ fn right_arrow_opens_a_submenu_and_left_arrow_closes_it_and_refocuses_the_parent
         let region = region.clone();
         move || {
             [
-                view! { <context_menu region={view! { <menu_region node_ref={&region} /> }} items={items} /> },
+                view! { <context_menu items={items}><menu_region node_ref={&region} /></context_menu> },
             ]
         }
     });

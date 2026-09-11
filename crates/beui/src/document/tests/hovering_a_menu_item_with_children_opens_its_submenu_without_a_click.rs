@@ -16,7 +16,7 @@ fn hovering_a_menu_item_with_children_opens_its_submenu_without_a_click() {
         let region = region.clone();
         move || {
             [
-                view! { <context_menu region={view! { <menu_region node_ref={&region} /> }} items={items} /> },
+                view! { <context_menu items={items}><menu_region node_ref={&region} /></context_menu> },
             ]
         }
     });

@@ -13,7 +13,7 @@ fn arrow_keys_move_a_visible_highlight_through_an_open_context_menu() {
         let region = region.clone();
         move || {
             [
-                view! { <context_menu region={view! { <menu_region node_ref={&region} /> }} items={items} /> },
+                view! { <context_menu items={items}><menu_region node_ref={&region} /></context_menu> },
             ]
         }
     });

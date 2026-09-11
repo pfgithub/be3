@@ -545,16 +545,7 @@ fn menu_controls() -> NodeId {
                 <caption content={fruit_status_text} />
             </column>
             @percent(50.0) <column spacing={8.0}>
-                <context_menu region={
-                    view! {
-                        <card>
-                            <column spacing={4.0}>
-                                <caption content={"Right-click the card below".to_string()} />
-                                <paragraph content={"The Share item opens a submenu on hover or Right Arrow; Left Arrow closes it.".to_string()} />
-                            </column>
-                        </card>
-                    }
-                } items={items} on_select={move |path: Vec<usize>| {
+                <context_menu items={items} on_select={move |path: Vec<usize>| {
                     let label = match path.as_slice() {
                         [0] => "Copy".to_owned(),
                         [1] => "Paste".to_owned(),
@@ -563,7 +554,14 @@ fn menu_controls() -> NodeId {
                         other => format!("{other:?}"),
                     };
                     set_menu_status_text.set(format!("Chose: {label}"));
-                }} />
+                }}>
+                    <card>
+                        <column spacing={4.0}>
+                            <caption content={"Right-click the card below".to_string()} />
+                            <paragraph content={"The Share item opens a submenu on hover or Right Arrow; Left Arrow closes it.".to_string()} />
+                        </column>
+                    </card>
+                </context_menu>
                 <caption content={menu_status_text} />
             </column>
         </stack>

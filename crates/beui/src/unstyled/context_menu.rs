@@ -6,8 +6,8 @@ use crate::geometry::Pos2;
 use crate::input::{CursorIcon, PointerPress};
 use crate::node::NodeId;
 use crate::reactive::{
-    create_memo, create_signal, set_component_state, Callback, ClickCatcherBuilder, ColumnBuilder,
-    DynamicBuilder, NodeRef, Prop, RenderFn,
+    create_memo, create_signal, set_component_state, Callback, Children, ClickCatcherBuilder,
+    ColumnBuilder, DynamicBuilder, NodeRef, Prop, RenderFn,
 };
 use crate::unstyled::menu::{MenuItem, MenuListBuilder, MenuRowHandle};
 
@@ -18,12 +18,15 @@ struct State {
 
 #[component]
 pub fn context_menu(
-    region: NodeId,
+    children: Children,
     items: Prop<Vec<MenuItem>>,
     row: Option<RenderFn<MenuRowHandle>>,
     panel: Option<RenderFn<NodeId>>,
     on_select: Callback<Vec<usize>>,
 ) -> NodeId {
+    let region = children
+        .into_first()
+        .expect("context_menu requires a region, e.g. <context_menu>{content}</context_menu>");
     let row = row.unwrap_or_else(|| RenderFn::new(|_| view! { <column spacing={0.0} /> }));
     let panel = panel.unwrap_or_else(|| RenderFn::new(|content| content));
     let (open, set_open) = create_signal(false);

@@ -13,7 +13,7 @@ fn right_click_opens_a_context_menu_at_the_cursor_position() {
         let region = region.clone();
         move || {
             [
-                view! { <context_menu region={view! { <menu_region node_ref={&region} /> }} items={items} /> },
+                view! { <context_menu items={items}><menu_region node_ref={&region} /></context_menu> },
             ]
         }
     });

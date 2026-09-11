@@ -4,8 +4,8 @@ use crate::base::TextAlign;
 use crate::color::Color32;
 use crate::node::NodeId;
 use crate::reactive::{
-    create_memo, Callback, FillBuilder, OutlineBuilder, PaddingBuilder, Prop, SizedBuilder,
-    TextBuilder,
+    create_memo, Callback, Children, FillBuilder, OutlineBuilder, PaddingBuilder, Prop,
+    SizedBuilder, TextBuilder,
 };
 use crate::styled::theme::{
     ACCENT_SOFT, BORDER, BORDER_WIDTH, FONT_BODY, RADIUS, SURFACE_RAISED, TEXT, TEXT_MUTED,
@@ -20,18 +20,22 @@ const MENU_WIDTH: f32 = 200.0;
 
 #[component]
 pub fn context_menu(
-    region: NodeId,
+    children: Children,
     items: Prop<Vec<MenuItem>>,
     on_select: Callback<Vec<usize>>,
 ) -> NodeId {
+    let region = children
+        .into_first()
+        .expect("context_menu requires a region, e.g. <context_menu>{content}</context_menu>");
     view! {
         <unstyled::context_menu
-            region={region}
             items={items}
             row={|handle| view! { <menu_row handle={handle} /> }}
-            panel={|content| view! { <menu_panel content={content} /> }}
+            panel={|content| view! { <menu_panel>{content}</menu_panel> }}
             on_select={move |path| on_select.call(path)}
-        />
+        >
+            {region}
+        </unstyled::context_menu>
     }
 }
 
@@ -59,7 +63,10 @@ fn menu_row(handle: MenuRowHandle) -> NodeId {
 }
 
 #[component]
-fn menu_panel(content: NodeId) -> NodeId {
+fn menu_panel(children: Children) -> NodeId {
+    let content = children
+        .into_first()
+        .expect("menu_panel wraps the menu it frames");
     view! {
         <sized width={MENU_WIDTH}>
             <outline color={BORDER} width={BORDER_WIDTH} radius={RADIUS} offset={0.0} visible={true}>

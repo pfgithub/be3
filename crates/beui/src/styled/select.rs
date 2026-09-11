@@ -5,8 +5,8 @@ use crate::color::Color32;
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
-    create_memo, Callback, FillBuilder, OutlineBuilder, PaddingBuilder, Prop, SizedBuilder,
-    TextBuilder,
+    create_memo, Callback, Children, FillBuilder, OutlineBuilder, PaddingBuilder, Prop,
+    SizedBuilder, TextBuilder,
 };
 use crate::styled::theme::{
     ACCENT, ACCENT_SOFT, BORDER, BORDER_WIDTH, FONT_BODY, RADIUS, SURFACE, SURFACE_RAISED, TEXT,
@@ -46,7 +46,7 @@ pub fn select(
             search_content={|handle| view! { <search_field handle={handle} /> }}
             trigger={move |handle| view! { <select_trigger options={trigger_options} handle={handle} /> }}
             option={|handle| view! { <select_option handle={handle} /> }}
-            popup={|content| view! { <select_popup content={content} /> }}
+            popup={|content| view! { <select_popup>{content}</select_popup> }}
         />
     }
 }
@@ -126,7 +126,10 @@ fn select_option(handle: SelectOptionHandle) -> NodeId {
 }
 
 #[component]
-fn select_popup(content: NodeId) -> NodeId {
+fn select_popup(children: Children) -> NodeId {
+    let content = children
+        .into_first()
+        .expect("select_popup wraps the popup it frames");
     view! {
         <sized width={POPUP_WIDTH}>
             <outline color={BORDER} width={BORDER_WIDTH} radius={RADIUS} offset={0.0} visible={true}>
