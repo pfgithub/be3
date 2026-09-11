@@ -241,16 +241,17 @@ impl Inspector {
                 .then(|| (row.set_detail.clone(), entry.detail.clone()));
             let size =
                 (entry.size != previous.size).then(|| (row.set_size.clone(), entry.size.clone()));
-            if entry.selected != previous.selected {
-                self.document
-                    .set_outline_visible(row.outline, entry.selected);
-            }
+            let selected = (entry.selected != previous.selected)
+                .then(|| (row.set_selected.clone(), entry.selected));
             with_reactive_scope(&mut self.document, move || {
                 if let Some((set_detail, detail)) = detail {
                     set_detail.set(detail);
                 }
                 if let Some((set_size, size)) = size {
                     set_size.set(size);
+                }
+                if let Some((set_selected, selected)) = selected {
+                    set_selected.set(selected);
                 }
             });
             *previous = entry;

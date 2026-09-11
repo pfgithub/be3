@@ -3,13 +3,13 @@ use std::rc::Rc;
 use crate::color::Color32;
 use crate::input::CursorIcon;
 
-use crate::base::TextAlign;
+use crate::base::{ScrollPosition, TextAlign};
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
-    create_signal, intrinsic, view, with_reactive_scope, CenteredRowBuilder, ClickCatcherBuilder,
-    ColumnBuilder, FillBuilder, OutlineBuilder, PaddingBuilder, Prop, ReadSignal, RowBuilder,
-    ScrollBuilder, SpacerBuilder, WriteSignal,
+    component, create_signal, intrinsic, view, with_reactive_scope, CenteredRowBuilder,
+    ClickCatcherBuilder, ColumnBuilder, FillBuilder, NodeRef, OutlineBuilder, PaddingBuilder, Prop,
+    ReadSignal, RowBuilder, ScrollBuilder, SpacerBuilder, WriteSignal,
 };
 use crate::styled::theme::{
     ACCENT, BORDER_WIDTH, CHIP_RADIUS, ON_ACCENT, RADIUS, SCROLLBAR_WIDTH, SEPARATOR_HEIGHT,
@@ -21,7 +21,7 @@ use crate::styled::{
 };
 use crate::unstyled;
 
-use super::tree::Entry;
+use super::tree::{Entry, Key};
 use super::State;
 
 const HEADER_PADDING: f32 = 12.0;
@@ -46,8 +46,8 @@ pub(crate) struct Summary {
 pub(crate) struct Row {
     pub(crate) row: NodeId,
     #[cfg(test)]
-    pub(crate) marker: NodeId,
-    pub(crate) outline: NodeId,
+    pub(crate) marker: NodeRef,
+    pub(crate) set_selected: WriteSignal<bool>,
     pub(crate) set_detail: WriteSignal<String>,
     pub(crate) set_size: WriteSignal<String>,
 }
@@ -98,12 +98,14 @@ fn build_tree(entries: &[Entry], summary: &Summary, state: &Rc<State>, offset: f
     let (selection_text, set_selection) = create_signal(summary.selection.clone());
     let (bounds_text, set_bounds) = create_signal(summary.bounds.clone());
 
+    let (position, set_position) = create_signal(ScrollPosition::ZERO);
     let rows: Vec<Row> = entries.iter().map(|entry| row(entry, state)).collect();
     let items: Vec<NodeId> = rows.iter().map(|row| row.row).collect();
     let scroll = view! {
         <scroll
             offset={offset}
             focus_color={ACCENT}
+            on_change={move |value| set_position.set(value)}
             children={items.into_iter().map(intrinsic).collect::<Vec<_>>()}
         />
     };
@@ -117,14 +119,14 @@ fn build_tree(entries: &[Entry], summary: &Summary, state: &Rc<State>, offset: f
                         <centered_row spacing={HEADER_SPACING}>
                             <heading content={"Inspector".to_string()} />
                             @percent(100.0) <caption content={count_text} align={TextAlign::End} />
-                            {pick_toggle(state, &picking)}
+                            <pick_toggle state={state.clone()} picking={picking} />
                         </centered_row>
                     </padding>
                     @fixed(SEPARATOR_HEIGHT) <separator />
                     @percent(100.0) <padding horizontal={BODY_PADDING} vertical={BODY_PADDING}>
                         <row spacing={BODY_SPACING}>
                             @percent(100.0) {scroll}
-                            @fixed(SCROLLBAR_WIDTH) <scrollbar scroll={scroll} />
+                            @fixed(SCROLLBAR_WIDTH) <scrollbar position={position} />
                         </row>
                     </padding>
                     @fixed(SEPARATOR_HEIGHT) <separator />
@@ -173,16 +175,14 @@ pub(crate) fn toggle_text(picking: bool) -> Color32 {
     }
 }
 
-fn pick_toggle(state: &Rc<State>, picking: &ReadSignal<bool>) -> NodeId {
+#[component]
+fn pick_toggle(state: Rc<State>, picking: ReadSignal<bool>) -> NodeId {
     let label_color = {
         let picking = picking.clone();
         Prop::Dynamic(Box::new(move || toggle_text(picking.get())))
     };
-    let fill_color = {
-        let picking = picking.clone();
-        Prop::Dynamic(Box::new(move || toggle_fill(picking.get())))
-    };
-    let picker = state.clone();
+    let fill_color = Prop::Dynamic(Box::new(move || toggle_fill(picking.get())));
+    let picker = state;
     view! {
         <unstyled::pressable on_click={move || picker.toggle_picking()}>
             <bordered corner_radius={CHIP_RADIUS}>
@@ -204,77 +204,84 @@ fn pick_toggle(state: &Rc<State>, picking: &ReadSignal<bool>) -> NodeId {
 }
 
 fn row(entry: &Entry, state: &Rc<State>) -> Row {
-    let marker = marker(entry, state);
     let (detail_text, set_detail) = create_signal(entry.detail.clone());
     let (size_text, set_size) = create_signal(entry.size.clone());
-    let indent = entry.depth as f32 * INDENT;
+    let (selected, set_selected) = create_signal(entry.selected);
+    let marker = NodeRef::new();
 
-    let outline_cell = std::cell::Cell::new(None);
-    let node = entry.key.node();
-    let hover = state.clone();
-    let selection = state.clone();
     let row = view! {
-        <click_catcher
-            cursor={CursorIcon::PointingHand}
-            on_click={move || selection.select(node)}
-            on_hover_change={move |hovered| hover.hover(node, hovered)}
-        >
-            {{
-                let outline = view! {
-                    <outline
-                        color={ACCENT}
-                        width={BORDER_WIDTH}
-                        radius={RADIUS}
-                        offset={0.0}
-                        visible={entry.selected}
-                    >
-                        <list_row>
-                            <centered_row spacing={ROW_SPACING}>
-                                @fixed(indent) <spacer />
-                                @fixed(MARKER_WIDTH) {marker}
-                                <code content={entry.kind.to_owned()} />
-                                @percent(100.0) <code content={detail_text} color={TEXT_MUTED} />
-                                <code content={size_text} color={TEXT_MUTED} align={TextAlign::End} />
-                            </centered_row>
-                        </list_row>
-                    </outline>
-                };
-                outline_cell.set(Some(outline));
-                outline
-            }}
-        </click_catcher>
+        <tree_row
+            marker_ref={marker.clone()}
+            state={state.clone()}
+            key={entry.key}
+            kind={entry.kind}
+            indent={entry.depth as f32 * INDENT}
+            expandable={entry.expandable}
+            expanded={entry.expanded}
+            glyph={glyph(entry).to_owned()}
+            selected={selected}
+            detail={detail_text}
+            size={size_text}
+        />
     };
-    let outline = outline_cell.get().expect("row outline not yet built");
 
     Row {
         row,
         #[cfg(test)]
         marker,
-        outline,
+        set_selected,
         set_detail,
         set_size,
     }
 }
 
-fn marker(entry: &Entry, state: &Rc<State>) -> NodeId {
-    let glyph_node = view! {
-        <code
-            content={glyph(entry).to_owned()}
-            color={TEXT_MUTED}
-            align={TextAlign::Center}
-        />
-    };
-    if !entry.expandable {
-        return glyph_node;
-    }
-
-    let expansion = state.clone();
-    let key = entry.key;
-    let expanded = entry.expanded;
+#[component]
+fn tree_row(
+    state: Rc<State>,
+    key: Key,
+    kind: &'static str,
+    indent: f32,
+    expandable: bool,
+    expanded: bool,
+    glyph: String,
+    selected: ReadSignal<bool>,
+    detail: ReadSignal<String>,
+    size: ReadSignal<String>,
+    marker_ref: Option<NodeRef>,
+) -> NodeId {
+    let node = key.node();
+    let marker_ref = marker_ref.unwrap_or_default();
+    let (hover, selection, expansion) = (state.clone(), state.clone(), state);
     view! {
-        <unstyled::pressable on_click={move || expansion.set_expanded(key, !expanded)}>
-            {glyph_node}
-        </unstyled::pressable>
+        <click_catcher
+            cursor={CursorIcon::PointingHand}
+            on_click={move || selection.select(node)}
+            on_hover_change={move |hovered| hover.hover(node, hovered)}
+        >
+            <outline
+                color={ACCENT}
+                width={BORDER_WIDTH}
+                radius={RADIUS}
+                offset={0.0}
+                visible={selected}
+            >
+                <list_row>
+                    <centered_row spacing={ROW_SPACING}>
+                        @fixed(indent) <spacer />
+                        @fixed(MARKER_WIDTH) <unstyled::pressable
+                            node_ref={&marker_ref}
+                            enabled={expandable}
+                            on_click={move || expansion.set_expanded(key, !expanded)}
+                        >
+                            <code content={glyph} color={TEXT_MUTED} align={TextAlign::Center} />
+                        </unstyled::pressable>
+                        <code content={kind.to_owned()} />
+                        @percent(100.0) <code content={detail} color={TEXT_MUTED} />
+                        <code content={size} color={TEXT_MUTED} align={TextAlign::End} />
+                    </centered_row>
+                </list_row>
+            </outline>
+        </click_catcher>
     }
 }
 

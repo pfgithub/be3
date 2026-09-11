@@ -67,7 +67,6 @@ pub fn button(
         tab_stop.map(move |tab_stop| tab_stop && !disabled.get())
     };
 
-    let click_catcher_cell = std::cell::Cell::new(None);
     let focusable = view! {
         <focusable
             tab_stop={tab_stop}
@@ -77,20 +76,14 @@ pub fn button(
             on_activate_change={move |pressed: bool| set_key_active.set(pressed)}
             on_activate={key_click}
         >
-            {{
-                let click_catcher = view! {
-                    <click_catcher
-                        cursor={CursorIcon::PointingHand}
-                        key_active={key_active}
-                        on_click={click}
-                        on_hover_change={move |hovered: bool| set_hovered.set(hovered)}
-                        on_active_change={move |active: bool| set_active.set(active)}
-                        children={content_node.map(reactive::intrinsic)}
-                    />
-                };
-                click_catcher_cell.set(Some(click_catcher));
-                click_catcher
-            }}
+            <click_catcher
+                cursor={CursorIcon::PointingHand}
+                key_active={key_active}
+                on_click={click}
+                on_hover_change={move |hovered: bool| set_hovered.set(hovered)}
+                on_active_change={move |active: bool| set_active.set(active)}
+                children={content_node.map(reactive::intrinsic)}
+            />
         </focusable>
     };
 

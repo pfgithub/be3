@@ -24,8 +24,20 @@ pub struct ScrollPosition {
 }
 
 impl ScrollPosition {
+    pub const ZERO: Self = Self {
+        offset: 0.0,
+        content: 0.0,
+        viewport: 0.0,
+    };
+
     pub fn max_offset(&self) -> f32 {
         (self.content - self.viewport).max(0.0)
+    }
+}
+
+impl Default for ScrollPosition {
+    fn default() -> Self {
+        Self::ZERO
     }
 }
 
@@ -386,7 +398,28 @@ impl Document {
     }
 }
 
+pub(crate) fn reveal_scroll_item(scroll: NodeId, item: NodeId) {
+    with_document(|document| document.reveal_scroll_item(scroll, item));
+}
+
 impl Document {
+    fn reveal_scroll_item(&mut self, scroll: NodeId, item: NodeId) {
+        let (Some(viewport), Some(item)) = (self.node_rect(scroll), self.node_rect(item)) else {
+            return;
+        };
+        let offset = self.scroll_offset(scroll);
+        let top = item.top() - viewport.top() + offset;
+        let bottom = item.bottom() - viewport.top() + offset;
+        let revealed = if top < offset {
+            top
+        } else if bottom > offset + viewport.height() {
+            (bottom - viewport.height()).min(top)
+        } else {
+            return;
+        };
+        self.set_scroll_offset(scroll, revealed.max(0.0));
+    }
+
     pub fn set_scroll_focus_color(&mut self, scroll: NodeId, color: Color32) {
         self.arena.get_mut_as::<ScrollNode>(scroll).focus_color = color;
     }
@@ -510,8 +543,10 @@ pub fn virtual_list(
     count: Prop<usize>,
     item_height: Prop<f32>,
     item: Option<ItemBuilder>,
+    focus_color: Prop<Color32>,
+    on_change: Callback<ScrollPosition>,
 ) -> NodeId {
-    let scroll = with_document(Document::create_scroll);
+    let scroll = create_scroll(focus_color, on_change);
     let item = Rc::new(RefCell::new(
         item.expect("virtual_list requires an `item` builder"),
     ));
@@ -532,14 +567,28 @@ pub fn virtual_list(
 }
 
 #[component(base)]
-pub fn scroll(offset: Prop<f32>, focus_color: Prop<Color32>, children: Children) -> NodeId {
-    let scroll = with_document(Document::create_scroll);
+pub fn scroll(
+    offset: Prop<f32>,
+    focus_color: Prop<Color32>,
+    on_change: Callback<ScrollPosition>,
+    children: Children,
+) -> NodeId {
+    let scroll = create_scroll(focus_color, on_change);
     children.mount_scroll_items(scroll);
-    focus_color.apply(move |color| {
-        with_document(|document| document.set_scroll_focus_color(scroll, color));
-    });
     offset.apply(move |offset| {
         with_document(|document| document.set_scroll_offset(scroll, offset));
+    });
+    scroll
+}
+
+fn create_scroll(focus_color: Prop<Color32>, on_change: Callback<ScrollPosition>) -> NodeId {
+    let scroll = with_document(|document| {
+        let scroll = document.create_scroll();
+        document.set_scroll_on_change(scroll, move |position| on_change.call(position));
+        scroll
+    });
+    focus_color.apply(move |color| {
+        with_document(|document| document.set_scroll_focus_color(scroll, color));
     });
     scroll
 }

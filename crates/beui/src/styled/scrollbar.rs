@@ -4,28 +4,17 @@ use crate::color::Color32;
 
 use crate::base::ScrollPosition;
 use crate::node::NodeId;
-use crate::reactive::{
-    create_signal, with_document, ColumnBuilder, FillBuilder, Prop, SpacerBuilder,
-};
-use crate::styled::theme::{ACCENT, SCROLL_THUMB, SURFACE_RAISED};
+use crate::reactive::{create_signal, ColumnBuilder, FillBuilder, Prop, SpacerBuilder};
+use crate::styled::theme::{SCROLL_THUMB, SURFACE_RAISED};
 
 const RADIUS: u8 = 3;
 const MINIMUM_THUMB: f32 = 0.08;
 
 #[component]
-pub fn scrollbar(scroll: NodeId) -> NodeId {
-    with_document(|document| document.set_scroll_focus_color(scroll, ACCENT));
-
-    let (position, set_position) = create_signal(ScrollPosition {
-        offset: 0.0,
-        content: 0.0,
-        viewport: 0.0,
-    });
-    with_document(|document| {
-        document.set_scroll_on_change(scroll, move |new_position| {
-            set_position.set(new_position);
-        });
-    });
+pub fn scrollbar(position: Prop<ScrollPosition>) -> NodeId {
+    let (position_read, set_position) = create_signal(ScrollPosition::ZERO);
+    position.apply(move |value| set_position.set(value));
+    let position = position_read;
 
     let before_percent = {
         let position = position.clone();

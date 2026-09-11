@@ -10,12 +10,16 @@ use crate::reactive::{
 #[component]
 pub fn pressable(
     children: Children,
+    #[prop(default = true)] enabled: bool,
     on_click: ClickCallback,
     on_focus_change: Callback<bool>,
     on_hover_change: Callback<bool>,
     on_active_change: Callback<bool>,
 ) -> NodeId {
     let child = children.into_first();
+    if !enabled {
+        return child.expect("a disabled pressable still requires a child");
+    }
     let (key_active, set_key_active) = create_signal(false);
     let key_click = on_click.clone();
 

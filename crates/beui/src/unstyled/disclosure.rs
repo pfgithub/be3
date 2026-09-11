@@ -4,7 +4,7 @@ use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
     component_detail, create_signal, set_component_state, untrack, with_document, Callback,
-    Children, ColumnBuilder, Prop, ReadSignal, VisibilityBuilder,
+    Children, ColumnBuilder, NodeRef, Prop, ReadSignal, VisibilityBuilder,
 };
 use crate::unstyled;
 use crate::unstyled::button::ButtonHandle;
@@ -19,7 +19,7 @@ pub struct DisclosureHandle {
 pub type DisclosureHeader = Box<dyn FnOnce(DisclosureHandle) -> NodeId>;
 
 struct State {
-    button: NodeId,
+    button: NodeRef,
     open: ReadSignal<bool>,
 }
 
@@ -49,36 +49,32 @@ pub fn disclosure(
     let open_for_header = open_read.clone();
     let open_for_click = open_read.clone();
 
-    let button_cell = std::cell::Cell::new(None);
+    let button = NodeRef::new();
 
     let root = view! {
         <column spacing={spacing}>
-            {{
-                let button = view! {
-                    <unstyled::button
-                        on_click={move || {
-                            let next = !untrack(|| open_for_click.get());
-                            set_open.set(next);
-                            on_toggle.call(next);
-                        }}
-                        content={Box::new(move |handle: ButtonHandle| {
-                            header(DisclosureHandle {
-                                hovered: handle.hovered,
-                                active: handle.active,
-                                focused: handle.focused,
-                                open: open_for_header,
-                            })
-                        })} />
-                };
-                button_cell.set(Some(button));
-                button
-            }}
+            <unstyled::button
+                node_ref={&button}
+                on_click={move || {
+                    let next = !untrack(|| open_for_click.get());
+                    set_open.set(next);
+                    on_toggle.call(next);
+                }}
+                content={Box::new(move |handle: ButtonHandle| {
+                    header(DisclosureHandle {
+                        hovered: handle.hovered,
+                        active: handle.active,
+                        focused: handle.focused,
+                        open: open_for_header,
+                    })
+                })}
+            />
             <visibility visible={open_read.clone()}>{content}</visibility>
         </column>
     };
 
     set_component_state(State {
-        button: button_cell.get().expect("disclosure button not yet built"),
+        button,
         open: open_read,
     });
 
@@ -94,18 +90,18 @@ pub fn disclosure_open_signal(document: &Document, disclosure: NodeId) -> ReadSi
 }
 
 pub fn disclosure_hovered(document: &Document, disclosure: NodeId) -> ReadSignal<bool> {
-    let button = document.component_state::<State>(disclosure).button;
+    let button = document.component_state::<State>(disclosure).button.get();
     unstyled::button_hovered(document, button)
 }
 
 pub fn disclosure_focused(document: &Document, disclosure: NodeId) -> ReadSignal<bool> {
-    let button = document.component_state::<State>(disclosure).button;
+    let button = document.component_state::<State>(disclosure).button.get();
     unstyled::button_focused(document, button)
 }
 
 pub fn focus_disclosure(disclosure: NodeId) {
     with_document(|document| {
-        let button = document.component_state::<State>(disclosure).button;
+        let button = document.component_state::<State>(disclosure).button.get();
         unstyled::focus_button(button);
     });
 }

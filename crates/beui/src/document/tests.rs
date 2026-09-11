@@ -238,7 +238,7 @@ impl Harness {
     }
 
     pub(crate) fn marker_center(&self, index: usize) -> Pos2 {
-        self.node_center(self.inspector().rows[index].marker)
+        self.node_center(self.inspector().rows[index].marker.get())
     }
 
     fn node_center(&self, id: NodeId) -> Pos2 {

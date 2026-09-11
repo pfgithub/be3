@@ -14,7 +14,7 @@ use beui::styled::{
     SeparatorBuilder, ShortcutBuilder, SliderBuilder, SwitchBuilder, TabsBuilder, TextInputBuilder,
     TitleBuilder, ToggleButtonBuilder,
 };
-use beui::{unstyled, Color32, Context, Document, NodeId, Rect, TextAlign};
+use beui::{unstyled, Color32, Context, Document, NodeId, Rect, ScrollPosition, TextAlign};
 use beui_macros::component;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -252,10 +252,13 @@ fn build_main(value: NodeId) -> NodeId {
         }))
     };
     let item_rows = rows.clone();
+    let (scroll_position, set_scroll_position) = create_signal(ScrollPosition::ZERO);
     let scroll = view! {
         <virtual_list
             count={ROW_COUNT}
             item_height={row_height}
+            focus_color={ACCENT}
+            on_change={move |position| set_scroll_position.set(position)}
             item={Box::new(move |index| {
                 let rows = item_rows.clone();
                 let compact = rows.compact.get();
@@ -283,7 +286,7 @@ fn build_main(value: NodeId) -> NodeId {
                     @fixed(SEPARATOR_HEIGHT) <separator/>
                     @percent(100.0) <row spacing={10.0}>
                         @percent(100.0) {scroll}
-                        @fixed(SCROLLBAR_WIDTH) <scrollbar scroll={scroll} />
+                        @fixed(SCROLLBAR_WIDTH) <scrollbar position={scroll_position} />
                     </row>
                 </column>
             </card>

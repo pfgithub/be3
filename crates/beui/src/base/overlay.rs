@@ -186,6 +186,10 @@ pub(crate) fn close_overlay(overlay: NodeId) {
     with_document(|document| document.close_overlay(overlay));
 }
 
+pub(crate) fn overlay_is_open(overlay: NodeId) -> bool {
+    with_document(|document| document.is_overlay_open(overlay))
+}
+
 pub(crate) fn move_overlay_to(overlay: NodeId, pos: Pos2) {
     with_document(|document| document.set_overlay_anchor(overlay, OverlayAnchor::Point(pos)));
 }

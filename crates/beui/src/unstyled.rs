@@ -30,8 +30,7 @@ pub use pressable::PressableBuilder;
 pub use select::{
     focus_select, select_highlighted, select_highlighted_signal, select_open, select_option_button,
     select_option_count, select_overlay, select_search, select_selected, select_selected_signal,
-    select_trigger, set_select_highlighted, set_select_open, set_select_options,
-    set_select_selected, SelectBuilder, SelectOption, SelectOptionHandle, SelectPopup,
+    select_trigger, set_select_open, SelectBuilder, SelectOption, SelectOptionHandle, SelectPopup,
     SelectTrigger, SelectTriggerHandle,
 };
 pub use slider::{
