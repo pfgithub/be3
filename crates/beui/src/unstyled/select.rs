@@ -166,7 +166,7 @@ pub fn select(
         </column>
     };
 
-    set_component_state(Rc::new(State {
+    let state: Handle = Rc::new(State {
         trigger,
         overlay,
         search,
@@ -177,15 +177,10 @@ pub fn select(
         highlighted,
         set_highlighted,
         on_change,
-    }));
-
-    selected_prop.apply(move |selected| {
-        with_document(|document| {
-            if document.contains(select) {
-                apply_requested_selection(document.component_state::<Handle>(select), selected);
-            }
-        });
     });
+    set_component_state(state.clone());
+
+    selected_prop.apply(move |selected| apply_requested_selection(&state, selected));
 
     root
 }

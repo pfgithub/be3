@@ -2,7 +2,7 @@ use crate::base::TextAlign;
 use crate::color::Color32;
 use crate::document::Document;
 use crate::node::NodeId;
-use beui_macros::view;
+use beui_macros::{component, view};
 
 use crate::reactive::{
     with_document, Callback, CenteredRowBuilder, FillBuilder, OutlineBuilder, PaddingBuilder, Prop,
@@ -12,33 +12,37 @@ use crate::styled::theme::{
     ACCENT, ACCENT_SOFT, BORDER, FONT_BODY, RADIUS, SURFACE_RAISED, TEXT, TEXT_MUTED,
 };
 use crate::unstyled;
+use crate::unstyled::ChoiceBuilder;
 use crate::unstyled::ChoiceOptionHandle;
 
 pub(super) use crate::unstyled::ChoiceKind as Kind;
 
 pub(super) fn choice(
-    labels: &[&str],
+    labels: Vec<String>,
     selected: Prop<Option<usize>>,
     kind: Kind,
     on_change: Callback<Option<usize>>,
 ) -> NodeId {
-    unstyled::choice(
-        labels,
-        selected,
-        kind,
-        on_change,
-        Box::new(move |option| option_view(kind, option)),
-    )
+    view! {
+        <choice
+            labels={labels}
+            selected={selected}
+            kind={kind}
+            on_change={move |selected| on_change.call(selected)}
+            option={Box::new(move |handle| view! { <choice_option kind={kind} handle={handle} /> })}
+        />
+    }
 }
 
-fn option_view(kind: Kind, option: ChoiceOptionHandle) -> NodeId {
+#[component]
+fn choice_option(kind: Kind, handle: ChoiceOptionHandle) -> NodeId {
     let ChoiceOptionHandle {
         label,
         selected,
         hovered,
         focused,
         ..
-    } = option;
+    } = handle;
     let label_color = {
         let selected = selected.clone();
         Prop::Dynamic(Box::new(

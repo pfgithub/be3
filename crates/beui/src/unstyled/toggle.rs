@@ -5,7 +5,7 @@ use crate::input::CursorIcon;
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
-    self, component_detail, create_signal, set_component_state, untrack, Callback,
+    self, component_detail, create_signal, set_component_state, untrack, with_document, Callback,
     ClickCatcherBuilder, FocusableBuilder, Prop, ReadSignal,
 };
 
@@ -118,7 +118,9 @@ fn detail(checked: bool) -> &'static str {
     }
 }
 
-pub fn focus_toggle(document: &mut Document, toggle: NodeId) {
-    let focusable = document.component_state::<State>(toggle).focusable;
-    document.focus_focusable(focusable);
+pub fn focus_toggle(toggle: NodeId) {
+    with_document(|document| {
+        let focusable = document.component_state::<State>(toggle).focusable;
+        document.focus_focusable(focusable);
+    });
 }

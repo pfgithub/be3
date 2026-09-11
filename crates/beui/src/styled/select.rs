@@ -42,17 +42,19 @@ pub fn select(
             search_selection_color={ACCENT_SOFT}
             search_caret_color={ACCENT}
             search_padding_horizontal={PADDING_HORIZONTAL}
-            search_content={Box::new(search_view)}
-            trigger={Box::new(move |handle| trigger_view(&trigger_options, handle))}
-            option={Box::new(option_view)}
-            popup={Box::new(popup_view)}
+            search_content={Box::new(|handle| view! { <search_field handle={handle} /> })}
+            trigger={Box::new(move |handle| view! {
+                <select_trigger options={trigger_options} handle={handle} />
+            })}
+            option={Box::new(|handle| view! { <select_option handle={handle} /> })}
+            popup={Box::new(|content| view! { <select_popup content={content} /> })}
         />
     }
 }
 
-fn trigger_view(options: &[String], handle: SelectTriggerHandle) -> NodeId {
+#[component]
+fn select_trigger(options: Vec<String>, handle: SelectTriggerHandle) -> NodeId {
     let label_text = {
-        let options = options.to_owned();
         let selected = handle.selected;
         Prop::Dynamic(Box::new(move || trigger_label(&options, selected.get())))
     };
@@ -84,13 +86,12 @@ fn trigger_view(options: &[String], handle: SelectTriggerHandle) -> NodeId {
     }
 }
 
-fn search_view(handle: TextInputHandle) -> NodeId {
-    let focused = handle.focused.clone();
+#[component]
+fn search_field(handle: TextInputHandle) -> NodeId {
+    let field = handle.field;
     let border = Prop::Dynamic(Box::new(move || {
         border_color(handle.focused.get(), handle.hovered.get())
     }));
-    let field = handle.field;
-    let _ = focused;
     view! {
         <sized height={HEIGHT}>
             <outline color={border} width={BORDER_WIDTH} radius={RADIUS} offset={0.0} visible={true}>
@@ -100,7 +101,9 @@ fn search_view(handle: TextInputHandle) -> NodeId {
     }
 }
 
-fn option_view(option: SelectOptionHandle) -> NodeId {
+#[component]
+fn select_option(handle: SelectOptionHandle) -> NodeId {
+    let option = handle;
     let highlighted = option.highlighted;
     let hovered = option.hovered;
     let fill_color = Prop::Dynamic(Box::new(move || {
@@ -120,7 +123,8 @@ fn option_view(option: SelectOptionHandle) -> NodeId {
     }
 }
 
-fn popup_view(content: NodeId) -> NodeId {
+#[component]
+fn select_popup(content: NodeId) -> NodeId {
     view! {
         <sized width={POPUP_WIDTH}>
             <outline color={BORDER} width={BORDER_WIDTH} radius={RADIUS} offset={0.0} visible={true}>

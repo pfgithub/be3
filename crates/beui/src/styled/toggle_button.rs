@@ -4,8 +4,8 @@ use crate::color::Color32;
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
-    component_detail, create_signal, Callback, FillBuilder, OutlineBuilder, PaddingBuilder, Prop,
-    TextBuilder,
+    component_detail, create_signal, with_document, Callback, FillBuilder, OutlineBuilder,
+    PaddingBuilder, Prop, TextBuilder,
 };
 use crate::styled::theme::{
     ACCENT, ACCENT_SOFT, BORDER, FONT_BODY, RADIUS, SURFACE, SURFACE_RAISED, TEXT,
@@ -73,7 +73,7 @@ pub fn toggle_button_pressed(document: &Document, button: NodeId) -> bool {
     unstyled::toggle_checked(document, document.shadow_root(button)).get()
 }
 
-pub fn focus_toggle_button(document: &mut Document, button: NodeId) {
-    let toggle = document.shadow_root(button);
-    unstyled::focus_toggle(document, toggle);
+pub fn focus_toggle_button(button: NodeId) {
+    let toggle = with_document(|document| document.shadow_root(button));
+    unstyled::focus_toggle(toggle);
 }

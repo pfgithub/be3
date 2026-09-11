@@ -14,7 +14,7 @@ pub use button::{
     set_button_on_click, ButtonBuilder, ButtonContent, ButtonHandle,
 };
 pub use choice::{
-    choice, choice_selected, choice_selected_signal, focus_choice, ChoiceKind, ChoiceOption,
+    choice_selected, choice_selected_signal, focus_choice, ChoiceBuilder, ChoiceKind, ChoiceOption,
     ChoiceOptionHandle,
 };
 pub use context_menu::{context_menu_menu, context_menu_overlay, ContextMenuBuilder};

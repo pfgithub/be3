@@ -11,8 +11,7 @@ pub fn listbox(
     selected: Prop<Option<usize>>,
     on_change: Callback<Option<usize>>,
 ) -> NodeId {
-    let label_refs: Vec<&str> = labels.iter().map(String::as_str).collect();
-    choice::choice(&label_refs, selected, Kind::Listbox, on_change)
+    choice::choice(labels, selected, Kind::Listbox, on_change)
 }
 
 pub fn listbox_selected(document: &Document, control: NodeId) -> Option<usize> {

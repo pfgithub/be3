@@ -27,14 +27,16 @@ pub fn context_menu(
         <unstyled::context_menu
             region={region}
             items={items}
-            row={std::rc::Rc::new(row_view)}
-            panel={std::rc::Rc::new(panel_view)}
+            row={std::rc::Rc::new(|handle| view! { <menu_row handle={handle} /> })}
+            panel={std::rc::Rc::new(|content| view! { <menu_panel content={content} /> })}
             on_select={move |path| on_select.call(path)}
         />
     }
 }
 
-fn row_view(row: MenuRowHandle) -> NodeId {
+#[component]
+fn menu_row(handle: MenuRowHandle) -> NodeId {
+    let row = handle;
     let color = if row.item.disabled { TEXT_MUTED } else { TEXT };
     let hovered = row.hovered;
     let focused = row.focused;
@@ -55,12 +57,13 @@ fn row_view(row: MenuRowHandle) -> NodeId {
     }
 }
 
-fn panel_view(menu: NodeId) -> NodeId {
+#[component]
+fn menu_panel(content: NodeId) -> NodeId {
     view! {
         <sized width={MENU_WIDTH}>
             <outline color={BORDER} width={BORDER_WIDTH} radius={RADIUS} offset={0.0} visible={true}>
                 <fill color={SURFACE_RAISED} radius={RADIUS}>
-                    <padding horizontal={MENU_PADDING} vertical={MENU_PADDING}>{menu}</padding>
+                    <padding horizontal={MENU_PADDING} vertical={MENU_PADDING}>{content}</padding>
                 </fill>
             </outline>
         </sized>

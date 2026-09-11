@@ -20,6 +20,7 @@ thread_local! {
     static CURRENT_DOCUMENT: RefCell<Option<Document>> = const { RefCell::new(None) };
     static ACTIVE_DOCUMENT: Cell<*mut Document> = const { Cell::new(std::ptr::null_mut()) };
     static CURRENT_COMPONENT: Cell<Option<NodeId>> = const { Cell::new(None) };
+    static COMPONENT_NAME: Cell<Option<&'static str>> = const { Cell::new(None) };
     static PENDING_DETAIL: RefCell<HashMap<NodeId, String>> = RefCell::new(HashMap::new());
     static PENDING_STATE: RefCell<HashMap<NodeId, Box<dyn Any>>> = RefCell::new(HashMap::new());
 }
@@ -129,11 +130,19 @@ pub fn in_new_scope(f: impl FnOnce() -> NodeId) -> NodeId {
     node
 }
 
+pub fn set_component_name(name: &'static str) {
+    COMPONENT_NAME.with(|cell| cell.set(Some(name)));
+}
+
 pub fn component(name: &'static str, f: impl FnOnce() -> NodeId) -> NodeId {
     let shadow = with_document(Document::reserve_shadow);
     let scope = Scope::new();
     let previous = CURRENT_COMPONENT.with(|cell| cell.replace(Some(shadow)));
+    let outer_name = COMPONENT_NAME.with(|cell| cell.take());
     let root = scope.run(f);
+    let name = COMPONENT_NAME
+        .with(|cell| cell.replace(outer_name))
+        .unwrap_or(name);
     CURRENT_COMPONENT.with(|cell| cell.set(previous));
     with_document(|document| {
         document.finish_shadow(shadow, name, root, Vec::new());

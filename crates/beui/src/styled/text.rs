@@ -38,11 +38,12 @@ pub fn icon_sized(glyph: String, font_size: f32, color: Prop<Color32>) -> NodeId
     }
 }
 
-fn reactive_line(
+#[component(base)]
+fn line(
     content: Prop<String>,
     font_size: f32,
     color: Prop<Color32>,
-    align: Option<TextAlign>,
+    #[prop(default = TextAlign::Start)] align: TextAlign,
 ) -> NodeId {
     let (text, set_text) = create_signal(String::new());
     content.apply(move |value| set_text.set(value));
@@ -51,7 +52,7 @@ fn reactive_line(
         move || format!("{:?}", text.get())
     });
     view! {
-        <text string={text} font_size={font_size} color={color} align={align.unwrap_or(TextAlign::Start)} />
+        <text string={text} font_size={font_size} color={color} align={align} />
     }
 }
 
@@ -61,7 +62,7 @@ pub fn display(
     align: Option<TextAlign>,
     #[prop(default = TEXT)] color: Prop<Color32>,
 ) -> NodeId {
-    reactive_line(content, FONT_DISPLAY, color, align)
+    view! { <line content={content} font_size={FONT_DISPLAY} color={color} align={align.unwrap_or(TextAlign::Start)} /> }
 }
 
 #[component]
@@ -70,7 +71,7 @@ pub fn title(
     align: Option<TextAlign>,
     #[prop(default = TEXT)] color: Prop<Color32>,
 ) -> NodeId {
-    reactive_line(content, FONT_TITLE, color, align)
+    view! { <line content={content} font_size={FONT_TITLE} color={color} align={align.unwrap_or(TextAlign::Start)} /> }
 }
 
 #[component]
@@ -79,7 +80,7 @@ pub fn heading(
     align: Option<TextAlign>,
     #[prop(default = TEXT)] color: Prop<Color32>,
 ) -> NodeId {
-    reactive_line(content, FONT_HEADING, color, align)
+    view! { <line content={content} font_size={FONT_HEADING} color={color} align={align.unwrap_or(TextAlign::Start)} /> }
 }
 
 #[component]
@@ -88,7 +89,7 @@ pub fn body(
     align: Option<TextAlign>,
     #[prop(default = TEXT)] color: Prop<Color32>,
 ) -> NodeId {
-    reactive_line(content, FONT_BODY, color, align)
+    view! { <line content={content} font_size={FONT_BODY} color={color} align={align.unwrap_or(TextAlign::Start)} /> }
 }
 
 #[component]
@@ -97,7 +98,7 @@ pub fn caption(
     align: Option<TextAlign>,
     #[prop(default = TEXT_MUTED)] color: Prop<Color32>,
 ) -> NodeId {
-    reactive_line(content, FONT_SMALL, color, align)
+    view! { <line content={content} font_size={FONT_SMALL} color={color} align={align.unwrap_or(TextAlign::Start)} /> }
 }
 
 #[component]

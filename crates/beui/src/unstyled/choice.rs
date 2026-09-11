@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
@@ -6,13 +7,15 @@ use crate::document::Document;
 use crate::input::{Key, KeyPress};
 use crate::node::NodeId;
 use crate::reactive::{
-    self, bind, create_memo, create_signal, current_component, intrinsic, set_component_state,
-    set_shadow_detail, untrack, with_document, Callback, ListBuilder, Memo, Prop, ReadSignal,
-    WriteSignal,
+    component_state, create_effect, create_memo, create_signal, current_component, intrinsic,
+    set_component_name, set_component_state, set_shadow_detail, with_document, Callback,
+    ListBuilder, Memo, NodeRef, Prop, ReadSignal, WriteSignal,
 };
 use crate::unstyled;
 use crate::unstyled::ButtonHandle;
-use beui_macros::view;
+use beui_macros::{component, view};
+
+const TYPEAHEAD_TIMEOUT: Duration = Duration::from_secs(1);
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum ChoiceKind {
@@ -33,190 +36,182 @@ pub struct ChoiceOptionHandle {
 pub type ChoiceOption = Box<dyn Fn(ChoiceOptionHandle) -> NodeId>;
 
 struct Option_ {
-    button: NodeId,
+    button: NodeRef,
     label: String,
 }
 
+#[derive(Default)]
+struct Typeahead {
+    search: String,
+    typed_at: Option<Instant>,
+}
+
 struct State {
+    shadow: NodeId,
     options: Vec<Option_>,
     selected: ReadSignal<Option<usize>>,
     set_selected: WriteSignal<Option<usize>>,
     kind: ChoiceKind,
-    search: String,
-    typed_at: Option<Instant>,
+    typeahead: RefCell<Typeahead>,
     on_change: Callback<Option<usize>>,
 }
 
+type Handle = Rc<State>;
+
+#[component]
 pub fn choice(
-    labels: &[&str],
+    labels: Vec<String>,
     selected: Prop<Option<usize>>,
     kind: ChoiceKind,
     on_change: Callback<Option<usize>>,
-    option: ChoiceOption,
+    option: Option<ChoiceOption>,
 ) -> NodeId {
-    let choice = reactive::component(kind_name(kind), move || {
-        let choice = current_component();
-        let direction = if kind == ChoiceKind::Tabs {
-            Direction::Horizontal
-        } else {
-            Direction::Vertical
-        };
-        let (selected_read, set_selected) = create_signal(None);
+    set_component_name(kind_name(kind));
+    let choice = current_component();
+    let selected_prop = selected;
+    let option = Rc::new(option.expect("choice requires an `option` builder"));
+    let (selected, set_selected) = create_signal(None);
 
-        let option = Rc::new(option);
-        let (options, focused_signals, buttons) = with_document(|document| {
-            let mut options = Vec::new();
-            let mut focused_signals = Vec::new();
-            let mut buttons = Vec::new();
-            for (index, title) in labels.iter().enumerate() {
-                let label = (*title).to_owned();
-                let tab_stop = {
-                    let selected = selected_read.clone();
-                    Prop::Dynamic(Box::new(move || selected.get().unwrap_or(0) == index))
-                };
-                let is_selected = {
-                    let selected = selected_read.clone();
-                    create_memo(move || selected.get() == Some(index))
-                };
-                let content = {
-                    let option = option.clone();
-                    let label = label.clone();
-                    Box::new(move |handle: ButtonHandle| {
-                        option(ChoiceOptionHandle {
-                            index,
-                            label,
-                            selected: is_selected,
-                            hovered: handle.hovered,
-                            active: handle.active,
-                            focused: handle.focused,
-                        })
-                    })
-                };
-                let button = view! {
-                    <unstyled::button
-                        tab_stop={tab_stop}
-                        content={content}
-                        on_click={move || {
-                            with_document(|document| select(document, choice, Some(index)));
-                        }}
-                        on_key={move |press: KeyPress| {
-                            with_document(|document| key(document, choice, index, press))
-                        }}
-                        on_text={move |text: String| {
-                            with_document(|document| {
-                                if document.component_state::<State>(choice).kind
-                                    == ChoiceKind::Listbox
-                                {
-                                    typeahead(document, choice, index, &text);
-                                }
-                            });
-                        }}
-                    />
-                };
-                focused_signals.push(unstyled::button_focused(document, button));
-                buttons.push(intrinsic(button));
-                options.push(Option_ { button, label });
+    let mut options = Vec::new();
+    let mut focused_signals = Vec::new();
+    let mut buttons = Vec::new();
+    for (index, label) in labels.iter().enumerate() {
+        let button = NodeRef::new();
+        let tab_stop = {
+            let selected = selected.clone();
+            Prop::Dynamic(Box::new(move || selected.get().unwrap_or(0) == index))
+        };
+        let is_selected = {
+            let selected = selected.clone();
+            create_memo(move || selected.get() == Some(index))
+        };
+        let content = {
+            let option = option.clone();
+            let label = label.clone();
+            Box::new(move |handle: ButtonHandle| {
+                option(ChoiceOptionHandle {
+                    index,
+                    label,
+                    selected: is_selected,
+                    hovered: handle.hovered,
+                    active: handle.active,
+                    focused: handle.focused,
+                })
+            })
+        };
+        let node = view! {
+            <unstyled::button
+                node_ref={&button}
+                tab_stop={tab_stop}
+                content={content}
+                on_click={move || select(&handle(choice), Some(index))}
+                on_key={move |press: KeyPress| key(&handle(choice), index, press)}
+                on_text={move |text: String| {
+                    let state = handle(choice);
+                    if state.kind == ChoiceKind::Listbox {
+                        typeahead(&state, index, &text);
+                    }
+                }}
+            />
+        };
+        focused_signals.push(with_document(|document| {
+            unstyled::button_focused(document, node)
+        }));
+        buttons.push(intrinsic(node));
+        options.push(Option_ {
+            button,
+            label: label.clone(),
+        });
+    }
+
+    let state: Handle = Rc::new(State {
+        shadow: choice,
+        options,
+        selected,
+        set_selected,
+        kind,
+        typeahead: RefCell::default(),
+        on_change,
+    });
+    set_component_state(state.clone());
+    set_shadow_detail(choice, String::new());
+
+    if kind == ChoiceKind::Listbox {
+        let state = state.clone();
+        create_effect(move || {
+            if !focused_signals.iter().any(ReadSignal::get) {
+                *state.typeahead.borrow_mut() = Typeahead::default();
             }
-            (options, focused_signals, buttons)
         });
+    }
 
-        let line = view! {
-            <list direction={direction} spacing={6.0} children={buttons} />
-        };
-
-        set_shadow_detail(choice, String::new());
-        set_component_state(State {
-            options,
-            selected: selected_read,
-            set_selected,
-            kind,
-            search: String::new(),
-            typed_at: None,
-            on_change,
-        });
-
-        if kind == ChoiceKind::Listbox {
-            bind(move |document| {
-                let any_focused = focused_signals.iter().any(ReadSignal::get);
-                if !any_focused {
-                    let state = document.component_state_mut::<State>(choice);
-                    state.search.clear();
-                    state.typed_at = None;
-                }
-            });
-        }
-
-        line
+    selected_prop.apply({
+        let state = state.clone();
+        move |value| sync_selected(&state, value)
     });
 
-    selected.apply(move |value| {
-        with_document(|document| sync_selected(document, choice, value));
-    });
+    let direction = if kind == ChoiceKind::Tabs {
+        Direction::Horizontal
+    } else {
+        Direction::Vertical
+    };
+    view! { <list direction={direction} spacing={6.0} children={buttons} /> }
+}
 
-    choice
+fn handle(choice: NodeId) -> Handle {
+    component_state::<Handle, _>(choice, Rc::clone)
 }
 
 pub fn choice_selected(document: &Document, choice: NodeId) -> Option<usize> {
-    document.component_state::<State>(choice).selected.get()
+    document.component_state::<Handle>(choice).selected.get()
 }
 
 pub fn choice_selected_signal(document: &Document, choice: NodeId) -> ReadSignal<Option<usize>> {
-    document.component_state::<State>(choice).selected.clone()
-}
-
-fn sync_selected(document: &mut Document, choice: NodeId, selected: Option<usize>) {
-    let state = document.component_state::<State>(choice);
-    if selected.is_some_and(|index| index >= state.options.len()) {
-        return;
-    }
-    let set_selected = state.set_selected.clone();
-    set_selected.set(selected);
-    let detail = match selected {
-        Some(index) => document.component_state::<State>(choice).options[index]
-            .label
-            .clone(),
-        None => String::new(),
-    };
-    document.set_component_detail(choice, detail);
-}
-
-fn select(document: &mut Document, choice: NodeId, selected: Option<usize>) {
-    let state = document.component_state::<State>(choice);
-    if selected.is_some_and(|index| index >= state.options.len())
-        || untrack(|| state.selected.get()) == selected
-    {
-        return;
-    }
-    let focused = state
-        .options
-        .iter()
-        .any(|option| unstyled::button_focused(document, option.button).get());
-    let buttons: Vec<NodeId> = state.options.iter().map(|option| option.button).collect();
-    let on_change = state.on_change.clone();
-    sync_selected(document, choice, selected);
-    if focused {
-        if let Some(&button) = buttons.get(selected.unwrap_or(0)) {
-            unstyled::focus_button(button);
-        }
-    }
-    on_change.call(selected);
+    document.component_state::<Handle>(choice).selected.clone()
 }
 
 pub fn focus_choice(choice: NodeId) {
-    with_document(|document| {
-        let state = document.component_state::<State>(choice);
-        if let Some(option) = state.options.get(state.selected.get().unwrap_or(0)) {
-            let button = option.button;
-            unstyled::focus_button(button);
-        }
-    });
+    let state = handle(choice);
+    let index = state.selected.get_untracked().unwrap_or(0);
+    if let Some(option) = state.options.get(index) {
+        unstyled::focus_button(option.button.get());
+    }
 }
 
-fn key(document: &mut Document, choice: NodeId, index: usize, press: KeyPress) -> bool {
+fn sync_selected(state: &State, selected: Option<usize>) {
+    if selected.is_some_and(|index| index >= state.options.len()) {
+        return;
+    }
+    state.set_selected.set(selected);
+    let detail = match selected {
+        Some(index) => state.options[index].label.clone(),
+        None => String::new(),
+    };
+    set_shadow_detail(state.shadow, detail);
+}
+
+fn select(state: &State, selected: Option<usize>) {
+    if selected.is_some_and(|index| index >= state.options.len())
+        || state.selected.get_untracked() == selected
+    {
+        return;
+    }
+    let focused = state.options.iter().any(|option| {
+        with_document(|document| unstyled::button_focused(document, option.button.get()).get())
+    });
+    sync_selected(state, selected);
+    if focused {
+        if let Some(option) = state.options.get(selected.unwrap_or(0)) {
+            unstyled::focus_button(option.button.get());
+        }
+    }
+    state.on_change.call(selected);
+}
+
+fn key(state: &State, index: usize, press: KeyPress) -> bool {
     if press.modifiers.ctrl || press.modifiers.alt {
         return false;
     }
-    let state = document.component_state::<State>(choice);
     let count = state.options.len();
     let next = match press.key {
         Key::ArrowLeft if state.kind != ChoiceKind::Listbox => (index + count - 1) % count,
@@ -230,53 +225,52 @@ fn key(document: &mut Document, choice: NodeId, index: usize, press: KeyPress) -
         _ => return false,
     };
     if press.pressed {
-        let button = state.options[next].button;
-        unstyled::focus_button(button);
-        select(document, choice, Some(next));
+        unstyled::focus_button(state.options[next].button.get());
+        select(state, Some(next));
     }
     true
 }
 
-fn typeahead(document: &mut Document, choice: NodeId, index: usize, text: &str) {
+fn typeahead(state: &State, index: usize, text: &str) {
     if text.is_empty() || text.chars().any(char::is_control) || text == " " {
         return;
     }
-    let state = document.component_state_mut::<State>(choice);
+    let typed = text.to_lowercase();
     let now = Instant::now();
-    if state
-        .typed_at
-        .is_none_or(|last| now.duration_since(last) > Duration::from_secs(1))
-    {
-        state.search.clear();
-    }
-    state.typed_at = Some(now);
-    state.search.push_str(&text.to_lowercase());
-    let search = state.search.clone();
-    let repeated = search.chars().all(|c| search.starts_with(c));
-    let prefix = if repeated {
-        text.to_lowercase()
-    } else {
-        search.clone()
+    let search = {
+        let mut typeahead = state.typeahead.borrow_mut();
+        if typeahead
+            .typed_at
+            .is_none_or(|last| now.duration_since(last) > TYPEAHEAD_TIMEOUT)
+        {
+            typeahead.search.clear();
+        }
+        typeahead.typed_at = Some(now);
+        typeahead.search.push_str(&typed);
+        typeahead.search.clone()
     };
-    let start = if repeated || search == text.to_lowercase() {
+    let repeated = search.chars().all(|letter| search.starts_with(letter));
+    let prefix = if repeated { &typed } else { &search };
+    let start = if repeated || search == typed {
         index + 1
     } else {
         index
     };
-    let labels: Vec<_> = state
-        .options
-        .iter()
-        .map(|option| (option.button, option.label.clone()))
-        .collect();
-    let matched = (0..labels.len())
-        .map(|offset| (start + offset) % labels.len())
-        .find(|&i| labels[i].1.to_lowercase().starts_with(&prefix));
+    let count = state.options.len();
+    let matched = (0..count)
+        .map(|offset| (start + offset) % count)
+        .find(|&candidate| {
+            state.options[candidate]
+                .label
+                .to_lowercase()
+                .starts_with(prefix)
+        });
     if let Some(next) = matched {
-        unstyled::focus_button(labels[next].0);
-        select(document, choice, Some(next));
-        let state = document.component_state_mut::<State>(choice);
-        state.search = search;
-        state.typed_at = Some(now);
+        unstyled::focus_button(state.options[next].button.get());
+        select(state, Some(next));
+        let mut typeahead = state.typeahead.borrow_mut();
+        typeahead.search = search;
+        typeahead.typed_at = Some(now);
     }
 }
 
