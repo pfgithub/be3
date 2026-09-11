@@ -21,7 +21,6 @@ struct State {
     hovered: ReadSignal<bool>,
     active: ReadSignal<bool>,
     focused: ReadSignal<bool>,
-    on_click: ClickCallback,
 }
 
 #[component]
@@ -51,7 +50,6 @@ pub fn button(
     };
 
     let click = {
-        let on_click = on_click.clone();
         let disabled = disabled_read.clone();
         move || {
             if untrack(|| disabled.get()) {
@@ -91,7 +89,6 @@ pub fn button(
         hovered,
         active,
         focused,
-        on_click,
     });
 
     focusable
@@ -107,10 +104,6 @@ pub fn button_active(document: &Document, button: NodeId) -> ReadSignal<bool> {
 
 pub fn button_focused(document: &Document, button: NodeId) -> ReadSignal<bool> {
     document.component_state::<State>(button).focused.clone()
-}
-
-pub fn set_button_on_click(button: NodeId, handler: impl FnMut() + 'static) {
-    component_state::<State, _>(button, |state| state.on_click.clone()).set(handler);
 }
 
 pub fn focus_button(button: NodeId) {

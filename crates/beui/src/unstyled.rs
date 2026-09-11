@@ -10,8 +10,8 @@ mod text_input;
 mod toggle;
 
 pub use button::{
-    button_active, button_focusable, button_focused, button_hovered, focus_button,
-    set_button_on_click, ButtonBuilder, ButtonHandle,
+    button_active, button_focusable, button_focused, button_hovered, focus_button, ButtonBuilder,
+    ButtonHandle,
 };
 pub use choice::{
     choice_selected, choice_selected_signal, focus_choice, ChoiceBuilder, ChoiceKind,

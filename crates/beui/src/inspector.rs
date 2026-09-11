@@ -15,10 +15,8 @@ use crate::node::NodeId;
 use crate::reactive::{with_reactive_scope, WriteSignal};
 use crate::styled::theme::ACCENT;
 
-use panel::{Panel, Summary};
+use panel::Summary;
 use tree::{Entry, Key};
-
-pub(crate) use panel::Row;
 
 const DEFAULT_WIDTH: f32 = 320.0;
 const MINIMUM_WIDTH: f32 = 200.0;
@@ -86,13 +84,12 @@ impl State {
 pub(crate) struct Inspector {
     pub(crate) document: Document,
     pub(crate) entries: Vec<Entry>,
-    pub(crate) rows: Vec<Row>,
     pub(crate) state: Rc<State>,
     scroll: NodeId,
-    set_count: WriteSignal<String>,
-    set_picking: WriteSignal<bool>,
-    set_selection: WriteSignal<String>,
-    set_bounds: WriteSignal<String>,
+    set_keys: WriteSignal<Vec<Key>>,
+    set_entries: WriteSignal<HashMap<Key, Entry>>,
+    set_summary: WriteSignal<Summary>,
+    rows: Rc<RefCell<HashMap<Key, panel::Row>>>,
     offset: f32,
     pub(crate) width: f32,
     grabbed: Option<f32>,
@@ -103,29 +100,34 @@ pub(crate) struct Inspector {
 impl Inspector {
     pub(crate) fn new() -> Self {
         let state = Rc::new(State::new());
-        let summary = Summary {
-            total: 0,
-            picking: false,
-            selection: nothing_selected(),
-            bounds: String::new(),
-        };
-        let panel = panel::build(&[], &summary, &state, 0.0);
+        let panel = panel::build(&state);
         Self {
             document: panel.document,
             entries: Vec::new(),
             rows: panel.rows,
             state,
             scroll: panel.scroll,
-            set_count: panel.set_count,
-            set_picking: panel.set_picking,
-            set_selection: panel.set_selection,
-            set_bounds: panel.set_bounds,
+            set_keys: panel.set_keys,
+            set_entries: panel.set_entries,
+            set_summary: panel.set_summary,
             offset: 0.0,
             width: DEFAULT_WIDTH,
             grabbed: None,
             grip: false,
             seen: 0,
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn row_node(&self, index: usize) -> NodeId {
+        let key = self.entries[index].key;
+        self.rows.borrow()[&key].row
+    }
+
+    #[cfg(test)]
+    pub(crate) fn marker_node(&self, index: usize) -> NodeId {
+        let key = self.entries[index].key;
+        self.rows.borrow()[&key].marker.get()
     }
 
     pub(crate) fn panel_width(&self, rect: Rect) -> f32 {
@@ -188,35 +190,24 @@ impl Inspector {
     fn sync(&mut self, target: &Document) {
         let entries = tree::collect(target, &self.state);
         let summary = self.summary(target);
-        if self.reshaped(&entries) {
-            self.adopt(panel::build(&entries, &summary, &self.state, self.offset));
-        } else {
-            self.publish(&entries, &summary);
-        }
-        self.entries = entries;
-    }
-
-    fn publish(&mut self, entries: &[Entry], summary: &Summary) {
         let Self {
             document,
-            rows,
-            set_count,
-            set_picking,
-            set_selection,
-            set_bounds,
+            set_keys,
+            set_entries,
+            set_summary,
             ..
         } = self;
         with_reactive_scope(document, || {
-            for (entry, row) in entries.iter().zip(rows.iter()) {
-                row.set_detail.set(entry.detail.clone());
-                row.set_size.set(entry.size.clone());
-                row.set_selected.set(entry.selected);
-            }
-            set_count.set(panel::total_label(summary.total));
-            set_picking.set(summary.picking);
-            set_selection.set(summary.selection.clone());
-            set_bounds.set(summary.bounds.clone());
+            set_keys.set(entries.iter().map(|entry| entry.key).collect());
+            set_entries.set(
+                entries
+                    .iter()
+                    .map(|entry| (entry.key, entry.clone()))
+                    .collect(),
+            );
+            set_summary.set(summary);
         });
+        self.entries = entries;
     }
 
     fn summary(&self, target: &Document) -> Summary {
@@ -230,24 +221,6 @@ impl Inspector {
                 .map(bounds_label)
                 .unwrap_or_default(),
         }
-    }
-
-    fn adopt(&mut self, panel: Panel) {
-        self.document = panel.document;
-        self.scroll = panel.scroll;
-        self.set_count = panel.set_count;
-        self.set_picking = panel.set_picking;
-        self.set_selection = panel.set_selection;
-        self.set_bounds = panel.set_bounds;
-        self.rows = panel.rows;
-    }
-
-    fn reshaped(&self, entries: &[Entry]) -> bool {
-        entries.len() != self.entries.len()
-            || entries
-                .iter()
-                .zip(&self.entries)
-                .any(|(entry, previous)| !entry.same_shape(previous))
     }
 
     fn pick(&mut self, target: &Document, ctx: &Context, content: Rect) {
@@ -301,14 +274,13 @@ impl Inspector {
         let Some(view) = self.document.node_rect(self.scroll) else {
             return;
         };
-        let Some((visible, rect)) = self
-            .rows
-            .iter()
-            .enumerate()
-            .find_map(|(at, row)| Some((at, self.document.node_rect(row.row)?)))
-        else {
+        let rows = self.rows.borrow();
+        let Some((visible, rect)) = self.entries.iter().enumerate().find_map(|(at, entry)| {
+            Some((at, self.document.node_rect(rows.get(&entry.key)?.row)?))
+        }) else {
             return;
         };
+        drop(rows);
 
         self.state.reveal.set(None);
         let height = rect.height();

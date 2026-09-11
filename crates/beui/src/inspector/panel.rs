@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use crate::color::Color32;
@@ -7,9 +9,9 @@ use crate::base::{ScrollPosition, TextAlign};
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
-    component, create_memo, create_signal, intrinsic, view, CenteredRowBuilder,
-    ClickCatcherBuilder, ColumnBuilder, FillBuilder, NodeRef, OutlineBuilder, PaddingBuilder,
-    ReadSignal, RowBuilder, ScrollBuilder, SpacerBuilder, WriteSignal,
+    component, create_memo, create_signal, on_cleanup, view, CenteredRowBuilder,
+    ClickCatcherBuilder, ColumnBuilder, FillBuilder, ForEachBuilder, Memo, NodeRef, OutlineBuilder,
+    PaddingBuilder, ReadSignal, RowBuilder, ScrollBuilder, SpacerBuilder, WriteSignal,
 };
 use crate::styled::theme::{
     ACCENT, BORDER_WIDTH, CHIP_RADIUS, ON_ACCENT, RADIUS, SCROLLBAR_WIDTH, SEPARATOR_HEIGHT,
@@ -36,6 +38,7 @@ const MARKER_WIDTH: f32 = 14.0;
 const TOGGLE_PADDING_HORIZONTAL: f32 = 8.0;
 const TOGGLE_PADDING_VERTICAL: f32 = 3.0;
 
+#[derive(Clone, Default, PartialEq)]
 pub(crate) struct Summary {
     pub(crate) total: usize,
     pub(crate) picking: bool,
@@ -47,33 +50,44 @@ pub(crate) struct Row {
     pub(crate) row: NodeId,
     #[cfg(test)]
     pub(crate) marker: NodeRef,
-    pub(crate) set_selected: WriteSignal<bool>,
-    pub(crate) set_detail: WriteSignal<String>,
-    pub(crate) set_size: WriteSignal<String>,
 }
+
+type Rows = Rc<RefCell<HashMap<Key, Row>>>;
+
+type Entries = ReadSignal<HashMap<Key, Entry>>;
 
 pub(crate) struct Panel {
     pub(crate) document: Document,
     pub(crate) scroll: NodeId,
-    pub(crate) set_count: WriteSignal<String>,
-    pub(crate) set_picking: WriteSignal<bool>,
-    pub(crate) set_selection: WriteSignal<String>,
-    pub(crate) set_bounds: WriteSignal<String>,
-    pub(crate) rows: Vec<Row>,
+    pub(crate) set_keys: WriteSignal<Vec<Key>>,
+    pub(crate) set_entries: WriteSignal<HashMap<Key, Entry>>,
+    pub(crate) set_summary: WriteSignal<Summary>,
+    pub(crate) rows: Rows,
 }
 
-pub(crate) fn build(entries: &[Entry], summary: &Summary, state: &Rc<State>, offset: f32) -> Panel {
-    let (count_text, set_count) = create_signal(total_label(summary.total));
-    let (picking, set_picking) = create_signal(summary.picking);
-    let (selection_text, set_selection) = create_signal(summary.selection.clone());
-    let (bounds_text, set_bounds) = create_signal(summary.bounds.clone());
+pub(crate) fn build(state: &Rc<State>) -> Panel {
+    let (keys, set_keys) = create_signal(Vec::<Key>::new());
+    let (entries, set_entries) = create_signal(HashMap::<Key, Entry>::new());
+    let (summary, set_summary) = create_signal(Summary::default());
     let (position, set_position) = create_signal(ScrollPosition::ZERO);
     let scroll = NodeRef::new();
-    let mut rows = Vec::new();
+    let rows: Rows = Rc::default();
 
     let mut document = crate::reactive::build(|| {
-        rows = entries.iter().map(|entry| row(entry, state)).collect();
-        let items: Vec<_> = rows.iter().map(|row| intrinsic(row.row)).collect();
+        let count_text = create_memo({
+            let summary = summary.clone();
+            move || total_label(summary.with(|summary| summary.total))
+        });
+        let picking = create_memo({
+            let summary = summary.clone();
+            move || summary.with(|summary| summary.picking)
+        });
+        let selection_text = create_memo({
+            let summary = summary.clone();
+            move || summary.with(|summary| summary.selection.clone())
+        });
+        let bounds_text = create_memo(move || summary.with(|summary| summary.bounds.clone()));
+        let (list_state, list_rows) = (state.clone(), rows.clone());
         view! {
         <row spacing={0.0}>
             @fixed(SEPARATOR_HEIGHT) <separator />
@@ -91,11 +105,23 @@ pub(crate) fn build(entries: &[Entry], summary: &Summary, state: &Rc<State>, off
                         <row spacing={BODY_SPACING}>
                             @percent(100.0) <scroll
                                 node_ref={&scroll}
-                                offset={offset}
                                 focus_color={ACCENT}
                                 on_change={move |value| set_position.set(value)}
-                                children={items}
-                            />
+                            >
+                                <for_each
+                                    spacing={0.0}
+                                    items={keys}
+                                    key={|key: Key| key}
+                                    view={move |key: Key| view! {
+                                        <tree_row
+                                            row_key={key}
+                                            entries={entries.clone()}
+                                            state={list_state.clone()}
+                                            rows={list_rows.clone()}
+                                        />
+                                    }}
+                                />
+                            </scroll>
                             @fixed(SCROLLBAR_WIDTH) <scrollbar position={position} />
                         </row>
                     </padding>
@@ -116,10 +142,9 @@ pub(crate) fn build(entries: &[Entry], summary: &Summary, state: &Rc<State>, off
     Panel {
         document,
         scroll: scroll.get(),
-        set_count,
-        set_picking,
-        set_selection,
-        set_bounds,
+        set_keys,
+        set_entries,
+        set_summary,
         rows,
     }
 }
@@ -148,7 +173,7 @@ pub(crate) fn toggle_text(picking: bool) -> Color32 {
 }
 
 #[component]
-fn pick_toggle(state: Rc<State>, picking: ReadSignal<bool>) -> NodeId {
+fn pick_toggle(state: Rc<State>, picking: Memo<bool>) -> NodeId {
     let label_color = create_memo({
         let picking = picking.clone();
         move || toggle_text(picking.get())
@@ -175,56 +200,34 @@ fn pick_toggle(state: Rc<State>, picking: ReadSignal<bool>) -> NodeId {
     }
 }
 
-fn row(entry: &Entry, state: &Rc<State>) -> Row {
-    let (detail_text, set_detail) = create_signal(entry.detail.clone());
-    let (size_text, set_size) = create_signal(entry.size.clone());
-    let (selected, set_selected) = create_signal(entry.selected);
-    let marker = NodeRef::new();
-
-    let row = view! {
-        <tree_row
-            marker_ref={marker.clone()}
-            state={state.clone()}
-            key={entry.key}
-            kind={entry.kind}
-            indent={entry.depth as f32 * INDENT}
-            expandable={entry.expandable}
-            expanded={entry.expanded}
-            glyph={glyph(entry).to_owned()}
-            selected={selected}
-            detail={detail_text}
-            size={size_text}
-        />
-    };
-
-    Row {
-        row,
-        #[cfg(test)]
-        marker,
-        set_selected,
-        set_detail,
-        set_size,
-    }
+fn entry_field<T: Clone + Default + PartialEq + 'static>(
+    entries: &Entries,
+    key: Key,
+    read: impl Fn(&Entry) -> T + 'static,
+) -> Memo<T> {
+    let entries = entries.clone();
+    create_memo(move || entries.with(|entries| entries.get(&key).map(&read).unwrap_or_default()))
 }
 
 #[component]
-fn tree_row(
-    state: Rc<State>,
-    key: Key,
-    kind: &'static str,
-    indent: f32,
-    expandable: bool,
-    expanded: bool,
-    glyph: String,
-    selected: ReadSignal<bool>,
-    detail: ReadSignal<String>,
-    size: ReadSignal<String>,
-    marker_ref: Option<NodeRef>,
-) -> NodeId {
+fn tree_row(row_key: Key, entries: Entries, state: Rc<State>, rows: Rows) -> NodeId {
+    let key = row_key;
     let node = key.node();
-    let marker_ref = marker_ref.unwrap_or_default();
+    let indent = entry_field(&entries, key, |entry| entry.depth as f32 * INDENT);
+    let kind = entry_field(&entries, key, |entry| entry.kind.to_owned());
+    let detail = entry_field(&entries, key, |entry| entry.detail.clone());
+    let size = entry_field(&entries, key, |entry| entry.size.clone());
+    let selected = entry_field(&entries, key, |entry| entry.selected);
+    let expandable = entry_field(&entries, key, |entry| entry.expandable);
+    let expanded = entry_field(&entries, key, |entry| entry.expanded);
+    let glyph = create_memo({
+        let (expandable, expanded) = (expandable.clone(), expanded.clone());
+        move || glyph(expandable.get(), expanded.get()).to_owned()
+    });
+
+    let marker = NodeRef::new();
     let (hover, selection, expansion) = (state.clone(), state.clone(), state);
-    view! {
+    let row = view! {
         <click_catcher
             cursor={CursorIcon::PointingHand}
             on_click={move || selection.select(node)}
@@ -241,24 +244,40 @@ fn tree_row(
                     <centered_row spacing={ROW_SPACING}>
                         @fixed(indent) <spacer />
                         @fixed(MARKER_WIDTH) <unstyled::pressable
-                            node_ref={&marker_ref}
+                            node_ref={&marker}
                             enabled={expandable}
-                            on_click={move || expansion.set_expanded(key, !expanded)}
+                            on_click={move || {
+                                expansion.set_expanded(key, !expanded.get_untracked());
+                            }}
                         >
                             <code content={glyph} color={TEXT_MUTED} align={TextAlign::Center} />
                         </unstyled::pressable>
-                        <code content={kind.to_owned()} />
+                        <code content={kind} />
                         @percent(100.0) <code content={detail} color={TEXT_MUTED} />
                         <code content={size} color={TEXT_MUTED} align={TextAlign::End} />
                     </centered_row>
                 </list_row>
             </outline>
         </click_catcher>
-    }
+    };
+
+    rows.borrow_mut().insert(
+        key,
+        Row {
+            row,
+            #[cfg(test)]
+            marker,
+        },
+    );
+    on_cleanup(move || {
+        rows.borrow_mut().remove(&key);
+    });
+
+    row
 }
 
-fn glyph(entry: &Entry) -> &'static str {
-    match (entry.expandable, entry.expanded) {
+fn glyph(expandable: bool, expanded: bool) -> &'static str {
+    match (expandable, expanded) {
         (true, true) => "-",
         (true, false) => "+",
         (false, _) => "",

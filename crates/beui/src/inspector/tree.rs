@@ -21,6 +21,7 @@ impl Key {
     }
 }
 
+#[derive(Clone, PartialEq)]
 pub(crate) struct Entry {
     pub(crate) key: Key,
     pub(crate) depth: usize,
@@ -30,16 +31,6 @@ pub(crate) struct Entry {
     pub(crate) selected: bool,
     pub(crate) detail: String,
     pub(crate) size: String,
-}
-
-impl Entry {
-    pub(crate) fn same_shape(&self, other: &Entry) -> bool {
-        self.key == other.key
-            && self.depth == other.depth
-            && self.kind == other.kind
-            && self.expandable == other.expandable
-            && self.expanded == other.expanded
-    }
 }
 
 pub(crate) fn collect(target: &Document, state: &State) -> Vec<Entry> {
