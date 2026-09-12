@@ -5,7 +5,7 @@ use crate::node::NodeId;
 use beui_macros::{component, view};
 
 use crate::reactive::{
-    create_effect, create_signal, intrinsic, set_component_state, Callback, ColumnBuilder,
+    create_effect, create_signal, intrinsic, set_component_state, Callback, Child, ColumnBuilder,
     FocusableBuilder, NodeRef, Prop, ReadSignal, RenderFn, Selector, ShowBuilder, WriteSignal,
 };
 use crate::unstyled;
@@ -91,7 +91,7 @@ type Handle = Rc<State>;
 pub(crate) fn menu_list(
     items: Vec<MenuItem>,
     row: Option<RenderFn<MenuRowHandle>>,
-    panel: Option<RenderFn<NodeId>>,
+    panel: Option<RenderFn<Child>>,
     #[prop(default = MenuParent::default())] parent: MenuParent,
     active: Prop<bool>,
     #[prop(default = false)] focus_first: bool,
@@ -177,7 +177,7 @@ fn menu_row(
     item: MenuItem,
     focused: Selector<Focus>,
     row: RenderFn<MenuRowHandle>,
-    panel: RenderFn<NodeId>,
+    panel: RenderFn<Child>,
     #[prop(default = MenuParent::default())] parent: MenuParent,
 ) -> NodeId {
     let disabled = item.disabled;

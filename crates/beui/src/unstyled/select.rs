@@ -4,8 +4,8 @@ use crate::document::Document;
 use crate::input::{Key, KeyPress};
 use crate::node::NodeId;
 use crate::reactive::{
-    create_effect, create_signal, intrinsic, set_component_state, Callback, ColumnBuilder, Memo,
-    NodeRef, Prop, ReadSignal, Render, RenderFn, ScrollBuilder, Selector, VisibilityBuilder,
+    create_effect, create_signal, intrinsic, set_component_state, Callback, Child, ColumnBuilder,
+    Memo, NodeRef, Prop, ReadSignal, Render, RenderFn, ScrollBuilder, Selector, VisibilityBuilder,
     WriteSignal,
 };
 use crate::unstyled;
@@ -78,7 +78,7 @@ pub fn select(
     search_content: Option<Render<TextInputHandle>>,
     trigger: Option<Render<SelectTriggerHandle>>,
     option: Option<RenderFn<SelectOptionHandle>>,
-    popup: Option<Render<NodeId>>,
+    popup: Option<Render<Child>>,
 ) -> NodeId {
     let selected_prop = selected;
     let initial = selected_prop.peek().filter(|index| *index < options.len());

@@ -177,9 +177,14 @@ let document = build(|| view! { <app /> });
 generating a `NameBuilder` that `view!` fills in. A prop typed `Prop<T>` accepts
 either a plain `T` or a signal or memo of `T`; the reactive forms create an
 effect that keeps that property in sync. `#[component(base)]` is for the base
-elements, which do the same but without a shadow node of their own, and are the
-only place that touches `Document` directly. Every builder also accepts
-`test_id` and `node_ref`.
+elements, which do the same but without a shadow node of their own. Every
+builder also accepts `test_id` and `node_ref`.
+
+The base elements and the structural primitives that insert and remove nodes for
+a living — `show`, `dynamic`, `for_each`, `virtual_list` — are the only code that
+touches `Document` directly. Everything above them, unstyled and styled
+components and the code that uses them, says what it wants through props on
+those tags.
 
 Derive a prop that depends on other signals with `create_memo`, and pass the
 memo straight to the prop; a memo only wakes the property when its value

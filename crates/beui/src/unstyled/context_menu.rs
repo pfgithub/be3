@@ -21,7 +21,7 @@ pub fn context_menu(
     children: Child,
     items: Prop<Vec<MenuItem>>,
     row: Option<RenderFn<MenuRowHandle>>,
-    panel: Option<RenderFn<NodeId>>,
+    panel: Option<RenderFn<Child>>,
     on_select: Callback<Vec<usize>>,
 ) -> NodeId {
     let row = row.unwrap_or_else(|| RenderFn::new(|_| view! { <column spacing={0.0} /> }));

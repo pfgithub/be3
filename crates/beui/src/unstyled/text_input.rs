@@ -18,7 +18,7 @@ use crate::node::NodeId;
 use beui_macros::{component, view};
 
 use crate::reactive::{
-    component_detail, copy_text, create_memo, create_signal, set_component_state, Callback,
+    component_detail, copy_text, create_memo, create_signal, set_component_state, Callback, Child,
     ClickCatcherBuilder, FocusableBuilder, Memo, NodeRef, PaddingBuilder, Prop, ReadSignal, Render,
     TextBuilder, WriteSignal,
 };
@@ -30,7 +30,7 @@ const LINE_CLICKS: u32 = 3;
 const ALL_CLICKS: u32 = 4;
 
 pub struct TextInputHandle {
-    pub field: NodeId,
+    pub field: Child,
     pub hovered: ReadSignal<bool>,
     pub focused: ReadSignal<bool>,
 }
