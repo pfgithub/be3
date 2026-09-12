@@ -17,14 +17,14 @@ Do not:
 Verification:
 - `./scripts/verify`: This is the primary way to check your work, and should run frequently, not just once at the end. Run using a 10 minute timeout in the tool call arguments so it doesn't convert itself to a background task.
   - This will run all project tests and clippy lints
-  - It will autofix formatting, clippy fixable rules, and it will autofix to enforce these project-specific rules: It will delete all code comments & doc comments, it will structure test folders & files to the project's one test per file standard, and it will automatically move+rename mod.rs files to be in the parent folder named after the folder instead.
-  - Default to running `./scripts/verify` whenever you want to check that your code compiles or passes tests, including during iterative work, not only right before committing.
-  - Only fall back to manual `cargo check` / `cargo test` / `cargo build` / `cargo clippy` calls for special cases: e.g. verify failed and you need a faster/narrower loop to isolate the fix, or you need output verify doesn't surface. Treat these as the exception, not the default iteration loop, and always finish with a `./scripts/verify` run before committing.
+  - It will autofix formatting, clippy fixable rules, and it will autofix to enforce project-specific rules: It will delete all code comments & doc comments, it will structure test folders & files to the project's one test per file standard, and it will automatically move+rename mod.rs files to be in the parent folder named after the folder instead.
 - `PATH="/home/ubuntu/.local/android-build/gradle-8.11.1/bin:$PATH" ./scripts/build --target android --android-sdk /home/ubuntu/Android/Sdk`: run this for changes that affect features specific to Android.
 - `./scripts/build --target web`: run this for changes that affect features specific to web
 - Do not perform any manual GUI verification. Do not run the GUI app or use the browser tool.
 
 Do:
-- Use commit message format `type: message`. Add Co-Authored-By: (model name).
+- Use commit message format `type: message`. Include Co-Authored-By: (model name).
 - After running verification, commit and push changes in git.
 - You may push a change even if it still needs GUI verification or other verification that you are unable to perform.
+- In your handoff message, mention any small issues you encoutered or small things you noticed that could make the code / application better.
+- If you don't need tests in your search results, consider `grep --exclude-dir="tests"`
