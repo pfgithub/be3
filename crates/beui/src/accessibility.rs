@@ -277,7 +277,7 @@ impl Document {
         AccessNodeId(((self.accessibility_id as u64) << DOCUMENT_SHIFT) | id.index() as u64)
     }
 
-    fn local_node_id(&self, id: AccessNodeId) -> Option<NodeId> {
+    pub(crate) fn local_node_id(&self, id: AccessNodeId) -> Option<NodeId> {
         ((id.0 >> DOCUMENT_SHIFT) == self.accessibility_id as u64)
             .then(|| NodeId::from_index(id.0 as u32))
     }

@@ -1,3 +1,7 @@
+use std::collections::HashMap;
+
+use accesskit::{Node as AccessNode, NodeId as AccessNodeId};
+
 use crate::document::Document;
 use crate::node::NodeId;
 
@@ -11,12 +15,13 @@ pub(crate) enum Key {
     Node(NodeId),
     Internals(NodeId),
     Placeholder(NodeId),
+    AccessKit(NodeId),
 }
 
 impl Key {
     pub(crate) fn node(self) -> NodeId {
         match self {
-            Key::Node(id) | Key::Internals(id) | Key::Placeholder(id) => id,
+            Key::Node(id) | Key::Internals(id) | Key::Placeholder(id) | Key::AccessKit(id) => id,
         }
     }
 }
@@ -25,7 +30,7 @@ impl Key {
 pub(crate) struct Entry {
     pub(crate) key: Key,
     pub(crate) depth: usize,
-    pub(crate) kind: &'static str,
+    pub(crate) kind: String,
     pub(crate) expandable: bool,
     pub(crate) expanded: bool,
     pub(crate) selected: bool,
@@ -41,6 +46,91 @@ pub(crate) fn collect(target: &Document, state: &State) -> Vec<Entry> {
     entries
 }
 
+pub(crate) fn collect_accesskit(target: &Document, state: &State) -> Vec<Entry> {
+    let Some(fragment) = target.accessibility_fragment() else {
+        return Vec::new();
+    };
+    let nodes: HashMap<_, _> = fragment.nodes.into_iter().collect();
+    let mut entries = Vec::new();
+    visit_accesskit(target, state, &nodes, fragment.root, 0, &mut entries);
+    entries
+}
+
+pub(crate) fn accesskit_count(target: &Document) -> usize {
+    target
+        .accessibility_fragment()
+        .map_or(0, |fragment| fragment.nodes.len())
+}
+
+pub(crate) fn accesskit_path(target: &Document, id: NodeId) -> Vec<Key> {
+    let Some(fragment) = target.accessibility_fragment() else {
+        return Vec::new();
+    };
+    let nodes: HashMap<_, _> = fragment.nodes.into_iter().collect();
+    let mut path = Vec::new();
+    descend_accesskit(target, &nodes, fragment.root, id, &mut path);
+    path
+}
+
+fn descend_accesskit(
+    target: &Document,
+    nodes: &HashMap<AccessNodeId, AccessNode>,
+    access_id: AccessNodeId,
+    id: NodeId,
+    path: &mut Vec<Key>,
+) -> bool {
+    let Some(node_id) = target.local_node_id(access_id) else {
+        return false;
+    };
+    path.push(Key::AccessKit(node_id));
+    if node_id == id {
+        return true;
+    }
+    if let Some(node) = nodes.get(&access_id) {
+        for child in node.children() {
+            if descend_accesskit(target, nodes, *child, id, path) {
+                return true;
+            }
+        }
+    }
+    path.pop();
+    false
+}
+
+fn visit_accesskit(
+    target: &Document,
+    state: &State,
+    nodes: &HashMap<AccessNodeId, AccessNode>,
+    access_id: AccessNodeId,
+    depth: usize,
+    entries: &mut Vec<Entry>,
+) {
+    let Some(node) = nodes.get(&access_id) else {
+        return;
+    };
+    let Some(id) = target.local_node_id(access_id) else {
+        return;
+    };
+    let key = Key::AccessKit(id);
+    let expandable = !node.children().is_empty();
+    let expanded = expandable && state.expanded(key, depth < AUTO_EXPAND_DEPTH);
+    entries.push(Entry {
+        key,
+        depth,
+        kind: format!("{:?}", node.role()),
+        expandable,
+        expanded,
+        selected: state.selected.get() == Some(id),
+        detail: accesskit_detail(node),
+        size: accesskit_size(node),
+    });
+    if expanded {
+        for child in node.children() {
+            visit_accesskit(target, state, nodes, *child, depth + 1, entries);
+        }
+    }
+}
+
 fn visit(target: &Document, state: &State, key: Key, depth: usize, entries: &mut Vec<Entry>) {
     let children = children(target, key);
     let expandable = !children.is_empty();
@@ -48,7 +138,7 @@ fn visit(target: &Document, state: &State, key: Key, depth: usize, entries: &mut
     entries.push(Entry {
         key,
         depth,
-        kind: kind(target, key),
+        kind: kind(target, key).to_owned(),
         expandable,
         expanded,
         selected: state.selected.get() == Some(key.node()),
@@ -101,7 +191,7 @@ pub(crate) fn label(target: &Document, id: NodeId) -> String {
 
 fn children(target: &Document, key: Key) -> Vec<Key> {
     match key {
-        Key::Placeholder(_) => Vec::new(),
+        Key::Placeholder(_) | Key::AccessKit(_) => Vec::new(),
         Key::Internals(shadow) => vec![child_key(target, target.shadow_root(shadow))],
         Key::Node(id) if target.as_shadow(id).is_some() => {
             let slots = target.shadow_slots(id);
@@ -133,6 +223,7 @@ fn kind(target: &Document, key: Key) -> &'static str {
         Key::Node(id) => target.node_kind(id),
         Key::Internals(_) => "shadow",
         Key::Placeholder(_) => "slot",
+        Key::AccessKit(_) => unreachable!(),
     }
 }
 
@@ -145,8 +236,24 @@ fn detail(target: &Document, key: Key) -> String {
         Key::Node(id) => target.node_detail(id),
         Key::Internals(_) => None,
         Key::Placeholder(id) => Some(target.node_kind(id).to_owned()),
+        Key::AccessKit(_) => unreachable!(),
     };
     detail.map(|detail| trim(&detail)).unwrap_or_default()
+}
+
+fn accesskit_detail(node: &AccessNode) -> String {
+    node.label()
+        .or_else(|| node.value())
+        .or_else(|| node.description())
+        .map(trim)
+        .unwrap_or_default()
+}
+
+fn accesskit_size(node: &AccessNode) -> String {
+    match node.bounds() {
+        Some(bounds) => format!("{} x {}", bounds.width().round(), bounds.height().round()),
+        None => String::new(),
+    }
 }
 
 fn size(target: &Document, id: NodeId) -> String {

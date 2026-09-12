@@ -86,6 +86,7 @@ mod the_inspector_hides_the_internals_of_a_styled_component;
 mod the_inspector_keeps_the_rows_of_nodes_that_survive_an_update;
 mod the_inspector_lists_the_document_tree;
 mod the_inspector_separates_component_internals_from_slots;
+mod the_inspector_shows_the_accesskit_tree;
 mod the_scroll_position_is_reported_to_its_listener;
 mod touch_dragging_a_scroll_moves_it_without_activating_a_row;
 mod touch_overscroll_bands_without_hovering_a_row;
@@ -284,6 +285,10 @@ impl Harness {
 
     pub(crate) fn touch_toggle_center(&self) -> Pos2 {
         self.node_center(self.inspector().touch_toggle_node())
+    }
+
+    pub(crate) fn accesskit_tab_center(&self) -> Pos2 {
+        self.node_center(self.inspector().accesskit_tab_node())
     }
 
     pub(crate) fn touch_emulation(&self) -> bool {

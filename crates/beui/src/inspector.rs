@@ -23,8 +23,25 @@ const MINIMUM_WIDTH: f32 = 200.0;
 const GRIP_WIDTH: f32 = 4.0;
 const GRIP_PAINT_WIDTH: f32 = 2.0;
 
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum TreeKind {
+    #[default]
+    Beui,
+    AccessKit,
+}
+
+impl TreeKind {
+    fn from_index(index: usize) -> Self {
+        match index {
+            1 => Self::AccessKit,
+            _ => Self::Beui,
+        }
+    }
+}
+
 pub(crate) struct State {
     expansion: RefCell<HashMap<Key, bool>>,
+    tree: Cell<TreeKind>,
     pub(crate) hovered: Cell<Option<NodeId>>,
     pub(crate) selected: Cell<Option<NodeId>>,
     pub(crate) picking: Cell<bool>,
@@ -37,6 +54,7 @@ impl State {
     fn new(touch_emulation: bool) -> Self {
         Self {
             expansion: RefCell::new(HashMap::new()),
+            tree: Cell::new(TreeKind::default()),
             hovered: Cell::new(None),
             selected: Cell::new(None),
             picking: Cell::new(false),
@@ -56,6 +74,11 @@ impl State {
 
     fn set_expanded(&self, key: Key, expanded: bool) {
         self.expansion.borrow_mut().insert(key, expanded);
+        self.touch();
+    }
+
+    fn set_tree(&self, index: usize) {
+        self.tree.set(TreeKind::from_index(index));
         self.touch();
     }
 
@@ -95,6 +118,8 @@ pub(crate) struct Inspector {
     rows: Rc<RefCell<HashMap<Key, panel::Row>>>,
     #[cfg(test)]
     touch_toggle: crate::reactive::NodeRef,
+    #[cfg(test)]
+    tabs: crate::reactive::NodeRef,
     pub(crate) width: f32,
     grabbed: Option<f32>,
     grip: bool,
@@ -112,6 +137,8 @@ impl Inspector {
             rows: panel.rows,
             #[cfg(test)]
             touch_toggle: panel.touch_toggle,
+            #[cfg(test)]
+            tabs: panel.tabs,
             state,
             set_keys: panel.set_keys,
             set_entries: panel.set_entries,
@@ -139,6 +166,14 @@ impl Inspector {
     #[cfg(test)]
     pub(crate) fn touch_toggle_node(&self) -> NodeId {
         self.touch_toggle.get()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn accesskit_tab_node(&self) -> NodeId {
+        let tabs = self.tabs.get();
+        let choice = self.document.shadow_root(tabs);
+        let row = self.document.shadow_root(choice);
+        self.document.children(row)[1]
     }
 
     pub(crate) fn panel_width(&self, rect: Rect) -> f32 {
@@ -199,8 +234,11 @@ impl Inspector {
     }
 
     fn sync(&mut self, target: &Document) {
-        let entries = tree::collect(target, &self.state);
-        let summary = self.summary(target);
+        let entries = match self.state.tree.get() {
+            TreeKind::Beui => tree::collect(target, &self.state),
+            TreeKind::AccessKit => tree::collect_accesskit(target, &self.state),
+        };
+        let summary = self.summary(target, &entries);
         let Self {
             document,
             set_keys,
@@ -221,12 +259,18 @@ impl Inspector {
         self.entries = entries;
     }
 
-    fn summary(&self, target: &Document) -> Summary {
+    fn summary(&self, target: &Document, entries: &[Entry]) -> Summary {
         let selected = self.state.selected.get();
+        let selection = selected
+            .and_then(|id| entries.iter().find(|entry| entry.key.node() == id))
+            .map_or_else(nothing_selected, entry_label);
         Summary {
-            total: target.root().map_or(0, |root| tree::count(target, root)),
+            total: match self.state.tree.get() {
+                TreeKind::Beui => target.root().map_or(0, |root| tree::count(target, root)),
+                TreeKind::AccessKit => tree::accesskit_count(target),
+            },
             picking: self.state.picking.get(),
-            selection: selected.map_or_else(nothing_selected, |id| tree::label(target, id)),
+            selection,
             bounds: selected
                 .and_then(|id| target.node_rect(id))
                 .map(bounds_label)
@@ -262,7 +306,10 @@ impl Inspector {
     }
 
     fn choose(&mut self, target: &Document, id: NodeId) {
-        let path = tree::path(target, id);
+        let path = match self.state.tree.get() {
+            TreeKind::Beui => tree::path(target, id),
+            TreeKind::AccessKit => tree::accesskit_path(target, id),
+        };
         if let Some((_, ancestors)) = path.split_last() {
             for key in ancestors {
                 self.state.set_expanded(*key, true);
@@ -275,11 +322,11 @@ impl Inspector {
         let Some(id) = self.state.reveal.get() else {
             return;
         };
-        let Some(index) = self
-            .entries
-            .iter()
-            .position(|entry| entry.key == Key::Node(id))
-        else {
+        let key = match self.state.tree.get() {
+            TreeKind::Beui => Key::Node(id),
+            TreeKind::AccessKit => Key::AccessKit(id),
+        };
+        let Some(index) = self.entries.iter().position(|entry| entry.key == key) else {
             return;
         };
         self.state.reveal.set(None);
@@ -311,6 +358,14 @@ impl Inspector {
             ctx.painter().rect_filled(grip, 0.0, ACCENT);
             ctx.set_cursor_icon(CursorIcon::ResizeHorizontal);
         }
+    }
+}
+
+fn entry_label(entry: &Entry) -> String {
+    if entry.detail.is_empty() {
+        entry.kind.clone()
+    } else {
+        format!("{} {}", entry.kind, entry.detail)
     }
 }
 

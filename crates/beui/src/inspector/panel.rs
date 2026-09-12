@@ -17,7 +17,9 @@ use crate::styled::theme::{
     ACCENT, BORDER_WIDTH, CHIP_RADIUS, ON_ACCENT, RADIUS, SCROLLBAR_WIDTH, SEPARATOR_HEIGHT,
     SURFACE, SURFACE_RAISED, TEXT, TEXT_MUTED,
 };
-use crate::styled::{Bordered, Caption, Checkbox, Code, Heading, ListRow, Scrollbar, Separator};
+use crate::styled::{
+    Bordered, Caption, Checkbox, Code, Heading, ListRow, Scrollbar, Separator, Tabs,
+};
 use crate::unstyled;
 
 use super::tree::{Entry, Key};
@@ -63,6 +65,8 @@ pub(crate) struct Panel {
     #[cfg(test)]
     pub(crate) touch_toggle: NodeRef,
     #[cfg(test)]
+    pub(crate) tabs: NodeRef,
+    #[cfg(test)]
     pub(crate) rows: Rows,
 }
 
@@ -75,8 +79,11 @@ pub(crate) fn build(state: &Rc<State>) -> Panel {
     let rows: Rows = Rc::default();
     let touch_toggle = NodeRef::new();
     let touch_toggle_ref = touch_toggle.clone();
+    let tabs = NodeRef::new();
+    let tabs_ref = tabs.clone();
     let touch_emulation = state.touch_emulation.get();
     let touch_state = state.clone();
+    let tab_state = state.clone();
 
     let mut document = crate::reactive::build(|| {
         let count_text = create_memo({
@@ -99,11 +106,19 @@ pub(crate) fn build(state: &Rc<State>) -> Panel {
             <Fill @sizing=ItemSize::Percent(100.0) color=SURFACE radius=0>
                 <Column spacing=0.0>
                     <Padding horizontal=HEADER_PADDING vertical=HEADER_PADDING>
-                        <CenteredRow spacing=HEADER_SPACING>
-                            <Heading content="Inspector" />
-                            <Caption @sizing=ItemSize::Percent(100.0) content={count_text} align=TextAlign::End />
-                            <PickToggle state={state.clone()} picking />
-                        </CenteredRow>
+                        <Column spacing=HEADER_SPACING>
+                            <CenteredRow spacing=HEADER_SPACING>
+                                <Heading content="Inspector" />
+                                <Caption @sizing=ItemSize::Percent(100.0) content={count_text} align=TextAlign::End />
+                                <PickToggle state={state.clone()} picking />
+                            </CenteredRow>
+                            <Tabs
+                                @node_ref=&tabs_ref
+                                labels={vec!["BEUI".to_owned(), "AccessKit".to_owned()]}
+                                selected=0
+                                on_change={move |index| tab_state.set_tree(index)}
+                            />
+                        </Column>
                     </Padding>
                     <Separator @sizing=ItemSize::Fixed(SEPARATOR_HEIGHT) />
                     <Padding @sizing=ItemSize::Percent(100.0) horizontal=BODY_PADDING vertical=BODY_PADDING>
@@ -155,6 +170,8 @@ pub(crate) fn build(state: &Rc<State>) -> Panel {
         set_reveal,
         #[cfg(test)]
         touch_toggle,
+        #[cfg(test)]
+        tabs,
         #[cfg(test)]
         rows,
     }
