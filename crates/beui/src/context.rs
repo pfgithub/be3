@@ -3,8 +3,9 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::Duration;
 
+use crate::color::Color32;
 use crate::font::{FontId, FontSources, Fonts, Galley};
-use crate::geometry::Rect;
+use crate::geometry::{pos2, vec2, Rect};
 use crate::input::{CursorIcon, InputState, RawInput};
 use crate::painter::{Painter, Shape};
 
@@ -20,6 +21,7 @@ struct Inner {
     test_ids: RefCell<HashMap<String, Rect>>,
     copied_text: RefCell<Option<String>>,
     cursor_icon: Cell<CursorIcon>,
+    touch_emulation: Cell<bool>,
     repaint: Cell<bool>,
     repaint_after: Cell<Duration>,
     previous: RefCell<Option<(Vec<Shape>, f32)>>,
@@ -59,6 +61,7 @@ impl Context {
                 test_ids: RefCell::new(HashMap::new()),
                 copied_text: RefCell::new(None),
                 cursor_icon: Cell::new(CursorIcon::Default),
+                touch_emulation: Cell::new(false),
                 repaint: Cell::new(false),
                 repaint_after: Cell::new(Duration::MAX),
                 previous: RefCell::new(None),
@@ -100,6 +103,7 @@ impl Context {
     pub fn run(&self, raw: RawInput, frame: impl FnOnce(&Self)) -> FrameOutput {
         self.begin_frame(raw);
         frame(self);
+        self.paint_touch_cursor();
         self.end_frame()
     }
 
@@ -117,6 +121,14 @@ impl Context {
 
     pub fn set_cursor_icon(&self, cursor_icon: CursorIcon) {
         self.inner.cursor_icon.set(cursor_icon);
+    }
+
+    pub(crate) fn touch_emulation(&self) -> bool {
+        self.inner.touch_emulation.get()
+    }
+
+    pub(crate) fn set_touch_emulation(&self, enabled: bool) {
+        self.inner.touch_emulation.set(enabled);
     }
 
     pub fn request_repaint(&self) {
@@ -171,6 +183,27 @@ impl Context {
 
     pub(crate) fn push(&self, shape: Shape) {
         self.inner.shapes.borrow_mut().push(shape);
+    }
+
+    fn paint_touch_cursor(&self) {
+        if !self.touch_emulation() {
+            return;
+        }
+        let Some(pos) = self.input(|input| input.pointer.interact_pos()) else {
+            return;
+        };
+        let radius = 10.0;
+        let rect = Rect::from_min_size(
+            pos2(pos.x - radius, pos.y - radius),
+            vec2(radius * 2.0, radius * 2.0),
+        );
+        let painter = self.painter();
+        painter.rect_filled(
+            rect,
+            radius,
+            Color32::from_rgba_unmultiplied(255, 255, 255, 96),
+        );
+        painter.rect_stroke(rect, radius, 1.0, Color32::BLACK);
     }
 }
 

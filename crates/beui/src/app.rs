@@ -29,10 +29,6 @@ pub trait App {
     fn clear_color(&self) -> Color32 {
         Color32::BLACK
     }
-
-    fn emulate_touch_with_mouse(&self) -> bool {
-        false
-    }
 }
 
 pub fn run(title: impl Into<String>, app: impl App + 'static) -> Result<(), Box<dyn Error>> {
@@ -66,6 +62,7 @@ struct Surface {
     config: wgpu::SurfaceConfiguration,
     renderer: Renderer,
     cursor_icon: CursorIcon,
+    touch_emulation: bool,
     prepared_size: Option<(Vec2, f32)>,
     clear_color: Option<Color32>,
 }
@@ -131,6 +128,11 @@ impl Runner {
         if output.cursor_icon != surface.cursor_icon {
             surface.cursor_icon = output.cursor_icon;
             surface.window.set_cursor(cursor(output.cursor_icon));
+        }
+        let touch_emulation = self.context.touch_emulation();
+        if touch_emulation != surface.touch_emulation {
+            surface.touch_emulation = touch_emulation;
+            surface.window.set_cursor_visible(!touch_emulation);
         }
 
         let size = (physical, scale);
@@ -277,7 +279,7 @@ impl ApplicationHandler for Runner {
             }
             WindowEvent::CursorMoved { position, .. } => {
                 self.pointer = self.logical(position);
-                if self.app.emulate_touch_with_mouse() {
+                if self.context.touch_emulation() {
                     if self.emulated_touch {
                         self.push(emulated_touch(TouchPhase::Move, self.pointer));
                     }
@@ -294,7 +296,7 @@ impl ApplicationHandler for Runner {
                 }
             }
             WindowEvent::MouseInput { state, button, .. } => {
-                if self.app.emulate_touch_with_mouse() {
+                if self.context.touch_emulation() {
                     if button != MouseButton::Left {
                         return;
                     }
@@ -454,6 +456,7 @@ async fn create_surface(window: Arc<Window>) -> Result<Surface, Box<dyn Error>> 
         config,
         renderer,
         cursor_icon: CursorIcon::Default,
+        touch_emulation: false,
         prepared_size: None,
         clear_color: None,
     })

@@ -28,17 +28,19 @@ pub(crate) struct State {
     pub(crate) hovered: Cell<Option<NodeId>>,
     pub(crate) selected: Cell<Option<NodeId>>,
     pub(crate) picking: Cell<bool>,
+    pub(crate) touch_emulation: Cell<bool>,
     reveal: Cell<Option<NodeId>>,
     revision: Cell<u64>,
 }
 
 impl State {
-    fn new() -> Self {
+    fn new(touch_emulation: bool) -> Self {
         Self {
             expansion: RefCell::new(HashMap::new()),
             hovered: Cell::new(None),
             selected: Cell::new(None),
             picking: Cell::new(false),
+            touch_emulation: Cell::new(touch_emulation),
             reveal: Cell::new(None),
             revision: Cell::new(0),
         }
@@ -91,6 +93,8 @@ pub(crate) struct Inspector {
     set_reveal: WriteSignal<Option<usize>>,
     #[cfg(test)]
     rows: Rc<RefCell<HashMap<Key, panel::Row>>>,
+    #[cfg(test)]
+    touch_toggle: crate::reactive::NodeRef,
     pub(crate) width: f32,
     grabbed: Option<f32>,
     grip: bool,
@@ -98,14 +102,16 @@ pub(crate) struct Inspector {
 }
 
 impl Inspector {
-    pub(crate) fn new() -> Self {
-        let state = Rc::new(State::new());
+    pub(crate) fn new(touch_emulation: bool) -> Self {
+        let state = Rc::new(State::new(touch_emulation));
         let panel = panel::build(&state);
         Self {
             document: panel.document,
             entries: Vec::new(),
             #[cfg(test)]
             rows: panel.rows,
+            #[cfg(test)]
+            touch_toggle: panel.touch_toggle,
             state,
             set_keys: panel.set_keys,
             set_entries: panel.set_entries,
@@ -128,6 +134,11 @@ impl Inspector {
     pub(crate) fn marker_node(&self, index: usize) -> NodeId {
         let key = self.entries[index].key;
         self.rows.borrow()[&key].marker.get()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn touch_toggle_node(&self) -> NodeId {
+        self.touch_toggle.get()
     }
 
     pub(crate) fn panel_width(&self, rect: Rect) -> f32 {
@@ -169,6 +180,7 @@ impl Inspector {
         self.forget_removed(target);
         self.sync(target);
         self.document.show(ctx, panel);
+        ctx.set_touch_emulation(self.state.touch_emulation.get());
         self.pick(target, ctx, content);
         self.reveal();
         self.paint(target, ctx, content, panel);

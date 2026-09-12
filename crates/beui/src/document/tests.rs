@@ -40,6 +40,7 @@ mod ctrl_z_undoes_what_was_typed_into_a_text_input;
 mod double_clicking_a_word_selects_it_so_typing_replaces_it;
 mod dragging_a_slider_moves_its_value;
 mod dragging_the_inspector_edge_resizes_the_panel;
+mod enabling_touch_emulation_in_the_inspector_draws_a_circular_pointer;
 mod enter_activates_the_focused_button;
 mod enter_confirms_the_highlighted_select_option_and_closes_the_popup;
 mod enter_toggles_the_focused_checkbox;
@@ -276,6 +277,14 @@ impl Harness {
 
     pub(crate) fn marker_center(&self, index: usize) -> Pos2 {
         self.node_center(self.inspector().marker_node(index))
+    }
+
+    pub(crate) fn touch_toggle_center(&self) -> Pos2 {
+        self.node_center(self.inspector().touch_toggle_node())
+    }
+
+    pub(crate) fn touch_emulation(&self) -> bool {
+        self.context.touch_emulation()
     }
 
     fn node_center(&self, id: NodeId) -> Pos2 {

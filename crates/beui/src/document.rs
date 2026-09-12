@@ -150,12 +150,12 @@ impl Document {
             if chord_pressed(ctx, Key::I) {
                 self.inspector = match self.inspector {
                     Some(_) => None,
-                    None => Some(Box::new(Inspector::new())),
+                    None => Some(Box::new(Inspector::new(ctx.touch_emulation()))),
                 };
             }
             if chord_pressed(ctx, Key::C) {
                 self.inspector
-                    .get_or_insert_with(|| Box::new(Inspector::new()))
+                    .get_or_insert_with(|| Box::new(Inspector::new(ctx.touch_emulation())))
                     .toggle_picking();
             }
         }

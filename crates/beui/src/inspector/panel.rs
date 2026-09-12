@@ -19,8 +19,8 @@ use crate::styled::theme::{
     SURFACE, SURFACE_RAISED, TEXT, TEXT_MUTED,
 };
 use crate::styled::{
-    BorderedBuilder, CaptionBuilder, CodeBuilder, HeadingBuilder, ListRowBuilder, ScrollbarBuilder,
-    SeparatorBuilder,
+    BorderedBuilder, CaptionBuilder, CheckboxBuilder, CodeBuilder, HeadingBuilder, ListRowBuilder,
+    ScrollbarBuilder, SeparatorBuilder,
 };
 use crate::unstyled;
 
@@ -65,6 +65,8 @@ pub(crate) struct Panel {
     pub(crate) set_summary: WriteSignal<Summary>,
     pub(crate) set_reveal: WriteSignal<Option<usize>>,
     #[cfg(test)]
+    pub(crate) touch_toggle: NodeRef,
+    #[cfg(test)]
     pub(crate) rows: Rows,
 }
 
@@ -75,6 +77,10 @@ pub(crate) fn build(state: &Rc<State>) -> Panel {
     let (position, set_position) = create_signal(ScrollPosition::ZERO);
     let (reveal, set_reveal) = create_signal(None);
     let rows: Rows = Rc::default();
+    let touch_toggle = NodeRef::new();
+    let touch_toggle_ref = touch_toggle.clone();
+    let touch_emulation = state.touch_emulation.get();
+    let touch_state = state.clone();
 
     let mut document = crate::reactive::build(|| {
         let count_text = create_memo({
@@ -128,6 +134,12 @@ pub(crate) fn build(state: &Rc<State>) -> Panel {
                     <separator @sizing=ItemSize::Fixed(SEPARATOR_HEIGHT) />
                     <padding horizontal=FOOTER_PADDING vertical=FOOTER_PADDING>
                         <column spacing=FOOTER_SPACING>
+                            <checkbox
+                                @node_ref=&touch_toggle_ref
+                                label="Emulate touch with mouse"
+                                checked={touch_emulation}
+                                on_change={move |enabled| touch_state.touch_emulation.set(enabled)}
+                            />
                             <code content={selection_text} />
                             <code content={bounds_text} color=TEXT_MUTED />
                         </column>
@@ -145,6 +157,8 @@ pub(crate) fn build(state: &Rc<State>) -> Panel {
         set_entries,
         set_summary,
         set_reveal,
+        #[cfg(test)]
+        touch_toggle,
         #[cfg(test)]
         rows,
     }

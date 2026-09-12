@@ -19,8 +19,6 @@ use beui::{
     unstyled, Color32, Context, Document, ItemSize, NodeId, Rect, ScrollPosition, TextAlign,
 };
 use beui_macros::component;
-use std::cell::Cell;
-use std::rc::Rc;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     beui::run("beui demo", DemoApp::new())
@@ -45,28 +43,22 @@ const COMPACT_ROW_PADDING_VERTICAL: f32 = 4.0;
 
 struct DemoApp {
     document: Document,
-    emulate_touch: Rc<Cell<bool>>,
 }
 
 impl DemoApp {
     fn new() -> Self {
-        let emulate_touch = Rc::new(Cell::new(false));
-        let touch_setting = emulate_touch.clone();
         let document = build(|| {
             let (count, set_count) = create_signal(0i64);
             view! {
                 <fill color=BACKGROUND radius=0>
                     <container>
-                        {move |_| view! { <demo_shell count set_count emulate_touch={touch_setting} /> }}
+                        {move |_| view! { <demo_shell count set_count /> }}
                     </container>
                 </fill>
             }
         });
 
-        Self {
-            document,
-            emulate_touch,
-        }
+        Self { document }
     }
 }
 
@@ -77,10 +69,6 @@ impl beui::App for DemoApp {
 
     fn clear_color(&self) -> Color32 {
         BACKGROUND
-    }
-
-    fn emulate_touch_with_mouse(&self) -> bool {
-        self.emulate_touch.get()
     }
 }
 
@@ -191,11 +179,7 @@ fn scroll_row_face(
 }
 
 #[component]
-fn demo_shell(
-    count: ReadSignal<i64>,
-    set_count: WriteSignal<i64>,
-    emulate_touch: Rc<Cell<bool>>,
-) -> NodeId {
+fn demo_shell(count: ReadSignal<i64>, set_count: WriteSignal<i64>) -> NodeId {
     let narrow = narrower_than(NARROW_WIDTH);
     let header_height = create_memo(move || {
         if narrow.get() {
@@ -208,7 +192,7 @@ fn demo_shell(
         <column spacing=0.0>
             <demo_header @sizing={header_height} set_count />
             <separator @sizing=ItemSize::Fixed(SEPARATOR_HEIGHT) />
-            <demo_body @sizing=ItemSize::Percent(100.0) count emulate_touch />
+            <demo_body @sizing=ItemSize::Percent(100.0) count />
         </column>
     }
 }
@@ -253,7 +237,7 @@ fn demo_header(set_count: WriteSignal<i64>) -> NodeId {
 }
 
 #[component]
-fn demo_body(count: ReadSignal<i64>, emulate_touch: Rc<Cell<bool>>) -> NodeId {
+fn demo_body(count: ReadSignal<i64>) -> NodeId {
     let narrow = narrower_than(NARROW_WIDTH);
     let padding = create_memo(move || {
         if narrow.get() {
@@ -265,7 +249,7 @@ fn demo_body(count: ReadSignal<i64>, emulate_touch: Rc<Cell<bool>>) -> NodeId {
     view! {
         <padding horizontal={padding.clone()} vertical={padding}>
             <stack spacing=BODY_SPACING>
-                <sidebar @sizing=ItemSize::Percent(32.0) emulate_touch />
+                <sidebar @sizing=ItemSize::Percent(32.0) />
                 <main_panel @sizing=ItemSize::Percent(68.0) count />
             </stack>
         </padding>
@@ -273,7 +257,7 @@ fn demo_body(count: ReadSignal<i64>, emulate_touch: Rc<Cell<bool>>) -> NodeId {
 }
 
 #[component]
-fn sidebar(emulate_touch: Rc<Cell<bool>>) -> NodeId {
+fn sidebar() -> NodeId {
     let narrow = narrower_than(NARROW_WIDTH);
     let open = create_memo(move || !narrow.get());
     let keyboard_open = open.clone();
@@ -283,12 +267,6 @@ fn sidebar(emulate_touch: Rc<Cell<bool>>) -> NodeId {
                 <accordion title="About" open>
                     <paragraph content="beui keeps a retained tree of nodes. Base nodes carry behaviour only, unstyled \
                          components compose them, and the styled components paint them." />
-                </accordion>
-                <separator @sizing=ItemSize::Fixed(SEPARATOR_HEIGHT) />
-                <accordion title="Touch testing" open=false>
-                    <checkbox label="Emulate touch with mouse" checked=false on_change={move |enabled| {
-                        emulate_touch.set(enabled);
-                    }} />
                 </accordion>
                 <separator @sizing=ItemSize::Fixed(SEPARATOR_HEIGHT) />
                 <accordion title="Keyboard" open={keyboard_open}>

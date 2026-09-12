@@ -85,10 +85,9 @@ styling behind. Platform integrations may provide synthesized pointer events
 alongside touch events; BEUI suppresses those duplicates while the touch is
 active.
 
-Standalone apps receive winit touch events automatically. An app can return
-`true` from `App::emulate_touch_with_mouse` to turn the primary mouse button
-into a touch contact. The BEUI demo exposes this as “Emulate touch with mouse”
-under “Touch testing.” Embedded BEUI plugins receive the same touch data over
-the block plugin input protocol. `block_ui_test::BeuiTest` provides
+Standalone apps receive winit touch events automatically. Open the inspector
+with Ctrl+Shift+I and enable “Emulate touch with mouse” to turn the primary
+mouse button into a touch contact. Embedded BEUI plugins receive the same touch
+data over the block plugin input protocol. `block_ui_test::BeuiTest` provides
 `touch_start`, `touch_move`, `touch_end`, and `touch_cancel` for headless
 gesture tests.
