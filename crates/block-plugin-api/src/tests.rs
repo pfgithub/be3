@@ -95,6 +95,7 @@ mod rejects_unknown_message_kind;
 mod rejects_unordered_occluders;
 mod replacing_a_child_round_trips;
 mod resize_messages_round_trip;
+mod touch_input_round_trips;
 mod view_messages_round_trip;
 mod web_view_messages_round_trip;
 mod zoom_gesture_round_trips;

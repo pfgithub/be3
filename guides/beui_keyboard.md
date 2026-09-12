@@ -65,3 +65,30 @@ the tree is built.
 A host sends `Event::Focus(false)` when its window or editor region loses focus. Text and paste arrive through `Event::Text`. Copy and cut return text in `FrameOutput::copied_text`; the host writes this to its clipboard. Both the desktop runner and the block editor integration handle these outputs. Clipboard access for other custom hosts belongs to their platform integration.
 
 Keyboard regression tests run without a window. Run `cargo test -p beui --lib --no-default-features` for the control and document tests, and `./scripts/verify` for the required workspace verification.
+
+## Touch behavior
+
+BEUI accepts `Event::Touch` with a stable device and finger id, lifecycle
+phase, logical position, and optional normalized pressure. It tracks every
+active contact in `InputState::touch`; the first contact drives the primary
+pointer so existing pressable controls, sliders, text selection, focus, and
+overlays work without a separate touch-only control API. A second contact or
+a cancelled contact cancels a pending tap rather than activating it.
+
+A tap may drift by up to eight logical points. Beyond that threshold BEUI
+locks the gesture to its dominant axis. Vertical gestures drag the deepest
+scroll view under the initial contact, keep that scroll captured when the
+finger leaves its rectangle, and do not click the row where the gesture
+started. Horizontal gestures remain available to controls such as sliders.
+The touch pointer disappears after release, so touch does not leave hover
+styling behind. Platform integrations may provide synthesized pointer events
+alongside touch events; BEUI suppresses those duplicates while the touch is
+active.
+
+Standalone apps receive winit touch events automatically. An app can return
+`true` from `App::emulate_touch_with_mouse` to turn the primary mouse button
+into a touch contact. The BEUI demo exposes this as “Emulate touch with mouse”
+under “Touch testing.” Embedded BEUI plugins receive the same touch data over
+the block plugin input protocol. `block_ui_test::BeuiTest` provides
+`touch_start`, `touch_move`, `touch_end`, and `touch_cancel` for headless
+gesture tests.

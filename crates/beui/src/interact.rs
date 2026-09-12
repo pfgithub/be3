@@ -22,8 +22,32 @@ pub(crate) fn interact(
         released_this_frame: ctx.input(|input| input.pointer.primary_released()),
         secondary_pressed_this_frame: ctx.input(|input| input.pointer.secondary_pressed()),
         scroll_delta: ctx.input(|input| input.scroll_delta.y),
+        touch_started: ctx.input(|input| input.touch.started()),
+        touch_ended: ctx.input(|input| input.touch.ended()),
+        touch_cancelled: ctx.input(|input| input.touch.cancelled()),
+        touch_dragged: ctx.input(|input| input.touch.dragged()),
+        touch_scrolling: ctx.input(|input| input.touch.scrolling()),
+        touch_scroll_delta: ctx.input(|input| input.touch.scroll_delta().y),
+        touch_scroll_target: None,
         clicks: ctx.input(|input| input.pointer.clicks()),
         modifiers: ctx.input(|input| input.modifiers),
+    };
+
+    if input.touch_started {
+        doc.touch_scroll_target = input.pointer_pos.and_then(|pos| {
+            if doc.overlay_stack.is_empty() {
+                deepest_scroll(doc, rects, root, pos)
+            } else {
+                doc.overlay_stack
+                    .iter()
+                    .rev()
+                    .find_map(|overlay| deepest_scroll(doc, rects, *overlay, pos))
+            }
+        });
+    }
+    let input = InteractInput {
+        touch_scroll_target: doc.touch_scroll_target,
+        ..input
     };
 
     let mut focus_target = None;
@@ -99,6 +123,29 @@ pub(crate) fn interact(
         doc.reveal_focus(painter);
     }
     doc.validate_focus();
+    if input.touch_ended || input.touch_cancelled {
+        doc.touch_scroll_target = None;
+    }
+}
+
+fn deepest_scroll(
+    doc: &Document,
+    rects: &HashMap<NodeId, Rect>,
+    id: NodeId,
+    pos: crate::Pos2,
+) -> Option<NodeId> {
+    if !rects.get(&id).is_some_and(|rect| rect.contains(pos)) {
+        return None;
+    }
+    let node = doc.arena.get(id);
+    for child in node.children().into_iter().rev() {
+        if let Some(scroll) = deepest_scroll(doc, rects, child, pos) {
+            return Some(scroll);
+        }
+    }
+    node.as_any()
+        .is::<crate::base::scroll::ScrollNode>()
+        .then_some(id)
 }
 
 fn interact_node(

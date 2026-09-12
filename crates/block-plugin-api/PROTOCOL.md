@@ -40,11 +40,16 @@ is left is delivered to the host in the order it arrived, whatever class each
 message belongs to: a block a plugin wrote and the editor message that
 depends on it cannot swap places on the way.
 
-Input events carry pointer, wheel, key, text, focus and zoom-gesture input in
-the screen's own logical coordinates. A pinch or trackpad zoom is its own
-event, carrying the factor the view is asked to grow by; a wheel turned with
-the zoom modifier held stays a wheel event, which the receiver reads as a zoom
-of its own. Consecutive zoom gestures coalesce by multiplying their factors.
+Input events carry pointer, touch, wheel, key, text, focus and zoom-gesture
+input in the screen's own logical coordinates. Touch input preserves the
+device, finger, lifecycle phase and optional normalized pressure. The host
+also sends the primary-pointer events synthesized by its window integration;
+a receiver that handles touch directly suppresses those duplicates. A pinch
+or trackpad zoom is its own event, carrying the factor the view is asked to
+grow by; a wheel turned with the zoom modifier held stays a wheel event, which
+the receiver reads as a zoom of its own. Consecutive moves from one touch
+coalesce to their latest position and pressure. Consecutive zoom gestures
+coalesce by multiplying their factors.
 
 A screen's input goes out at the start of the host frame that received it,
 before the host lays anything out, and it is routed against where the screen

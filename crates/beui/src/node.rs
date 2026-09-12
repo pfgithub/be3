@@ -17,6 +17,13 @@ pub(crate) struct InteractInput {
     pub(crate) released_this_frame: bool,
     pub(crate) secondary_pressed_this_frame: bool,
     pub(crate) scroll_delta: f32,
+    pub(crate) touch_started: bool,
+    pub(crate) touch_ended: bool,
+    pub(crate) touch_cancelled: bool,
+    pub(crate) touch_dragged: bool,
+    pub(crate) touch_scrolling: bool,
+    pub(crate) touch_scroll_delta: f32,
+    pub(crate) touch_scroll_target: Option<NodeId>,
     pub(crate) clicks: u32,
     pub(crate) modifiers: Modifiers,
 }

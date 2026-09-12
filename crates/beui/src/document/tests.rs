@@ -77,12 +77,14 @@ mod tab_is_trapped_inside_an_open_context_menu;
 mod tab_moves_focus_from_one_text_input_to_the_next;
 mod tab_moves_focus_to_the_next_button;
 mod tabs_collapse_into_a_select_when_their_container_is_narrow;
+mod tapping_a_checkbox_with_touch_toggles_it;
 mod the_inspector_follows_nodes_added_to_the_document;
 mod the_inspector_hides_the_internals_of_a_styled_component;
 mod the_inspector_keeps_the_rows_of_nodes_that_survive_an_update;
 mod the_inspector_lists_the_document_tree;
 mod the_inspector_separates_component_internals_from_slots;
 mod the_scroll_position_is_reported_to_its_listener;
+mod touch_dragging_a_scroll_moves_it_without_activating_a_row;
 mod triple_clicking_selects_the_line_so_typing_replaces_the_value;
 mod typing_in_a_select_search_box_filters_options_case_insensitively;
 mod typing_into_a_focused_text_input_inserts_the_text;
@@ -99,6 +101,7 @@ use crate::color::Color32;
 use crate::context::Context;
 use crate::geometry::{pos2, Pos2, Vec2};
 use crate::input::{Event, Key, Modifiers, PointerButton, RawInput};
+use crate::input::{TouchId, TouchPhase};
 
 use crate::base::list::{Direction, ItemSize};
 use crate::inspector::Inspector;
@@ -183,6 +186,18 @@ impl Harness {
             button: PointerButton::Primary,
             pressed: false,
             modifiers: Modifiers::NONE,
+        }]);
+    }
+
+    pub(crate) fn touch(&mut self, phase: TouchPhase, pos: Pos2) {
+        self.frame(vec![Event::Touch {
+            id: TouchId {
+                device: 1,
+                finger: 1,
+            },
+            phase,
+            pos,
+            force: None,
         }]);
     }
 

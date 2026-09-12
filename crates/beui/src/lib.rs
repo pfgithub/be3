@@ -34,6 +34,7 @@ pub use font::{
 pub use geometry::{pos2, vec2, Pos2, Rect, Vec2};
 pub use input::{
     CursorIcon, Event, InputState, Key, KeyPress, Modifiers, PointerButton, PointerPress, RawInput,
+    TouchId, TouchPhase, TouchPoint, TouchState,
 };
 pub use node::{ClickHandler, Handler, NodeId};
 pub use painter::{Painter, Shape};

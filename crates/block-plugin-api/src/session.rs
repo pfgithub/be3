@@ -292,6 +292,29 @@ fn coalesce_input(current: &mut InputEvent, incoming: &InputEvent) -> bool {
             *factor *= incoming;
             true
         }
+        (
+            InputEvent::Touch {
+                device,
+                finger,
+                phase: crate::TouchPhase::Move,
+                x,
+                y,
+                force,
+            },
+            InputEvent::Touch {
+                device: incoming_device,
+                finger: incoming_finger,
+                phase: crate::TouchPhase::Move,
+                x: incoming_x,
+                y: incoming_y,
+                force: incoming_force,
+            },
+        ) if device == incoming_device && finger == incoming_finger => {
+            *x = *incoming_x;
+            *y = *incoming_y;
+            *force = *incoming_force;
+            true
+        }
         (InputEvent::Modifiers(current), InputEvent::Modifiers(incoming))
             if current == incoming =>
         {

@@ -1142,6 +1142,22 @@ impl EditorSession {
                     .events
                     .push(beui::Event::Scroll(beui::vec2(x * scale, y * scale)));
             }
+            InputEvent::Touch {
+                device,
+                finger,
+                phase,
+                x,
+                y,
+                force,
+            } => state.events.push(beui::Event::Touch {
+                id: beui::TouchId {
+                    device: *device,
+                    finger: *finger,
+                },
+                phase: beui_touch_phase(*phase),
+                pos: at(*x, *y),
+                force: *force,
+            }),
             InputEvent::Key {
                 logical,
                 pressed,
@@ -1214,6 +1230,20 @@ impl EditorSession {
                     modifiers: state.input.modifiers,
                 });
             }
+            InputEvent::Touch {
+                device,
+                finger,
+                phase,
+                x,
+                y,
+                force,
+            } => state.input.events.push(egui::Event::Touch {
+                device_id: egui::TouchDeviceId(*device),
+                id: egui::TouchId(*finger),
+                phase: egui_touch_phase(*phase),
+                pos: egui::pos2(*x, *y) + origin,
+                force: *force,
+            }),
             InputEvent::Zoom { factor } => state.input.events.push(egui::Event::Zoom(*factor)),
             InputEvent::Key {
                 logical,
@@ -1291,6 +1321,24 @@ fn beui_button(button: PointerButton) -> Option<beui::PointerButton> {
         PointerButton::Secondary => Some(beui::PointerButton::Secondary),
         PointerButton::Middle => Some(beui::PointerButton::Middle),
         PointerButton::Back | PointerButton::Forward | PointerButton::Other(_) => None,
+    }
+}
+
+fn beui_touch_phase(phase: block_plugin_api::TouchPhase) -> beui::TouchPhase {
+    match phase {
+        block_plugin_api::TouchPhase::Start => beui::TouchPhase::Start,
+        block_plugin_api::TouchPhase::Move => beui::TouchPhase::Move,
+        block_plugin_api::TouchPhase::End => beui::TouchPhase::End,
+        block_plugin_api::TouchPhase::Cancel => beui::TouchPhase::Cancel,
+    }
+}
+
+fn egui_touch_phase(phase: block_plugin_api::TouchPhase) -> egui::TouchPhase {
+    match phase {
+        block_plugin_api::TouchPhase::Start => egui::TouchPhase::Start,
+        block_plugin_api::TouchPhase::Move => egui::TouchPhase::Move,
+        block_plugin_api::TouchPhase::End => egui::TouchPhase::End,
+        block_plugin_api::TouchPhase::Cancel => egui::TouchPhase::Cancel,
     }
 }
 

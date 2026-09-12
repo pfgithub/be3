@@ -283,6 +283,9 @@ impl Element for ScrollNode {
         if input.scroll_delta != 0.0 && input.pointer_pos.is_some_and(|pos| rect.contains(pos)) {
             position.offset -= input.scroll_delta;
         }
+        if input.touch_scroll_target == Some(id) {
+            position.offset -= input.touch_scroll_delta;
+        }
         position.offset = position.offset.clamp(0.0, position.max_offset());
 
         if self.offset != position.offset {

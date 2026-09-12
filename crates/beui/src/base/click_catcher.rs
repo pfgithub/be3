@@ -127,8 +127,12 @@ impl Element for ClickCatcherNode {
                 self.on_secondary_press.call(press);
             }
         }
+        if input.touch_cancelled || input.touch_scrolling {
+            self.armed = false;
+            self.dragged = None;
+        }
         if input.released_this_frame {
-            if hovered && self.armed {
+            if hovered && self.armed && !input.touch_dragged && !input.touch_cancelled {
                 self.on_click.call();
             }
             self.armed = false;
@@ -146,7 +150,7 @@ impl Element for ClickCatcherNode {
             self.active = active;
             self.on_active_change.call(active);
         }
-        if self.armed && input.pointer_down {
+        if self.armed && input.pointer_down && !input.touch_scrolling {
             if let Some(pos) = input.pointer_pos {
                 if self.dragged != Some(pos) {
                     self.dragged = Some(pos);

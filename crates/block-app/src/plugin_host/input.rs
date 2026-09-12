@@ -3,6 +3,7 @@ use block_plugin_api::{
     ScreenId, ViewportMetrics, WheelUnit,
 };
 use eframe::egui;
+use std::collections::HashSet;
 use uuid::Uuid;
 
 use super::instances::Holes;
@@ -88,6 +89,7 @@ pub(super) struct InputAdapter {
     modifiers: Modifiers,
     over_hole: bool,
     paste_shortcut_down: bool,
+    captured_touches: HashSet<(u64, u64)>,
 }
 
 impl InputAdapter {
@@ -109,6 +111,11 @@ impl InputAdapter {
         if focused != self.focused {
             normalized.push(InputEvent::Focus(focused));
             self.focused = focused;
+            if !focused {
+                self.captured = false;
+                self.pressed_buttons = 0;
+                self.captured_touches.clear();
+            }
         }
 
         if rect.width() > 0.0 && rect.height() > 0.0 {
@@ -207,6 +214,50 @@ impl InputAdapter {
             egui::Event::Zoom(factor) if hovered && !self.over_hole => {
                 output.push(InputEvent::Zoom { factor });
             }
+            egui::Event::Touch {
+                device_id,
+                id,
+                phase,
+                pos,
+                force,
+            } => {
+                let touch = (device_id.0, id.0);
+                let accepted = match phase {
+                    egui::TouchPhase::Start => pointer(pos, false),
+                    egui::TouchPhase::Move | egui::TouchPhase::End | egui::TouchPhase::Cancel => {
+                        self.captured_touches.contains(&touch)
+                    }
+                };
+                if !accepted {
+                    return;
+                }
+                if phase == egui::TouchPhase::Start {
+                    self.captured_touches.insert(touch);
+                }
+                let position = pos - rect.min;
+                output.push(InputEvent::Touch {
+                    device: device_id.0,
+                    finger: id.0,
+                    phase: touch_phase(phase),
+                    x: position.x,
+                    y: position.y,
+                    force,
+                });
+                if matches!(phase, egui::TouchPhase::End | egui::TouchPhase::Cancel) {
+                    self.captured_touches.remove(&touch);
+                }
+                if phase == egui::TouchPhase::Cancel && self.pressed_buttons & 1 != 0 {
+                    self.pressed_buttons &=
+                        !(1 << pointer_button_index(egui::PointerButton::Primary));
+                    self.captured = self.pressed_buttons != 0;
+                    output.push(InputEvent::PointerButton {
+                        button: PointerButton::Primary,
+                        pressed: false,
+                        x: position.x,
+                        y: position.y,
+                    });
+                }
+            }
             egui::Event::Key {
                 key,
                 physical_key,
@@ -242,6 +293,7 @@ impl InputAdapter {
                 self.focused = false;
                 self.captured = false;
                 self.pressed_buttons = 0;
+                self.captured_touches.clear();
                 output.push(InputEvent::Focus(false));
             }
             _ => {}
@@ -310,5 +362,14 @@ fn wheel_unit(unit: egui::MouseWheelUnit) -> WheelUnit {
         egui::MouseWheelUnit::Point => WheelUnit::Pixels,
         egui::MouseWheelUnit::Line => WheelUnit::Lines,
         egui::MouseWheelUnit::Page => WheelUnit::Pages,
+    }
+}
+
+fn touch_phase(phase: egui::TouchPhase) -> block_plugin_api::TouchPhase {
+    match phase {
+        egui::TouchPhase::Start => block_plugin_api::TouchPhase::Start,
+        egui::TouchPhase::Move => block_plugin_api::TouchPhase::Move,
+        egui::TouchPhase::End => block_plugin_api::TouchPhase::End,
+        egui::TouchPhase::Cancel => block_plugin_api::TouchPhase::Cancel,
     }
 }

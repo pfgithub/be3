@@ -48,3 +48,4 @@ mod queue_saturation_preserves_ordered_input;
 mod repeated_start_and_shutdown_are_clean;
 mod request_timeout_fails_the_session;
 mod superseded_events_are_coalesced;
+mod touch_moves_are_coalesced;

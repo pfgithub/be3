@@ -7,7 +7,7 @@ mod session;
 pub use manifest::{manifest_from_json, ManifestDocument};
 pub use session::{HostSession, QueueError, SessionFailure, SessionState};
 
-pub const PROTOCOL_VERSION: u16 = 46;
+pub const PROTOCOL_VERSION: u16 = 47;
 pub const MAX_COLLECTION_ITEMS: usize = 1024;
 pub const MAX_STRING_BYTES: usize = 16 * 1024;
 pub const MAX_OPAQUE_DESCRIPTOR_BYTES: usize = 64 * 1024;
@@ -1088,6 +1088,14 @@ pub enum InputEvent {
     Zoom {
         factor: f32,
     },
+    Touch {
+        device: u64,
+        finger: u64,
+        phase: TouchPhase,
+        x: f32,
+        y: f32,
+        force: Option<f32>,
+    },
     Key {
         physical: PhysicalKey,
         logical: String,
@@ -1099,6 +1107,14 @@ pub enum InputEvent {
     Ime(ImeInput),
     Modifiers(Modifiers),
     Focus(bool),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TouchPhase {
+    Start,
+    Move,
+    End,
+    Cancel,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

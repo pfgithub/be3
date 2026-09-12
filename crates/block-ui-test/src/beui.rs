@@ -1,4 +1,6 @@
-use beui::{Color32, Context, Event, Key, Modifiers, PointerButton, Pos2, Rect, Vec2};
+use beui::{
+    Color32, Context, Event, Key, Modifiers, PointerButton, Pos2, Rect, TouchId, TouchPhase, Vec2,
+};
 use block_editor_plugin::BeuiApp;
 
 use crate::snapshot;
@@ -94,6 +96,34 @@ impl<A: BeuiApp> BeuiTest<A> {
             button: PointerButton::Primary,
             pressed: false,
             modifiers: self.modifiers,
+        });
+    }
+
+    pub fn touch_start(&mut self, pos: Pos2) {
+        self.touch(TouchPhase::Start, pos);
+    }
+
+    pub fn touch_move(&mut self, pos: Pos2) {
+        self.touch(TouchPhase::Move, pos);
+    }
+
+    pub fn touch_end(&mut self, pos: Pos2) {
+        self.touch(TouchPhase::End, pos);
+    }
+
+    pub fn touch_cancel(&mut self, pos: Pos2) {
+        self.touch(TouchPhase::Cancel, pos);
+    }
+
+    fn touch(&mut self, phase: TouchPhase, pos: Pos2) {
+        self.events.push(Event::Touch {
+            id: TouchId {
+                device: 1,
+                finger: 1,
+            },
+            phase,
+            pos,
+            force: None,
         });
     }
 

@@ -1,4 +1,5 @@
 use std::error::Error;
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -14,7 +15,9 @@ use crate::color::Color32;
 mod clipboard;
 use crate::context::Context;
 use crate::geometry::{pos2, vec2, Pos2, Rect, Vec2};
-use crate::input::{CursorIcon, Event, Key, Modifiers, PointerButton, RawInput};
+use crate::input::{
+    CursorIcon, Event, Key, Modifiers, PointerButton, RawInput, TouchId, TouchPhase,
+};
 use crate::renderer::{clear_color, Renderer};
 
 const LINE_HEIGHT: f32 = 40.0;
@@ -25,6 +28,10 @@ pub trait App {
 
     fn clear_color(&self) -> Color32 {
         Color32::BLACK
+    }
+
+    fn emulate_touch_with_mouse(&self) -> bool {
+        false
     }
 }
 
@@ -39,6 +46,7 @@ pub fn run(title: impl Into<String>, app: impl App + 'static) -> Result<(), Box<
         events: Vec::new(),
         modifiers: Modifiers::NONE,
         pointer: Pos2::ZERO,
+        emulated_touch: false,
         error: None,
         next_update: None,
         clipboard: Clipboard::new(),
@@ -70,6 +78,7 @@ struct Runner {
     events: Vec<Event>,
     modifiers: Modifiers,
     pointer: Pos2,
+    emulated_touch: bool,
     error: Option<String>,
     next_update: Option<Instant>,
     clipboard: Clipboard,
@@ -252,7 +261,12 @@ impl ApplicationHandler for Runner {
                     surface.window.request_redraw();
                 }
             }
-            WindowEvent::Focused(focused) => self.push(Event::Focus(focused)),
+            WindowEvent::Focused(focused) => {
+                if !focused {
+                    self.emulated_touch = false;
+                }
+                self.push(Event::Focus(focused));
+            }
             WindowEvent::ModifiersChanged(modifiers) => {
                 let state = modifiers.state();
                 self.modifiers = Modifiers {
@@ -263,10 +277,41 @@ impl ApplicationHandler for Runner {
             }
             WindowEvent::CursorMoved { position, .. } => {
                 self.pointer = self.logical(position);
-                self.push(Event::PointerMoved(self.pointer));
+                if self.app.emulate_touch_with_mouse() {
+                    if self.emulated_touch {
+                        self.push(emulated_touch(TouchPhase::Move, self.pointer));
+                    }
+                } else {
+                    self.push(Event::PointerMoved(self.pointer));
+                }
             }
-            WindowEvent::CursorLeft { .. } => self.push(Event::PointerGone),
+            WindowEvent::CursorLeft { .. } => {
+                if self.emulated_touch {
+                    self.emulated_touch = false;
+                    self.push(emulated_touch(TouchPhase::Cancel, self.pointer));
+                } else {
+                    self.push(Event::PointerGone);
+                }
+            }
             WindowEvent::MouseInput { state, button, .. } => {
+                if self.app.emulate_touch_with_mouse() {
+                    if button != MouseButton::Left {
+                        return;
+                    }
+                    let pressed = state == ElementState::Pressed;
+                    if pressed != self.emulated_touch {
+                        self.emulated_touch = pressed;
+                        self.push(emulated_touch(
+                            if pressed {
+                                TouchPhase::Start
+                            } else {
+                                TouchPhase::End
+                            },
+                            self.pointer,
+                        ));
+                    }
+                    return;
+                }
                 let Some(button) = pointer_button(button) else {
                     return;
                 };
@@ -275,6 +320,17 @@ impl ApplicationHandler for Runner {
                     button,
                     pressed: state == ElementState::Pressed,
                     modifiers: self.modifiers,
+                });
+            }
+            WindowEvent::Touch(touch) => {
+                self.push(Event::Touch {
+                    id: TouchId {
+                        device: hash(touch.device_id),
+                        finger: touch.id,
+                    },
+                    phase: touch_phase(touch.phase),
+                    pos: self.logical(touch.location),
+                    force: touch.force.map(touch_force),
                 });
             }
             WindowEvent::MouseWheel { delta, .. } => {
@@ -318,6 +374,44 @@ impl ApplicationHandler for Runner {
             WindowEvent::RedrawRequested => self.redraw(),
             _ => {}
         }
+    }
+}
+
+fn hash(value: impl Hash) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    value.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn emulated_touch(phase: TouchPhase, pos: Pos2) -> Event {
+    Event::Touch {
+        id: TouchId {
+            device: 0,
+            finger: 0,
+        },
+        phase,
+        pos,
+        force: None,
+    }
+}
+
+fn touch_phase(phase: winit::event::TouchPhase) -> TouchPhase {
+    match phase {
+        winit::event::TouchPhase::Started => TouchPhase::Start,
+        winit::event::TouchPhase::Moved => TouchPhase::Move,
+        winit::event::TouchPhase::Ended => TouchPhase::End,
+        winit::event::TouchPhase::Cancelled => TouchPhase::Cancel,
+    }
+}
+
+fn touch_force(force: winit::event::Force) -> f32 {
+    match force {
+        winit::event::Force::Normalized(force) => force as f32,
+        winit::event::Force::Calibrated {
+            force,
+            max_possible_force,
+            ..
+        } => (force / max_possible_force) as f32,
     }
 }
 
