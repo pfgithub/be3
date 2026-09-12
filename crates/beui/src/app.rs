@@ -9,7 +9,7 @@ use winit::dpi::{LogicalSize, PhysicalPosition};
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
 use winit::keyboard::{KeyCode, PhysicalKey};
-use winit::window::{Window, WindowId};
+use winit::window::{CustomCursor, CustomCursorSource, Window, WindowId};
 
 use self::clipboard::Clipboard;
 use crate::color::Color32;
@@ -23,6 +23,10 @@ use crate::renderer::{clear_color, Renderer};
 
 const LINE_HEIGHT: f32 = 40.0;
 const DEFAULT_SIZE: Vec2 = Vec2::new(1280.0, 800.0);
+const TOUCH_CURSOR_SIZE: u16 = 20;
+const TOUCH_CURSOR_RADIUS: f32 = TOUCH_CURSOR_SIZE as f32 / 2.0;
+const TOUCH_CURSOR_STROKE: f32 = 1.0;
+const TOUCH_CURSOR_SAMPLES: u16 = 4;
 
 pub trait App {
     fn update(&mut self, context: &Context, rect: Rect);
@@ -65,6 +69,7 @@ struct Surface {
     renderer: Renderer,
     cursor_icon: CursorIcon,
     touch_emulation: bool,
+    touch_cursor: CustomCursor,
     prepared_size: Option<(Vec2, f32)>,
     clear_color: Option<Color32>,
     accessibility: AccessKitAdapter,
@@ -131,14 +136,15 @@ impl Runner {
         if let Some(text) = &output.copied_text {
             self.clipboard.set(text.clone());
         }
-        if output.cursor_icon != surface.cursor_icon {
-            surface.cursor_icon = output.cursor_icon;
-            surface.window.set_cursor(cursor(output.cursor_icon));
-        }
         let touch_emulation = self.context.touch_emulation();
-        if touch_emulation != surface.touch_emulation {
+        if output.cursor_icon != surface.cursor_icon || touch_emulation != surface.touch_emulation {
+            surface.cursor_icon = output.cursor_icon;
             surface.touch_emulation = touch_emulation;
-            surface.window.set_cursor_visible(!touch_emulation);
+            if touch_emulation {
+                surface.window.set_cursor(surface.touch_cursor.clone());
+            } else {
+                surface.window.set_cursor(cursor(output.cursor_icon));
+            }
         }
 
         let size = (physical, scale);
@@ -242,8 +248,9 @@ impl ApplicationHandler<AccessKitEvent> for Runner {
             &window,
             self.event_loop_proxy.clone(),
         );
+        let touch_cursor = event_loop.create_custom_cursor(touch_cursor_source());
         window.set_visible(true);
-        match pollster::block_on(create_surface(window, accessibility)) {
+        match pollster::block_on(create_surface(window, accessibility, touch_cursor)) {
             Ok(surface) => self.surface = Some(surface),
             Err(error) => self.fail(event_loop, error),
         }
@@ -295,7 +302,6 @@ impl ApplicationHandler<AccessKitEvent> for Runner {
             }
             WindowEvent::CursorMoved { position, .. } => {
                 self.pointer = self.logical(position);
-                self.context.set_touch_cursor(Some(self.pointer));
                 if self.context.touch_emulation() {
                     if self.emulated_touch {
                         self.push(emulated_touch(TouchPhase::Move, self.pointer));
@@ -305,7 +311,6 @@ impl ApplicationHandler<AccessKitEvent> for Runner {
                 }
             }
             WindowEvent::CursorLeft { .. } => {
-                self.context.set_touch_cursor(None);
                 if self.emulated_touch {
                     self.emulated_touch = false;
                     self.push(emulated_touch(TouchPhase::Cancel, self.pointer));
@@ -460,6 +465,7 @@ fn touch_force(force: winit::event::Force) -> f32 {
 async fn create_surface(
     window: Arc<Window>,
     accessibility: AccessKitAdapter,
+    touch_cursor: CustomCursor,
 ) -> Result<Surface, Box<dyn Error>> {
     let size = window.inner_size();
     let instance = wgpu::Instance::default();
@@ -500,10 +506,56 @@ async fn create_surface(
         renderer,
         cursor_icon: CursorIcon::Default,
         touch_emulation: false,
+        touch_cursor,
         prepared_size: None,
         clear_color: None,
         accessibility,
     })
+}
+
+fn touch_cursor_source() -> CustomCursorSource {
+    let size = usize::from(TOUCH_CURSOR_SIZE);
+    let mut rgba = vec![0; size * size * 4];
+    let samples = f32::from(TOUCH_CURSOR_SAMPLES);
+    let sample_count = f32::from(TOUCH_CURSOR_SAMPLES * TOUCH_CURSOR_SAMPLES);
+    for y in 0..TOUCH_CURSOR_SIZE {
+        for x in 0..TOUCH_CURSOR_SIZE {
+            let mut alpha = 0.0;
+            let mut white = 0.0;
+            for sample_y in 0..TOUCH_CURSOR_SAMPLES {
+                for sample_x in 0..TOUCH_CURSOR_SAMPLES {
+                    let x = f32::from(x) + (f32::from(sample_x) + 0.5) / samples;
+                    let y = f32::from(y) + (f32::from(sample_y) + 0.5) / samples;
+                    let distance = (x - TOUCH_CURSOR_RADIUS).hypot(y - TOUCH_CURSOR_RADIUS);
+                    if distance <= TOUCH_CURSOR_RADIUS {
+                        if distance <= TOUCH_CURSOR_RADIUS - TOUCH_CURSOR_STROKE {
+                            alpha += 96.0;
+                            white += 96.0;
+                        } else {
+                            alpha += 255.0;
+                        }
+                    }
+                }
+            }
+            let offset = (usize::from(y) * size + usize::from(x)) * 4;
+            let alpha = alpha / sample_count;
+            let color = if alpha == 0.0 {
+                0.0
+            } else {
+                white / sample_count / alpha * 255.0
+            };
+            rgba[offset..offset + 3].fill(color.round() as u8);
+            rgba[offset + 3] = alpha.round() as u8;
+        }
+    }
+    CustomCursor::from_rgba(
+        rgba,
+        TOUCH_CURSOR_SIZE,
+        TOUCH_CURSOR_SIZE,
+        TOUCH_CURSOR_SIZE / 2,
+        TOUCH_CURSOR_SIZE / 2,
+    )
+    .expect("the touch cursor dimensions and hotspot are valid")
 }
 
 fn pointer_button(button: MouseButton) -> Option<PointerButton> {
