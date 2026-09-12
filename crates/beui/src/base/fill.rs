@@ -116,7 +116,7 @@ impl Document {
 }
 
 #[component(base)]
-pub fn fill(color: Prop<Color32>, radius: Prop<u8>, children: Option<Child>) -> NodeId {
+pub fn Fill(color: Prop<Color32>, radius: Prop<u8>, children: Option<Child>) -> NodeId {
     let fill = with_document(|document| {
         let fill = document.create_fill(Color32::TRANSPARENT, 0);
         if let Some(child) = children {

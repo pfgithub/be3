@@ -89,7 +89,7 @@ struct State {
 type Handle = Rc<State>;
 
 #[component]
-pub(crate) fn menu_list(
+pub(crate) fn MenuList(
     items: Vec<MenuItem>,
     row: Option<RenderFn<MenuRowHandle>>,
     panel: Option<RenderFn<Child>>,
@@ -172,7 +172,7 @@ pub(crate) fn menu_list(
 }
 
 #[component]
-fn menu_row(
+fn MenuRow(
     state: Handle,
     index: usize,
     item: MenuItem,

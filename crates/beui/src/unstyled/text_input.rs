@@ -51,7 +51,7 @@ struct Editor {
 type Handle = Rc<RefCell<Editor>>;
 
 #[component]
-pub fn text_input(
+pub fn TextInput(
     value: Prop<String>,
     focused: Prop<bool>,
     #[prop(children)] content: Option<Render<TextInputHandle>>,

@@ -11,7 +11,7 @@ const PADDING_HORIZONTAL: f32 = 8.0;
 const PADDING_VERTICAL: f32 = 4.0;
 
 #[component]
-pub fn list_row(children: Child, on_click: ClickCallback) -> NodeId {
+pub fn ListRow(children: Child, on_click: ClickCallback) -> NodeId {
     view! {
         <Button
             on_click={move || on_click.call()}
@@ -21,7 +21,7 @@ pub fn list_row(children: Child, on_click: ClickCallback) -> NodeId {
 }
 
 #[component]
-fn list_row_face(handle: ButtonHandle, children: Child) -> NodeId {
+fn ListRowFace(handle: ButtonHandle, children: Child) -> NodeId {
     let ButtonHandle {
         hovered,
         active,

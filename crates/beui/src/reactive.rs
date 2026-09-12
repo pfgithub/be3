@@ -597,7 +597,7 @@ pub use crate::base::text::Text;
 pub use crate::base::visibility::Visibility;
 
 #[component(base)]
-pub fn list(
+pub fn List(
     #[prop(default = Direction::Vertical)] direction: Prop<Direction>,
     #[prop(default = Align::Stretch)] align: Prop<Align>,
     spacing: Prop<f32>,
@@ -614,17 +614,17 @@ pub fn list(
 }
 
 #[component(base)]
-pub fn row(spacing: Prop<f32>, children: Children) -> NodeId {
+pub fn Row(spacing: Prop<f32>, children: Children) -> NodeId {
     view! { <List direction=Direction::Horizontal spacing children /> }
 }
 
 #[component(base)]
-pub fn column(spacing: Prop<f32>, children: Children) -> NodeId {
+pub fn Column(spacing: Prop<f32>, children: Children) -> NodeId {
     view! { <List direction=Direction::Vertical spacing children /> }
 }
 
 #[component(base)]
-pub fn centered_row(spacing: Prop<f32>, children: Children) -> NodeId {
+pub fn CenteredRow(spacing: Prop<f32>, children: Children) -> NodeId {
     view! {
         <List
             direction=Direction::Horizontal
@@ -636,12 +636,12 @@ pub fn centered_row(spacing: Prop<f32>, children: Children) -> NodeId {
 }
 
 #[component(base)]
-pub fn spacer() -> NodeId {
+pub fn Spacer() -> NodeId {
     with_document(|document| document.create_fill(Color32::TRANSPARENT, 0))
 }
 
 #[component]
-pub fn show(condition: Prop<bool>, #[prop(children)] then: Option<Render>) -> NodeId {
+pub fn Show(condition: Prop<bool>, #[prop(children)] then: Option<Render>) -> NodeId {
     let mut then = then;
     let visibility = with_document(|document| document.create_visibility(false));
     let built: Rc<Cell<Option<NodeId>>> = Rc::new(Cell::new(None));
@@ -659,7 +659,7 @@ pub fn show(condition: Prop<bool>, #[prop(children)] then: Option<Render>) -> No
 }
 
 #[component]
-pub fn dynamic<T>(value: Prop<T>, #[prop(children)] view: Option<RenderFn<T>>) -> NodeId
+pub fn Dynamic<T>(value: Prop<T>, #[prop(children)] view: Option<RenderFn<T>>) -> NodeId
 where
     T: Clone + Default + 'static,
 {
@@ -682,7 +682,7 @@ where
 }
 
 #[component]
-pub fn for_each<T, K>(
+pub fn ForEach<T, K>(
     spacing: f32,
     items: Prop<Vec<T>>,
     key: Option<Func<T, K>>,
@@ -726,7 +726,7 @@ where
 }
 
 #[component]
-pub fn button(children: Children, disabled: Prop<bool>, on_click: ClickCallback) -> NodeId {
+pub fn Button(children: Children, disabled: Prop<bool>, on_click: ClickCallback) -> NodeId {
     view! {
         <unstyled::Button
             disabled

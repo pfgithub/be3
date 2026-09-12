@@ -18,7 +18,7 @@ pub struct SliderHandle {
 }
 
 #[component]
-pub fn slider(
+pub fn Slider(
     value: Prop<f32>,
     #[prop(children)] content: Option<Render<SliderHandle>>,
     on_change: Callback<f32>,

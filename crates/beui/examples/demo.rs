@@ -113,7 +113,7 @@ impl Rows {
 }
 
 #[component]
-fn scroll_row(index: usize, rows: Rows, compact: bool) -> NodeId {
+fn ScrollRow(index: usize, rows: Rows, compact: bool) -> NodeId {
     let selected = rows.selection.memo(Some(index));
     let select_rows = rows.clone();
     view! {
@@ -133,7 +133,7 @@ fn scroll_row(index: usize, rows: Rows, compact: bool) -> NodeId {
 }
 
 #[component]
-fn scroll_row_face(
+fn ScrollRowFace(
     index: usize,
     handle: unstyled::ButtonHandle,
     selected: Memo<bool>,
@@ -177,7 +177,7 @@ fn scroll_row_face(
 }
 
 #[component]
-fn demo_shell(count: ReadSignal<i64>, set_count: WriteSignal<i64>) -> NodeId {
+fn DemoShell(count: ReadSignal<i64>, set_count: WriteSignal<i64>) -> NodeId {
     let narrow = narrower_than(NARROW_WIDTH);
     let header_height = create_memo(move || {
         if narrow.get() {
@@ -196,7 +196,7 @@ fn demo_shell(count: ReadSignal<i64>, set_count: WriteSignal<i64>) -> NodeId {
 }
 
 #[component]
-fn demo_header(set_count: WriteSignal<i64>) -> NodeId {
+fn DemoHeader(set_count: WriteSignal<i64>) -> NodeId {
     let reset_count = set_count.clone();
     let decrement_count = set_count.clone();
     let narrow = narrower_than(NARROW_WIDTH);
@@ -235,7 +235,7 @@ fn demo_header(set_count: WriteSignal<i64>) -> NodeId {
 }
 
 #[component]
-fn demo_body(count: ReadSignal<i64>) -> NodeId {
+fn DemoBody(count: ReadSignal<i64>) -> NodeId {
     let narrow = narrower_than(NARROW_WIDTH);
     let padding = create_memo(move || {
         if narrow.get() {
@@ -255,7 +255,7 @@ fn demo_body(count: ReadSignal<i64>) -> NodeId {
 }
 
 #[component]
-fn sidebar() -> NodeId {
+fn Sidebar() -> NodeId {
     let narrow = narrower_than(NARROW_WIDTH);
     let open = create_memo(move || !narrow.get());
     let keyboard_open = open.clone();
@@ -285,7 +285,7 @@ fn sidebar() -> NodeId {
 }
 
 #[component]
-fn main_panel(count: ReadSignal<i64>) -> NodeId {
+fn MainPanel(count: ReadSignal<i64>) -> NodeId {
     let (status_text, set_status_text) = create_signal("Nothing selected".to_string());
     let rows = Rows::new(set_status_text);
     let compact = rows.compact.clone();
@@ -346,7 +346,7 @@ fn main_panel(count: ReadSignal<i64>) -> NodeId {
 }
 
 #[component]
-fn controls(rows: Rows) -> NodeId {
+fn Controls(rows: Rows) -> NodeId {
     view! {
         <Card>
             <Container>{move |_| view! { <ControlPanels rows /> }}</Container>
@@ -355,7 +355,7 @@ fn controls(rows: Rows) -> NodeId {
 }
 
 #[component]
-fn control_panels(rows: Rows) -> NodeId {
+fn ControlPanels(rows: Rows) -> NodeId {
     let (selected_tab, set_selected_tab) = create_signal(0usize);
 
     let tab = create_selector(clone!(selected_tab -> move || selected_tab.get()));
@@ -383,7 +383,7 @@ fn control_panels(rows: Rows) -> NodeId {
 }
 
 #[component]
-fn list_controls(rows: Rows) -> NodeId {
+fn ListControls(rows: Rows) -> NodeId {
     let timing_rows = rows.clone();
     let compact_rows = rows.clone();
     view! {
@@ -400,7 +400,7 @@ fn list_controls(rows: Rows) -> NodeId {
 }
 
 #[component]
-fn load_controls() -> NodeId {
+fn LoadControls() -> NodeId {
     let (progress_value, set_progress_value) = create_signal(0.4f32);
     let readout_value = progress_value.clone();
 
@@ -419,7 +419,7 @@ fn load_controls() -> NodeId {
 }
 
 #[component]
-fn name_controls() -> NodeId {
+fn NameControls() -> NodeId {
     let (greeting_text, set_greeting_text) = create_signal(greeting_label(""));
 
     view! {
@@ -449,7 +449,7 @@ fn percent_label(value: f32) -> String {
 }
 
 #[component]
-fn choice_controls() -> NodeId {
+fn ChoiceControls() -> NodeId {
     let modes = ["Automatic", "Manual", "Scheduled"];
     let (mode_status_text, set_mode_status_text) = create_signal("Automatic updates".to_string());
     let colors = ["Amber", "Blue", "Green", "Purple"];
@@ -493,7 +493,7 @@ fn choice_controls() -> NodeId {
 }
 
 #[component]
-fn menu_controls() -> NodeId {
+fn MenuControls() -> NodeId {
     let fruits: Vec<String> = ["Apple", "Banana", "Cherry", "Date", "Grape", "Mango"]
         .iter()
         .map(|label| (*label).to_owned())

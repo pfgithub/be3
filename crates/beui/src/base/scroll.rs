@@ -667,7 +667,7 @@ impl Document {
 }
 
 #[component(base)]
-pub fn virtual_list(
+pub fn VirtualList(
     count: Prop<usize>,
     item_height: Prop<f32>,
     #[prop(children)] item: Option<RenderFn<usize>>,
@@ -691,7 +691,7 @@ pub fn virtual_list(
 }
 
 #[component(base)]
-pub fn scroll(
+pub fn Scroll(
     offset: Prop<f32>,
     reveal: Prop<Option<usize>>,
     focus_color: Prop<Color32>,

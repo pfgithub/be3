@@ -184,7 +184,7 @@ pub(crate) fn toggle_text(picking: bool) -> Color32 {
 }
 
 #[component]
-fn pick_toggle(state: Rc<State>, picking: Memo<bool>) -> NodeId {
+fn PickToggle(state: Rc<State>, picking: Memo<bool>) -> NodeId {
     let label_color = create_memo(clone!(picking -> move || toggle_text(picking.get())));
     let fill_color = create_memo(move || toggle_fill(picking.get()));
     let picker = state;
@@ -218,7 +218,7 @@ fn entry_field<T: Clone + Default + PartialEq + 'static>(
 }
 
 #[component]
-fn tree_row(row_key: Key, entries: Entries, state: Rc<State>, rows: Rows) -> NodeId {
+fn TreeRow(row_key: Key, entries: Entries, state: Rc<State>, rows: Rows) -> NodeId {
     let key = row_key;
     let node = key.node();
     let indent = entry_field(&entries, key, |entry| {

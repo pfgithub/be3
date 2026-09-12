@@ -24,7 +24,7 @@ const FOCUS_RING_WIDTH: f32 = 2.0;
 const FOCUS_RING_OFFSET: f32 = 4.0;
 
 #[component]
-pub fn checkbox(label: Prop<String>, checked: Prop<bool>, on_change: Callback<bool>) -> NodeId {
+pub fn Checkbox(label: Prop<String>, checked: Prop<bool>, on_change: Callback<bool>) -> NodeId {
     view! {
         <Toggle checked on_change={move |checked| on_change.call(checked)}>
             {move |handle: ToggleHandle| {
@@ -37,7 +37,7 @@ pub fn checkbox(label: Prop<String>, checked: Prop<bool>, on_change: Callback<bo
 }
 
 #[component]
-fn checkbox_face(handle: ToggleHandle, label: Prop<String>) -> NodeId {
+fn CheckboxFace(handle: ToggleHandle, label: Prop<String>) -> NodeId {
     let ToggleHandle {
         checked,
         hovered,

@@ -9,7 +9,7 @@ use crate::reactive::{
 };
 
 #[component]
-pub fn pressable(
+pub fn Pressable(
     children: Option<Child>,
     #[prop(default = true)] enabled: Prop<bool>,
     on_click: ClickCallback,

@@ -17,7 +17,7 @@ pub struct ToggleHandle {
 }
 
 #[component]
-pub fn toggle(
+pub fn Toggle(
     checked: Prop<bool>,
     #[prop(children)] content: Option<Render<ToggleHandle>>,
     on_change: Callback<bool>,

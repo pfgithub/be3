@@ -311,7 +311,7 @@ pub(crate) fn with_installed<R>(document: &mut Document, f: impl FnOnce(&mut Doc
 }
 
 #[component(base)]
-pub(crate) fn menu_region() -> NodeId {
+pub(crate) fn MenuRegion() -> NodeId {
     view! {
         <Sized width=120.0 height=60.0>
             <Fill color=Color32::from_gray(80) radius=4 />
@@ -320,7 +320,7 @@ pub(crate) fn menu_region() -> NodeId {
 }
 
 #[component(base)]
-pub(crate) fn button_face(label: String) -> NodeId {
+pub(crate) fn ButtonFace(label: String) -> NodeId {
     view! {
         <Fill color=Color32::from_gray(60) radius=4>
             <Padding horizontal=20.0 vertical=12.0>
@@ -331,7 +331,7 @@ pub(crate) fn button_face(label: String) -> NodeId {
 }
 
 #[component(base)]
-pub(crate) fn labelled_button(label: String, on_click: ClickCallback) -> NodeId {
+pub(crate) fn LabelledButton(label: String, on_click: ClickCallback) -> NodeId {
     view! {
         <unstyled::Button on_click={move || on_click.call()}>
             <ButtonFace label />

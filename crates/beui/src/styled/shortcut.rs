@@ -9,7 +9,7 @@ use crate::styled::Chip;
 const SPACING: f32 = 10.0;
 
 #[component]
-pub fn shortcut(keys: Prop<String>, description: Prop<String>) -> NodeId {
+pub fn Shortcut(keys: Prop<String>, description: Prop<String>) -> NodeId {
     view! {
         <CenteredRow spacing=SPACING>
             <Chip label={keys} />

@@ -4,7 +4,7 @@ use crate::reactive::{build, create_signal, view, Button, Column, NodeRef, Show,
 type Builds = Rc<Cell<usize>>;
 
 #[component]
-fn counted_panel(builds: Builds) -> NodeId {
+fn CountedPanel(builds: Builds) -> NodeId {
     builds.set(builds.get() + 1);
     view! { <Text string="panel" /> }
 }

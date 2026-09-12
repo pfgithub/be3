@@ -356,7 +356,7 @@ pub fn text_index_at(text: &NodeRef, pos: Pos2) -> usize {
 }
 
 #[component(base)]
-pub fn text(
+pub fn Text(
     string: Prop<String>,
     #[prop(default = DEFAULT_FONT_SIZE)] font_size: Prop<f32>,
     #[prop(default = Color32::WHITE)] color: Prop<Color32>,

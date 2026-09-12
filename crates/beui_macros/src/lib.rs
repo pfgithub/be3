@@ -191,18 +191,6 @@ impl Parse for ComponentAttr {
     }
 }
 
-fn pascal_case(name: &str) -> String {
-    name.split('_')
-        .map(|part| {
-            let mut chars = part.chars();
-            match chars.next() {
-                Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
-                None => String::new(),
-            }
-        })
-        .collect()
-}
-
 fn generic_inner(ty: &Type, name: &str) -> Option<Type> {
     let Type::Path(path) = ty else {
         return None;
@@ -272,8 +260,8 @@ pub fn component(attr: TokenStream, item: TokenStream) -> TokenStream {
         block,
     } = parse_macro_input!(item as ItemFn);
     let name = sig.ident.to_string();
-    let component_ident = format_ident!("{}", pascal_case(&name), span = sig.ident.span());
-    let builder_ident = format_ident!("{}Builder", pascal_case(&name));
+    let component_ident = sig.ident.clone();
+    let builder_ident = format_ident!("{}Builder", name);
     let output = sig.output.clone();
 
     let props: Vec<Prop> = sig

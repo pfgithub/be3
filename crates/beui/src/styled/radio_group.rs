@@ -7,7 +7,7 @@ use crate::styled::choice::{self, ChoiceOption, Kind};
 use crate::unstyled::Choice;
 
 #[component]
-pub fn radio_group(
+pub fn RadioGroup(
     labels: Vec<String>,
     selected: Prop<Option<usize>>,
     on_change: Callback<Option<usize>>,

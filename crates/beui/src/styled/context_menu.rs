@@ -16,7 +16,7 @@ const MENU_PADDING: f32 = 4.0;
 const MENU_WIDTH: f32 = 200.0;
 
 #[component]
-pub fn context_menu(
+pub fn ContextMenu(
     children: Child,
     items: Prop<Vec<MenuItem>>,
     on_select: Callback<Vec<usize>>,
@@ -34,7 +34,7 @@ pub fn context_menu(
 }
 
 #[component]
-fn menu_row(handle: MenuRowHandle) -> NodeId {
+fn MenuRow(handle: MenuRowHandle) -> NodeId {
     let MenuRowHandle {
         item,
         hovered,
@@ -57,7 +57,7 @@ fn menu_row(handle: MenuRowHandle) -> NodeId {
 }
 
 #[component]
-fn menu_panel(children: Child) -> NodeId {
+fn MenuPanel(children: Child) -> NodeId {
     view! {
         <Sized width=MENU_WIDTH>
             <Outline color=BORDER width=BORDER_WIDTH radius=RADIUS offset=0.0 visible=true>

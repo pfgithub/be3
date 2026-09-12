@@ -64,7 +64,7 @@ struct State {
 type Handle = Rc<State>;
 
 #[component]
-pub fn select(
+pub fn Select(
     options: Vec<String>,
     selected: Prop<Option<usize>>,
     on_change: Callback<Option<usize>>,
@@ -209,7 +209,7 @@ pub fn select(
 }
 
 #[component]
-fn select_row(
+fn SelectRow(
     state: Handle,
     index: usize,
     label: String,

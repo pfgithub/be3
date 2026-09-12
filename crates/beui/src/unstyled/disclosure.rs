@@ -21,7 +21,7 @@ struct State {
 }
 
 #[component]
-pub fn disclosure(
+pub fn Disclosure(
     spacing: Prop<f32>,
     header: Render<DisclosureHandle>,
     children: Child,

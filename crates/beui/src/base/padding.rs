@@ -116,7 +116,7 @@ impl Document {
 }
 
 #[component(base)]
-pub fn padding(horizontal: Prop<f32>, vertical: Prop<f32>, children: Child) -> NodeId {
+pub fn Padding(horizontal: Prop<f32>, vertical: Prop<f32>, children: Child) -> NodeId {
     let padding = with_document(|document| {
         let padding = document.create_padding(0.0, 0.0);
         document.set_padding_child(padding, children);

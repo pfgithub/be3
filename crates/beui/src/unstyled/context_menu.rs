@@ -17,7 +17,7 @@ struct State {
 }
 
 #[component]
-pub fn context_menu(
+pub fn ContextMenu(
     children: Child,
     items: Prop<Vec<MenuItem>>,
     row: Option<RenderFn<MenuRowHandle>>,

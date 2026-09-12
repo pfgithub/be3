@@ -21,7 +21,7 @@ const FOCUS_RING_WIDTH: f32 = 2.0;
 const FOCUS_RING_OFFSET: f32 = 3.0;
 
 #[component]
-pub fn slider(value: Prop<f32>, on_change: Callback<f32>) -> NodeId {
+pub fn Slider(value: Prop<f32>, on_change: Callback<f32>) -> NodeId {
     view! {
         <unstyled::Slider value on_change={move |value| on_change.call(value)}>
             {move |handle: SliderHandle| {
@@ -34,7 +34,7 @@ pub fn slider(value: Prop<f32>, on_change: Callback<f32>) -> NodeId {
 }
 
 #[component]
-fn slider_track(handle: SliderHandle) -> NodeId {
+fn SliderTrack(handle: SliderHandle) -> NodeId {
     let SliderHandle {
         value,
         dragging,

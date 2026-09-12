@@ -10,7 +10,7 @@ const HEIGHT: f32 = 6.0;
 const RADIUS: u8 = 3;
 
 #[component]
-pub fn progress(value: Prop<f32>) -> NodeId {
+pub fn Progress(value: Prop<f32>) -> NodeId {
     let value = value.map(|value| value.clamp(0.0, 1.0));
     let value_read = create_memo(move || value.get());
 

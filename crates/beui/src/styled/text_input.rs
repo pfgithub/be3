@@ -17,7 +17,7 @@ const FOCUS_RING_WIDTH: f32 = 2.0;
 const FOCUS_RING_OFFSET: f32 = 3.0;
 
 #[component]
-pub fn text_input(
+pub fn TextInput(
     value: Prop<String>,
     placeholder: Prop<String>,
     on_change: Callback<String>,
@@ -42,7 +42,7 @@ pub fn text_input(
 }
 
 #[component]
-fn text_input_frame(handle: TextInputHandle) -> NodeId {
+fn TextInputFrame(handle: TextInputHandle) -> NodeId {
     let TextInputHandle {
         field,
         hovered,

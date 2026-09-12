@@ -43,7 +43,7 @@ impl ButtonVariant {
 }
 
 #[component]
-pub fn button(
+pub fn Button(
     label: Prop<String>,
     variant: ButtonVariant,
     disabled: Prop<bool>,
@@ -61,7 +61,7 @@ pub fn button(
 }
 
 #[component]
-fn button_face(
+fn ButtonFace(
     handle: unstyled::ButtonHandle,
     variant: ButtonVariant,
     label: Prop<String>,

@@ -21,7 +21,7 @@ const PADDING_HORIZONTAL: f32 = 6.0;
 const PADDING_VERTICAL: f32 = 4.0;
 
 #[component]
-pub fn accordion(
+pub fn Accordion(
     title: Prop<String>,
     open: Prop<bool>,
     on_toggle: Callback<bool>,
@@ -43,7 +43,7 @@ pub fn accordion(
 }
 
 #[component]
-fn accordion_header(handle: DisclosureHandle, title: Memo<String>) -> NodeId {
+fn AccordionHeader(handle: DisclosureHandle, title: Memo<String>) -> NodeId {
     let DisclosureHandle {
         hovered,
         open,

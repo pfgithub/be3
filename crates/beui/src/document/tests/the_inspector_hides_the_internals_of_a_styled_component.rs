@@ -17,6 +17,6 @@ fn the_inspector_hides_the_internals_of_a_styled_component() {
 
     assert_eq!(
         harness.tree(),
-        ["column", "  list_row", "    button", "      focusable"]
+        ["column", "  ListRow", "    Button", "      focusable"]
     );
 }

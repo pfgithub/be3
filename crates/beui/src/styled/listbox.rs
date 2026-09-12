@@ -7,7 +7,7 @@ use crate::styled::choice::{self, ChoiceOption, Kind};
 use crate::unstyled::Choice;
 
 #[component]
-pub fn listbox(
+pub fn Listbox(
     labels: Vec<String>,
     selected: Prop<Option<usize>>,
     on_change: Callback<Option<usize>>,

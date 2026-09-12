@@ -7,7 +7,7 @@ use crate::styled::choice::{self, ChoiceOption, Kind};
 use crate::unstyled::Choice;
 
 #[component]
-pub fn tabs(labels: Vec<String>, selected: Prop<usize>, on_change: Callback<usize>) -> NodeId {
+pub fn Tabs(labels: Vec<String>, selected: Prop<usize>, on_change: Callback<usize>) -> NodeId {
     let option_count = labels.len();
     let selected = selected.map(move |selected| Some(selected.min(option_count.saturating_sub(1))));
     view! {

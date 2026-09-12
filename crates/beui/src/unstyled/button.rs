@@ -21,7 +21,7 @@ struct State {
 }
 
 #[component]
-pub fn button(
+pub fn Button(
     children: Option<Child>,
     content: Option<Render<ButtonHandle>>,
     disabled: Prop<bool>,

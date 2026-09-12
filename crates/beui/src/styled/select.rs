@@ -22,7 +22,7 @@ const FOCUS_RING_WIDTH: f32 = 2.0;
 const FOCUS_RING_OFFSET: f32 = 3.0;
 
 #[component]
-pub fn select(
+pub fn Select(
     options: Vec<String>,
     selected: Prop<Option<usize>>,
     on_change: Callback<Option<usize>>,
@@ -50,7 +50,7 @@ pub fn select(
 }
 
 #[component]
-fn select_trigger(options: Vec<String>, handle: SelectTriggerHandle) -> NodeId {
+fn SelectTrigger(options: Vec<String>, handle: SelectTriggerHandle) -> NodeId {
     let SelectTriggerHandle {
         selected,
         hovered,
@@ -84,7 +84,7 @@ fn select_trigger(options: Vec<String>, handle: SelectTriggerHandle) -> NodeId {
 }
 
 #[component]
-fn search_field(handle: TextInputHandle) -> NodeId {
+fn SearchField(handle: TextInputHandle) -> NodeId {
     let TextInputHandle {
         field,
         hovered,
@@ -101,7 +101,7 @@ fn search_field(handle: TextInputHandle) -> NodeId {
 }
 
 #[component]
-fn select_option(handle: SelectOptionHandle) -> NodeId {
+fn SelectOption(handle: SelectOptionHandle) -> NodeId {
     let SelectOptionHandle {
         label,
         highlighted,
@@ -124,7 +124,7 @@ fn select_option(handle: SelectOptionHandle) -> NodeId {
 }
 
 #[component]
-fn select_popup(children: Child) -> NodeId {
+fn SelectPopup(children: Child) -> NodeId {
     view! {
         <Sized width=POPUP_WIDTH>
             <Outline color=BORDER width=BORDER_WIDTH radius=RADIUS offset=0.0 visible=true>

@@ -57,7 +57,7 @@ struct State {
 type Handle = Rc<State>;
 
 #[component]
-pub fn choice(
+pub fn Choice(
     labels: Vec<String>,
     selected: Prop<Option<usize>>,
     kind: ChoiceKind,

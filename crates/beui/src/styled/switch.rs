@@ -22,7 +22,7 @@ const FOCUS_RING_WIDTH: f32 = 2.0;
 const FOCUS_RING_OFFSET: f32 = 4.0;
 
 #[component]
-pub fn switch(on: Prop<bool>, on_change: Callback<bool>) -> NodeId {
+pub fn Switch(on: Prop<bool>, on_change: Callback<bool>) -> NodeId {
     view! {
         <Toggle checked={on} on_change={move |on| on_change.call(on)}>
             {move |handle: ToggleHandle| {
@@ -35,7 +35,7 @@ pub fn switch(on: Prop<bool>, on_change: Callback<bool>) -> NodeId {
 }
 
 #[component]
-fn switch_track(handle: ToggleHandle) -> NodeId {
+fn SwitchTrack(handle: ToggleHandle) -> NodeId {
     let ToggleHandle {
         checked,
         hovered,

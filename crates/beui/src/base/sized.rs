@@ -134,7 +134,7 @@ impl Document {
 }
 
 #[component(base)]
-pub fn sized(width: Option<Prop<f32>>, height: Option<Prop<f32>>, children: Child) -> NodeId {
+pub fn Sized(width: Option<Prop<f32>>, height: Option<Prop<f32>>, children: Child) -> NodeId {
     let sized = with_document(|document| {
         let sized = document.create_sized(None, None);
         document.set_sized_child(sized, children);

@@ -8,12 +8,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[component]
-fn history_entry(value: i64) -> NodeId {
+fn HistoryEntry(value: i64) -> NodeId {
     view! { <Text string={value.to_string()} /> }
 }
 
 #[component]
-fn app() -> NodeId {
+fn App() -> NodeId {
     let (count, set_count) = create_signal(0i64);
     let (history, set_history) = create_signal(Vec::<(u64, i64)>::new());
     let (next_id, set_next_id) = create_signal(0u64);

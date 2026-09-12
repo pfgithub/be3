@@ -23,7 +23,7 @@ const MARK_DOT: f32 = 8.0;
 const MARK_RADIUS: u8 = 9;
 
 #[component]
-pub(super) fn choice_option(kind: Kind, handle: ChoiceOptionHandle) -> NodeId {
+pub(super) fn ChoiceOption(kind: Kind, handle: ChoiceOptionHandle) -> NodeId {
     let ChoiceOptionHandle {
         label,
         selected,
@@ -52,7 +52,7 @@ pub(super) fn choice_option(kind: Kind, handle: ChoiceOptionHandle) -> NodeId {
 }
 
 #[component]
-fn choice_label(kind: Kind, label: String, color: Prop<Color32>, checked: Memo<bool>) -> NodeId {
+fn ChoiceLabel(kind: Kind, label: String, color: Prop<Color32>, checked: Memo<bool>) -> NodeId {
     let align = if kind == Kind::Tabs {
         TextAlign::Center
     } else {
@@ -70,7 +70,7 @@ fn choice_label(kind: Kind, label: String, color: Prop<Color32>, checked: Memo<b
 }
 
 #[component]
-fn radio_mark(checked: Memo<bool>) -> NodeId {
+fn RadioMark(checked: Memo<bool>) -> NodeId {
     view! {
         <Sized width=MARK_BOX height=MARK_BOX>
             <Outline color=BORDER width=2.0 radius=MARK_RADIUS offset=0.0 visible=true>

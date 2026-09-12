@@ -10,7 +10,7 @@ use crate::styled::theme::{
 };
 
 #[component]
-pub fn code(
+pub fn Code(
     content: Prop<String>,
     #[prop(default = TextAlign::Start)] align: Prop<TextAlign>,
     #[prop(default = TEXT)] color: Prop<Color32>,
@@ -27,19 +27,19 @@ pub fn code(
 }
 
 #[component]
-pub fn icon(glyph: String, #[prop(default = TEXT)] color: Prop<Color32>) -> NodeId {
+pub fn Icon(glyph: String, #[prop(default = TEXT)] color: Prop<Color32>) -> NodeId {
     view! { <IconSized glyph font_size=ICON_SIZE color /> }
 }
 
 #[component]
-pub fn icon_sized(glyph: String, font_size: Prop<f32>, color: Prop<Color32>) -> NodeId {
+pub fn IconSized(glyph: String, font_size: Prop<f32>, color: Prop<Color32>) -> NodeId {
     view! {
         <Text string={glyph} font_size color align=TextAlign::Center icon=true />
     }
 }
 
 #[component(base)]
-fn line(
+fn Line(
     content: Prop<String>,
     font_size: Prop<f32>,
     color: Prop<Color32>,
@@ -55,7 +55,7 @@ fn line(
 }
 
 #[component]
-pub fn display(
+pub fn Display(
     content: Prop<String>,
     #[prop(default = TextAlign::Start)] align: Prop<TextAlign>,
     #[prop(default = TEXT)] color: Prop<Color32>,
@@ -64,7 +64,7 @@ pub fn display(
 }
 
 #[component]
-pub fn title(
+pub fn Title(
     content: Prop<String>,
     #[prop(default = TextAlign::Start)] align: Prop<TextAlign>,
     #[prop(default = TEXT)] color: Prop<Color32>,
@@ -73,7 +73,7 @@ pub fn title(
 }
 
 #[component]
-pub fn heading(
+pub fn Heading(
     content: Prop<String>,
     #[prop(default = TextAlign::Start)] align: Prop<TextAlign>,
     #[prop(default = TEXT)] color: Prop<Color32>,
@@ -82,7 +82,7 @@ pub fn heading(
 }
 
 #[component]
-pub fn body(
+pub fn Body(
     content: Prop<String>,
     #[prop(default = TextAlign::Start)] align: Prop<TextAlign>,
     #[prop(default = TEXT)] color: Prop<Color32>,
@@ -91,7 +91,7 @@ pub fn body(
 }
 
 #[component]
-pub fn caption(
+pub fn Caption(
     content: Prop<String>,
     #[prop(default = TextAlign::Start)] align: Prop<TextAlign>,
     #[prop(default = TEXT_MUTED)] color: Prop<Color32>,
@@ -100,7 +100,7 @@ pub fn caption(
 }
 
 #[component]
-pub fn paragraph(
+pub fn Paragraph(
     content: Prop<String>,
     #[prop(default = TEXT_MUTED)] color: Prop<Color32>,
 ) -> NodeId {

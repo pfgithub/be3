@@ -11,7 +11,7 @@ const RADIUS: u8 = 3;
 const MINIMUM_THUMB: f32 = 0.08;
 
 #[component]
-pub fn scrollbar(position: Prop<ScrollPosition>) -> NodeId {
+pub fn Scrollbar(position: Prop<ScrollPosition>) -> NodeId {
     let position = create_memo(move || position.get());
 
     let before = create_memo(clone!(position -> move || before_percent(position.get())));

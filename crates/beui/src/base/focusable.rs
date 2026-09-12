@@ -369,7 +369,7 @@ pub fn focus_within(node: NodeId) {
 }
 
 #[component(base)]
-pub fn focusable(
+pub fn Focusable(
     #[prop(default = true)] tab_stop: Prop<bool>,
     focused: Prop<bool>,
     on_focus_change: Callback<bool>,

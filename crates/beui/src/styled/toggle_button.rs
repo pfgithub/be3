@@ -13,11 +13,7 @@ use crate::unstyled;
 use crate::unstyled::{Toggle, ToggleHandle};
 
 #[component]
-pub fn toggle_button(
-    label: Prop<String>,
-    pressed: Prop<bool>,
-    on_change: Callback<bool>,
-) -> NodeId {
+pub fn ToggleButton(label: Prop<String>, pressed: Prop<bool>, on_change: Callback<bool>) -> NodeId {
     let label_text = create_memo(move || label.get());
     component_detail(label_text.clone());
 
@@ -29,7 +25,7 @@ pub fn toggle_button(
 }
 
 #[component]
-fn toggle_button_face(handle: ToggleHandle, label: Prop<String>) -> NodeId {
+fn ToggleButtonFace(handle: ToggleHandle, label: Prop<String>) -> NodeId {
     let ToggleHandle {
         checked,
         hovered,

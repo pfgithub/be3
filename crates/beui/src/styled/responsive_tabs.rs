@@ -11,7 +11,7 @@ use crate::styled::{Select, Tabs};
 use crate::unstyled::narrower_than;
 
 #[component]
-pub fn responsive_tabs(
+pub fn ResponsiveTabs(
     labels: Vec<String>,
     selected: Prop<usize>,
     on_change: Callback<usize>,

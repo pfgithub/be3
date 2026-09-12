@@ -167,7 +167,7 @@ use beui::reactive::{
 };
 
 #[component]
-fn app() -> beui::NodeId {
+fn App() -> beui::NodeId {
     let (count, set_count) = create_signal(0i64);
     let decrement = set_count.clone();
     let count_text = create_memo(move || count.get().to_string());
@@ -189,8 +189,9 @@ fn app() -> beui::NodeId {
 let document = build(|| view! { <App /> });
 ```
 
-`#[component]` turns a function into a `<Name>` usable from `view!`, generating
-a `Name()` constructor that returns the builder `view!` fills in. A prop typed `Prop<T>` accepts
+`#[component]` turns a function named `Name` into a `<Name>` usable from `view!`.
+That exact function name is also the constructor that returns the builder `view!`
+fills in. A prop typed `Prop<T>` accepts
 either a plain `T` or a signal or memo of `T`; the reactive forms create an
 effect that keeps that property in sync. `#[component(base)]` is for the base
 elements, which do the same but without a shadow node of their own. Every tag
@@ -305,7 +306,7 @@ a component has at most one, and a component with both keeps `children`.
 
 ```rust
 #[component]
-fn checkbox(label: Prop<String>, checked: Prop<bool>) -> NodeId {
+fn Checkbox(label: Prop<String>, checked: Prop<bool>) -> NodeId {
     view! {
         <Toggle checked>
             {move |handle| view! { <CheckboxFace handle label /> }}
