@@ -11,9 +11,7 @@ mod stack;
 mod text_input;
 mod toggle;
 
-pub use button::{
-    button_active, button_focusable, button_focused, focus_button, ButtonBuilder, ButtonHandle,
-};
+pub use button::{button_active, button_focused, ButtonBuilder, ButtonHandle};
 pub use choice::{choice_selected, ChoiceBuilder, ChoiceKind, ChoiceOptionHandle};
 pub use container::{container_size, narrower_than, ContainerBuilder, ContainerSize};
 pub use context_menu::{context_menu_menu, context_menu_overlay, ContextMenuBuilder};

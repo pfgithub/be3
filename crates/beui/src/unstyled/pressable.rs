@@ -18,11 +18,10 @@ pub fn pressable(
     on_active_change: Callback<bool>,
 ) -> NodeId {
     let child = children.into_first();
-    let (enabled_read, set_enabled) = create_signal(true);
-    enabled.apply(move |value| set_enabled.set(value));
+    let enabled = enabled.memo();
     let (key_active, set_key_active) = create_signal(false);
     let click = {
-        let enabled = enabled_read.clone();
+        let enabled = enabled.clone();
         move || {
             if untrack(|| enabled.get()) {
                 on_click.call();
@@ -33,7 +32,7 @@ pub fn pressable(
 
     view! {
         <focusable
-            tab_stop={enabled_read}
+            tab_stop={enabled}
             on_focus_change={move |focused| on_focus_change.call(focused)}
             on_activate_change={move |pressed| set_key_active.set(pressed)}
             on_activate={key_click}

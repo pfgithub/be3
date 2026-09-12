@@ -4,8 +4,8 @@ use crate::color::Color32;
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
-    component_detail, create_memo, create_signal, Callback, FillBuilder, OutlineBuilder,
-    PaddingBuilder, Prop, TextBuilder,
+    component_detail, create_memo, Callback, FillBuilder, OutlineBuilder, PaddingBuilder, Prop,
+    TextBuilder,
 };
 use crate::styled::theme::{
     ACCENT, ACCENT_SOFT, BORDER, FONT_BODY, RADIUS, SURFACE, SURFACE_RAISED, TEXT,
@@ -19,8 +19,7 @@ pub fn toggle_button(
     pressed: Prop<bool>,
     on_change: Callback<bool>,
 ) -> NodeId {
-    let (label_text, set_label_text) = create_signal(String::new());
-    label.apply(move |value| set_label_text.set(value));
+    let label_text = label.memo();
     component_detail({
         let label_text = label_text.clone();
         move || label_text.get()

@@ -24,7 +24,7 @@ pub mod unstyled;
 
 #[cfg(feature = "window")]
 pub use app::{run, App};
-pub use base::{Align, Direction, ItemSize, ScrollPosition, TextAlign};
+pub use base::{focus_within, Align, Direction, ItemSize, ScrollPosition, TextAlign};
 pub use color::Color32;
 pub use context::{Context, FrameOutput};
 pub use document::Document;

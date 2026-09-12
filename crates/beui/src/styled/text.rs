@@ -4,7 +4,7 @@ use beui_macros::{component, view};
 
 use crate::base::TextAlign;
 use crate::node::NodeId;
-use crate::reactive::{component_detail, create_signal, Prop, TextBuilder};
+use crate::reactive::{component_detail, Prop, TextBuilder};
 use crate::styled::theme::{
     FONT_BODY, FONT_DISPLAY, FONT_HEADING, FONT_SMALL, FONT_TITLE, ICON_SIZE, TEXT, TEXT_MUTED,
 };
@@ -45,8 +45,7 @@ fn line(
     color: Prop<Color32>,
     #[prop(default = TextAlign::Start)] align: Prop<TextAlign>,
 ) -> NodeId {
-    let (text, set_text) = create_signal(String::new());
-    content.apply(move |value| set_text.set(value));
+    let text = content.memo();
     component_detail({
         let text = text.clone();
         move || format!("{:?}", text.get())
@@ -106,8 +105,7 @@ pub fn paragraph(
     content: Prop<String>,
     #[prop(default = TEXT_MUTED)] color: Prop<Color32>,
 ) -> NodeId {
-    let (text, set_text) = create_signal(String::new());
-    content.apply(move |value| set_text.set(value));
+    let text = content.memo();
     component_detail({
         let text = text.clone();
         move || format!("{:?}", text.get())

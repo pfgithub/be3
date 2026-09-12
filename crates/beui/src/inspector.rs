@@ -121,7 +121,7 @@ impl Inspector {
     #[cfg(test)]
     pub(crate) fn row_node(&self, index: usize) -> NodeId {
         let key = self.entries[index].key;
-        self.rows.borrow()[&key].row
+        self.rows.borrow()[&key].row.get()
     }
 
     #[cfg(test)]

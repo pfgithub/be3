@@ -2,12 +2,11 @@ use beui_macros::{component, view};
 
 use crate::base::{Direction, ItemSize};
 use crate::node::NodeId;
-use crate::reactive::{component_detail, create_memo, create_signal, Children, ListBuilder, Prop};
+use crate::reactive::{component_detail, create_memo, Children, ListBuilder, Prop};
 
 #[component]
 pub fn stack(spacing: Prop<f32>, narrow: Prop<bool>, children: Children) -> NodeId {
-    let (stacked, set_stacked) = create_signal(false);
-    narrow.apply(move |value| set_stacked.set(value));
+    let stacked = narrow.memo();
 
     component_detail({
         let stacked = stacked.clone();

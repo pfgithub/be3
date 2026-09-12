@@ -1,13 +1,12 @@
 use beui_macros::{component, view};
 
-use crate::base::focusable::focus;
 use crate::input::{CursorIcon, KeyPress};
 
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
-    self, component_state, create_signal, set_component_state, untrack, Callback, Children,
-    ClickCallback, ClickCatcherBuilder, FocusableBuilder, Prop, ReadSignal, Render,
+    self, create_signal, set_component_state, untrack, Callback, Children, ClickCallback,
+    ClickCatcherBuilder, FocusableBuilder, Prop, ReadSignal, Render,
 };
 
 pub struct ButtonHandle {
@@ -17,7 +16,6 @@ pub struct ButtonHandle {
 }
 
 struct State {
-    focusable: NodeId,
     active: ReadSignal<bool>,
     focused: ReadSignal<bool>,
 }
@@ -39,8 +37,7 @@ pub fn button(
     let (active, set_active) = create_signal(false);
     let (focused, set_focused) = create_signal(false);
     let (key_active, set_key_active) = create_signal(false);
-    let (disabled_read, set_disabled) = create_signal(false);
-    disabled.apply(move |disabled| set_disabled.set(disabled));
+    let disabled = disabled.memo();
 
     let content_node = match content {
         Some(build) => Some(build.call(ButtonHandle {
@@ -52,7 +49,7 @@ pub fn button(
     };
 
     let click = {
-        let disabled = disabled_read.clone();
+        let disabled = disabled.clone();
         move || {
             if untrack(|| disabled.get()) {
                 return;
@@ -61,12 +58,14 @@ pub fn button(
         }
     };
     let key_click = click.clone();
-    let tab_stop = {
-        let disabled = disabled_read.clone();
-        tab_stop.map(move |tab_stop| tab_stop && !disabled.get())
-    };
+    let tab_stop = tab_stop.map(move |tab_stop| tab_stop && !disabled.get());
 
-    let focusable = view! {
+    set_component_state(State {
+        active: active.clone(),
+        focused: focused.clone(),
+    });
+
+    view! {
         <focusable
             tab_stop={tab_stop}
             focused={focus_request}
@@ -88,15 +87,7 @@ pub fn button(
                 children={content_node.map(reactive::intrinsic)}
             />
         </focusable>
-    };
-
-    set_component_state(State {
-        focusable,
-        active,
-        focused,
-    });
-
-    focusable
+    }
 }
 
 pub fn button_active(document: &Document, button: NodeId) -> ReadSignal<bool> {
@@ -105,12 +96,4 @@ pub fn button_active(document: &Document, button: NodeId) -> ReadSignal<bool> {
 
 pub fn button_focused(document: &Document, button: NodeId) -> ReadSignal<bool> {
     document.component_state::<State>(button).focused.clone()
-}
-
-pub fn focus_button(button: NodeId) {
-    focus(component_state::<State, _>(button, |state| state.focusable));
-}
-
-pub fn button_focusable(document: &Document, button: NodeId) -> NodeId {
-    document.component_state::<State>(button).focusable
 }

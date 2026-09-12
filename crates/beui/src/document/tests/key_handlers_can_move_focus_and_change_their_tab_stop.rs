@@ -19,7 +19,7 @@ fn key_handlers_can_move_focus_and_change_their_tab_stop() {
                                 return false;
                             }
                             set_skipped.set(true);
-                            unstyled::focus_button(target.get());
+                            crate::focus_within(target.get());
                             true
                         }}
                     >

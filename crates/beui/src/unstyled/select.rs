@@ -1,4 +1,4 @@
-use crate::base::overlay::{OverlayAnchor, OverlayBuilder, Placement};
+use crate::base::overlay::{OverlayBuilder, Placement};
 use crate::color::Color32;
 use crate::document::Document;
 use crate::input::{Key, KeyPress};
@@ -155,6 +155,11 @@ pub fn select(
         })
         .collect();
 
+    selected_prop.apply({
+        let state = state.clone();
+        move |selected| apply_requested_selection(&state, selected)
+    });
+
     let reveal = reveal_reader(&state);
     let (open_state, key_state, filter_state, submit_state, navigate_state, dismiss_state) = (
         state.clone(),
@@ -166,7 +171,7 @@ pub fn select(
     );
     let (trigger_blur, search_blur) = (state.clone(), state.clone());
 
-    let root = view! {
+    view! {
         <column spacing={0.0}>
             <unstyled::button
                 node_ref={&state.trigger}
@@ -177,7 +182,7 @@ pub fn select(
                 on_key={move |press: KeyPress| trigger_key(&key_state, press)}
             />
             <overlay
-                anchor={OverlayAnchor::Node(state.trigger.get())}
+                anchor={&state.trigger}
                 placement={Placement::BelowStart}
                 open={is_open.clone()}
                 on_dismiss={move || dismiss(&dismiss_state)}
@@ -210,14 +215,7 @@ pub fn select(
                 })}
             </overlay>
         </column>
-    };
-
-    selected_prop.apply({
-        let state = state.clone();
-        move |selected| apply_requested_selection(&state, selected)
-    });
-
-    root
+    }
 }
 
 #[component]

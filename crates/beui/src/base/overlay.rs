@@ -12,18 +12,25 @@ use beui_macros::{component, view};
 use crate::document::Document;
 use crate::node::{ClickHandler, Element, InteractInput, NodeId};
 use crate::reactive::{
-    with_document, with_reactive_scope, Children, ClickCallback, ClickCatcherBuilder, Prop,
+    with_document, with_reactive_scope, Children, ClickCallback, ClickCatcherBuilder, IntoProp,
+    NodeRef, Prop,
 };
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub(crate) enum OverlayAnchor {
-    Node(NodeId),
+    Node(NodeRef),
     Point(Pos2),
 }
 
 impl Default for OverlayAnchor {
     fn default() -> Self {
         OverlayAnchor::Point(Pos2::ZERO)
+    }
+}
+
+impl IntoProp<OverlayAnchor> for &NodeRef {
+    fn into_prop(self) -> Prop<OverlayAnchor> {
+        Prop::Static(OverlayAnchor::Node(self.clone()))
     }
 }
 
@@ -107,9 +114,12 @@ impl Element for OverlayNode {
         let viewport = doc.viewport_rect();
         crate::layout::layout(doc, painter, self.scrim, viewport, out);
         let content_size = crate::layout::measure(doc, painter, content, viewport.size());
-        let anchor_rect = match self.anchor {
-            OverlayAnchor::Node(id) => out.get(&id).copied().unwrap_or(viewport),
-            OverlayAnchor::Point(pos) => Rect::from_min_size(pos, Vec2::ZERO),
+        let anchor_rect = match &self.anchor {
+            OverlayAnchor::Node(node) => node
+                .try_get()
+                .and_then(|id| out.get(&id).copied())
+                .unwrap_or(viewport),
+            OverlayAnchor::Point(pos) => Rect::from_min_size(*pos, Vec2::ZERO),
         };
         let rect = resolve_rect(viewport, anchor_rect, self.placement, content_size);
         crate::layout::layout(doc, painter, content, rect, out);

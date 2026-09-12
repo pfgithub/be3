@@ -162,6 +162,17 @@ impl Document {
         self.update_focus(Some(focusable));
     }
 
+    pub fn focusables_within(&self, root: NodeId) -> Vec<NodeId> {
+        let mut out = Vec::new();
+        self.collect_focusables(root, &mut out);
+        out
+    }
+
+    pub fn focus_is_within(&self, root: NodeId) -> bool {
+        self.focused
+            .is_some_and(|focused| self.focusables_within(root).contains(&focused))
+    }
+
     pub(crate) fn focus_next(&mut self) {
         self.move_focus(1);
     }
@@ -343,8 +354,15 @@ impl Document {
     }
 }
 
-pub(crate) fn focus(focusable: NodeId) {
-    with_document(|document| document.focus_focusable(focusable));
+pub fn focus_within(node: NodeId) {
+    with_document(|document| {
+        let focusable = document
+            .focusables_within(node)
+            .first()
+            .copied()
+            .expect("focus_within needs a focusable inside the node it is given");
+        document.focus_focusable(focusable);
+    });
 }
 
 #[component(base)]

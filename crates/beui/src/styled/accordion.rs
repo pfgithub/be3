@@ -6,8 +6,8 @@ use crate::base::TextAlign;
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
-    component_detail, create_memo, create_signal, Callback, CenteredRowBuilder, Children,
-    FillBuilder, OutlineBuilder, PaddingBuilder, Prop, ReadSignal, SizedBuilder, TextBuilder,
+    component_detail, create_memo, Callback, CenteredRowBuilder, Children, FillBuilder, Memo,
+    OutlineBuilder, PaddingBuilder, Prop, SizedBuilder, TextBuilder,
 };
 use crate::styled::theme::{
     ACCENT, FONT_HEADING, FONT_SMALL, RADIUS, SURFACE_RAISED, TEXT, TEXT_MUTED,
@@ -31,8 +31,7 @@ pub fn accordion(
         .into_first()
         .expect("accordion requires a child, e.g. <accordion>{content}</accordion>");
 
-    let (title_text, set_title_text) = create_signal(String::new());
-    title.apply(move |value| set_title_text.set(value));
+    let title_text = title.memo();
     component_detail({
         let title_text = title_text.clone();
         move || title_text.get()
@@ -51,7 +50,7 @@ pub fn accordion(
 }
 
 #[component]
-fn accordion_header(handle: DisclosureHandle, title: ReadSignal<String>) -> NodeId {
+fn accordion_header(handle: DisclosureHandle, title: Memo<String>) -> NodeId {
     let DisclosureHandle {
         hovered,
         open,

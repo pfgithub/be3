@@ -1,4 +1,4 @@
-use crate::base::overlay::{OverlayAnchor, OverlayBuilder, Placement};
+use crate::base::overlay::{OverlayBuilder, Placement};
 use crate::document::Document;
 use crate::input::{Key, KeyPress};
 use crate::node::NodeId;
@@ -69,7 +69,6 @@ impl MenuParent {
 struct Submenu {
     open: ReadSignal<bool>,
     set_open: WriteSignal<bool>,
-    overlay: NodeRef,
     content: NodeRef,
 }
 
@@ -101,7 +100,14 @@ pub(crate) fn menu_list(
 ) -> NodeId {
     let row = row.expect("menu_list requires a `row` builder");
     let panel = panel.expect("menu_list requires a `panel` builder");
-    let (focus, set_focus) = create_signal(Focus::Away);
+    let entry = if focus_first && !items.is_empty() {
+        Focus::Row(0)
+    } else {
+        Focus::Root
+    };
+    let (focus, set_focus) = active
+        .map(move |active| if active { entry } else { Focus::Away })
+        .signal();
     let focused = create_selector({
         let focus = focus.clone();
         move || focus.get()
@@ -122,7 +128,6 @@ pub(crate) fn menu_list(
                     Submenu {
                         open,
                         set_open,
-                        overlay: NodeRef::new(),
                         content: NodeRef::new(),
                     }
                 }),
@@ -134,16 +139,6 @@ pub(crate) fn menu_list(
         on_select,
     });
     set_component_state(state.clone());
-
-    let entry = if focus_first && !state.rows.is_empty() {
-        Focus::Row(0)
-    } else {
-        Focus::Root
-    };
-    active.apply({
-        let set_focus = set_focus.clone();
-        move |active| set_focus.set(if active { entry } else { Focus::Away })
-    });
 
     let lines: Vec<_> = items
         .iter()
@@ -255,8 +250,7 @@ fn menu_row(
                 })));
                 view! {
                     <overlay
-                        node_ref={&submenu.overlay}
-                        anchor={OverlayAnchor::Node(button.get())}
+                        anchor={&button}
                         placement={Placement::RightStart}
                         open={submenu.open.clone()}
                         on_dismiss={move || dismiss.set(false)}

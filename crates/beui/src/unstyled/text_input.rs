@@ -98,7 +98,16 @@ pub fn text_input(
         move || detail(&text_value.get())
     });
 
-    let root = view! {
+    value.apply({
+        let editor = editor.clone();
+        move |value| {
+            if text_of(&editor.borrow().core) != value {
+                replace_all(&editor, value);
+            }
+        }
+    });
+
+    view! {
         <focusable
             focused={focus_request}
             on_focus_change={{
@@ -164,18 +173,7 @@ pub fn text_input(
                 }}
             </click_catcher>
         </focusable>
-    };
-
-    value.apply({
-        let editor = editor.clone();
-        move |value| {
-            if text_of(&editor.borrow().core) != value {
-                replace_all(&editor, value);
-            }
-        }
-    });
-
-    root
+    }
 }
 
 fn shown_string(value: &ReadSignal<String>, placeholder: Prop<String>) -> Memo<String> {
@@ -291,8 +289,8 @@ fn insert(editor: &Handle, typed: &str) {
 
 fn point(editor: &Handle, press: PointerPress) {
     let index = {
-        let text = editor.borrow().text.get();
-        text_index_at(text, press.pos)
+        let text = editor.borrow().text.clone();
+        text_index_at(&text, press.pos)
     };
     let position = editor.borrow().core.position(index);
     let dragging = press.clicks < ALL_CLICKS;
@@ -323,9 +321,9 @@ fn extend(editor: &Handle, press: PointerPress) {
         if !state.dragging {
             return;
         }
-        state.text.get()
+        state.text.clone()
     };
-    let index = text_index_at(text, press.pos);
+    let index = text_index_at(&text, press.pos);
     let position = editor.borrow().core.position(index);
     command(editor, EditorCommand::Drag(position));
 }

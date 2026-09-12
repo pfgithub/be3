@@ -376,16 +376,8 @@ fn controls(rows: Rows) -> NodeId {
 fn control_panels(rows: Rows) -> NodeId {
     let (selected_tab, set_selected_tab) = create_signal(0usize);
 
+    let tab = create_selector(move || selected_tab.get());
     let list_rows = rows.clone();
-    let list_tab = selected_tab.clone();
-    let load_tab = selected_tab.clone();
-    let name_tab = selected_tab.clone();
-    let choices_tab = selected_tab.clone();
-    let list_condition = create_memo(move || list_tab.get() == 0);
-    let load_condition = create_memo(move || load_tab.get() == 1);
-    let name_condition = create_memo(move || name_tab.get() == 2);
-    let choices_condition = create_memo(move || choices_tab.get() == 3);
-    let menus_condition = create_memo(move || selected_tab.get() == 4);
 
     view! {
         <column spacing={16.0}>
@@ -398,11 +390,11 @@ fn control_panels(rows: Rows) -> NodeId {
                 }}
             />
             <column spacing={0.0}>
-                <show condition={list_condition} then={move || view! { <list_controls rows={list_rows} /> }} />
-                <show condition={load_condition} then={|| view! { <load_controls /> }} />
-                <show condition={name_condition} then={|| view! { <name_controls /> }} />
-                <show condition={choices_condition} then={|| view! { <choice_controls /> }} />
-                <show condition={menus_condition} then={|| view! { <menu_controls /> }} />
+                <show condition={tab.memo(0)} then={move || view! { <list_controls rows={list_rows} /> }} />
+                <show condition={tab.memo(1)} then={|| view! { <load_controls /> }} />
+                <show condition={tab.memo(2)} then={|| view! { <name_controls /> }} />
+                <show condition={tab.memo(3)} then={|| view! { <choice_controls /> }} />
+                <show condition={tab.memo(4)} then={|| view! { <menu_controls /> }} />
             </column>
         </column>
     }

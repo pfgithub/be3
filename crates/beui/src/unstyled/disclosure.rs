@@ -3,8 +3,8 @@ use beui_macros::{component, view};
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
-    component_detail, create_signal, set_component_state, untrack, Callback, Children,
-    ColumnBuilder, Prop, ReadSignal, Render, VisibilityBuilder,
+    component_detail, set_component_state, untrack, Callback, Children, ColumnBuilder, Prop,
+    ReadSignal, Render, VisibilityBuilder,
 };
 use crate::unstyled;
 use crate::unstyled::button::ButtonHandle;
@@ -32,21 +32,21 @@ pub fn disclosure(
         .into_first()
         .expect("disclosure requires content, e.g. <unstyled::disclosure>{intrinsic(node)}</unstyled::disclosure>");
 
-    let (open_read, set_open) = create_signal(false);
-    open.apply({
-        let set_open = set_open.clone();
-        move |value| set_open.set(value)
-    });
+    let (open_read, set_open) = open.signal();
 
     component_detail({
         let open = open_read.clone();
         move || if open.get() { "open" } else { "closed" }.to_owned()
     });
 
+    set_component_state(State {
+        open: open_read.clone(),
+    });
+
     let open_for_header = open_read.clone();
     let open_for_click = open_read.clone();
 
-    let root = view! {
+    view! {
         <column spacing={spacing}>
             <unstyled::button
                 on_click={move || {
@@ -63,13 +63,9 @@ pub fn disclosure(
                     })
                 }}
             />
-            <visibility visible={open_read.clone()}>{content}</visibility>
+            <visibility visible={open_read}>{content}</visibility>
         </column>
-    };
-
-    set_component_state(State { open: open_read });
-
-    root
+    }
 }
 
 pub fn disclosure_open(document: &Document, disclosure: NodeId) -> bool {

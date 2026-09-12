@@ -193,16 +193,14 @@ pub fn set_component_state<T: 'static>(state: T) {
     });
 }
 
-pub fn component_state<T: 'static, R>(shadow: NodeId, read: impl FnOnce(&T) -> R) -> R {
-    with_document(|document| read(document.component_state::<T>(shadow)))
-}
-
-pub fn component_state_mut<T: 'static, R>(shadow: NodeId, write: impl FnOnce(&mut T) -> R) -> R {
-    with_document(|document| write(document.component_state_mut::<T>(shadow)))
-}
-
 #[derive(Clone, Default)]
 pub struct NodeRef(Rc<Cell<Option<NodeId>>>);
+
+impl PartialEq for NodeRef {
+    fn eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.0, &other.0)
+    }
+}
 
 impl NodeRef {
     pub fn new() -> Self {
@@ -467,6 +465,24 @@ impl<T: 'static> Prop<T> {
             Prop::Static(value) => Box::new(move || value.clone()),
             Prop::Dynamic(read) => read,
         }
+    }
+
+    pub fn memo(self) -> Memo<T>
+    where
+        T: Clone + PartialEq,
+    {
+        let read = self.reader();
+        create_memo(read)
+    }
+
+    pub fn signal(self) -> (ReadSignal<T>, WriteSignal<T>)
+    where
+        T: Clone + PartialEq,
+    {
+        let (read, write) = create_signal(self.peek());
+        let sink = write.clone();
+        self.apply(move |value| sink.set(value));
+        (read, write)
     }
 
     pub fn map<U: 'static>(self, f: impl Fn(T) -> U + 'static) -> Prop<U> {

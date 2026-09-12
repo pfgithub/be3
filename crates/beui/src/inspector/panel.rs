@@ -48,7 +48,7 @@ pub(crate) struct Summary {
 
 pub(crate) struct Row {
     #[cfg(test)]
-    pub(crate) row: NodeId,
+    pub(crate) row: NodeRef,
     #[cfg(test)]
     pub(crate) marker: NodeRef,
 }
@@ -228,10 +228,24 @@ fn tree_row(row_key: Key, entries: Entries, state: Rc<State>, rows: Rows) -> Nod
         move || glyph(expandable.get(), expanded.get()).to_owned()
     });
 
-    let marker = NodeRef::new();
+    let (row, marker) = (NodeRef::new(), NodeRef::new());
+    rows.borrow_mut().insert(
+        key,
+        Row {
+            #[cfg(test)]
+            row: row.clone(),
+            #[cfg(test)]
+            marker: marker.clone(),
+        },
+    );
+    on_cleanup(move || {
+        rows.borrow_mut().remove(&key);
+    });
+
     let (hover, selection, expansion) = (state.clone(), state.clone(), state);
-    let row = view! {
+    view! {
         <click_catcher
+            node_ref={&row}
             cursor={CursorIcon::PointingHand}
             on_click={move || selection.select(node)}
             on_hover_change={move |hovered| hover.hover(node, hovered)}
@@ -262,22 +276,7 @@ fn tree_row(row_key: Key, entries: Entries, state: Rc<State>, rows: Rows) -> Nod
                 </list_row>
             </outline>
         </click_catcher>
-    };
-
-    rows.borrow_mut().insert(
-        key,
-        Row {
-            #[cfg(test)]
-            row,
-            #[cfg(test)]
-            marker,
-        },
-    );
-    on_cleanup(move || {
-        rows.borrow_mut().remove(&key);
-    });
-
-    row
+    }
 }
 
 fn glyph(expandable: bool, expanded: bool) -> &'static str {

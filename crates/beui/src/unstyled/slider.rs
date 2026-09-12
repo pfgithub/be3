@@ -25,11 +25,7 @@ pub fn slider(
     on_drag_change: Callback<bool>,
     on_focus_change: Callback<bool>,
 ) -> NodeId {
-    let (value_read, set_value_signal) = create_signal(0.0);
-    value.apply({
-        let set_value_signal = set_value_signal.clone();
-        move |value| set_value_signal.set(value.clamp(0.0, 1.0))
-    });
+    let (value_read, set_value_signal) = value.map(|value| value.clamp(0.0, 1.0)).signal();
     let (dragging, set_dragging) = create_signal(false);
     let (focused, set_focused) = create_signal(false);
 
@@ -63,7 +59,7 @@ pub fn slider(
 
     set_component_state(value_read.clone());
 
-    let focusable = view! {
+    view! {
         <focusable
             on_focus_change={move |focused: bool| {
                 set_focused.set(focused);
@@ -100,9 +96,7 @@ pub fn slider(
                 children={content_node.map(reactive::intrinsic)}
             />
         </focusable>
-    };
-
-    focusable
+    }
 }
 
 pub fn slider_value(document: &Document, slider: NodeId) -> ReadSignal<f32> {

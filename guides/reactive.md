@@ -185,6 +185,15 @@ let fill = create_memo(move || if hovered.get() { HOVER } else { REST });
 view! { <fill color={fill} radius={RADIUS}>{child}</fill> }
 ```
 
+A component that has to *read* one of its own `Prop<T>`s calls `memo()` on it,
+which turns either form into a `Memo<T>` it can read and pass on. When the
+component also writes that value itself — a toggle whose `checked` prop seeds
+state that clicking then changes — `signal()` returns a `(ReadSignal<T>,
+WriteSignal<T>)` pair seeded from the prop and kept in sync with it, so writes
+from the component's own handlers and writes from the caller's signal both land
+in one place. Use `map` first when the value needs adjusting on the way in:
+`value.map(|value| value.clamp(0.0, 1.0)).signal()`.
+
 Props that build part of the tree are typed `Render<H>` when the component calls
 them once, `RenderFn<H>` when it may call them many times, and `Option<..>` when
 they have a default. Their setters take a bare closure, so a component hands
@@ -210,10 +219,10 @@ built `Render`/`RenderFn`/`Func`, which is how a component forwards one it was
 given.
 
 State a component keeps for its own handlers belongs in an `Rc` the handlers
-capture; `set_component_state` additionally publishes it so that code outside
-the tree (a test, or a sibling component holding its `NodeId`) can read it back
-with `component_state`. Prefer the capture: reaching for a `NodeId` to find
-state again is a sign the value should have been captured or passed as a prop.
+capture; `set_component_state` additionally publishes it so that a test holding
+the component's `NodeId` can read it back with `Document::component_state`. That
+is the only reader: inside the tree, reaching for a `NodeId` to find state again
+is a sign the value should have been captured or passed as a prop.
 
 ## Controlled state
 

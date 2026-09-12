@@ -40,17 +40,14 @@ fn tab_is_trapped_inside_an_open_context_menu() {
     let inner = harness.document().shadow_root(menu);
     let content = unstyled::context_menu_menu(harness.document(), inner);
     let root_focusable = unstyled::menu_list_root_focusable(harness.document(), content);
-    let before_focusable = unstyled::button_focusable(harness.document(), before);
-    let after_focusable = unstyled::button_focusable(harness.document(), after);
 
     assert_eq!(harness.document().focused_node(), Some(root_focusable));
 
     for _ in 0..3 {
         harness.key(Key::Tab, Modifiers::NONE);
         harness.frame(Vec::new());
-        let focused = harness.document().focused_node();
-        assert_eq!(focused, Some(root_focusable));
-        assert_ne!(focused, Some(before_focusable));
-        assert_ne!(focused, Some(after_focusable));
+        assert_eq!(harness.document().focused_node(), Some(root_focusable));
+        assert!(!harness.document().focus_is_within(before));
+        assert!(!harness.document().focus_is_within(after));
     }
 }

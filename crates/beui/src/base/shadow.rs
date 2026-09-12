@@ -214,15 +214,6 @@ impl Document {
             .unwrap_or_else(|| panic!("component has no {} state", std::any::type_name::<T>()))
     }
 
-    pub fn component_state_mut<T: 'static>(&mut self, shadow: NodeId) -> &mut T {
-        self.arena
-            .get_mut_as::<ShadowNode>(shadow)
-            .state
-            .as_mut()
-            .and_then(|state| state.downcast_mut::<T>())
-            .unwrap_or_else(|| panic!("component has no {} state", std::any::type_name::<T>()))
-    }
-
     pub(crate) fn as_shadow(&self, id: NodeId) -> Option<&ShadowNode> {
         self.arena.get(id).as_any().downcast_ref::<ShadowNode>()
     }

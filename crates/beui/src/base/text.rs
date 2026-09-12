@@ -11,7 +11,7 @@ use crate::painter::Painter;
 
 use crate::document::Document;
 use crate::node::{Element, InteractInput, NodeId};
-use crate::reactive::{with_document, Prop};
+use crate::reactive::{with_document, NodeRef, Prop};
 
 use beui_macros::component;
 
@@ -350,7 +350,8 @@ impl Document {
     }
 }
 
-pub fn text_index_at(text: NodeId, pos: Pos2) -> usize {
+pub fn text_index_at(text: &NodeRef, pos: Pos2) -> usize {
+    let text = text.get();
     with_document(|document| document.text_index_at(text, pos))
 }
 

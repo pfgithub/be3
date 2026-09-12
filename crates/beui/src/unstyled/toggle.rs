@@ -22,11 +22,7 @@ pub fn toggle(
     content: Option<Render<ToggleHandle>>,
     on_change: Callback<bool>,
 ) -> NodeId {
-    let (checked_read, set_checked) = create_signal(false);
-    checked.apply({
-        let set_checked = set_checked.clone();
-        move |value| set_checked.set(value)
-    });
+    let (checked_read, set_checked) = checked.signal();
     let (hovered, set_hovered) = create_signal(false);
     let (active, set_active) = create_signal(false);
     let (focused, set_focused) = create_signal(false);
@@ -58,7 +54,7 @@ pub fn toggle(
 
     set_component_state(checked_read.clone());
 
-    let focusable = view! {
+    view! {
         <focusable
             on_focus_change={move |focused: bool| set_focused.set(focused)}
             on_activate_change={move |pressed: bool| set_key_active.set(pressed)}
@@ -73,9 +69,7 @@ pub fn toggle(
                 children={content_node.map(reactive::intrinsic)}
             />
         </focusable>
-    };
-
-    focusable
+    }
 }
 
 pub fn toggle_checked(document: &Document, toggle: NodeId) -> ReadSignal<bool> {

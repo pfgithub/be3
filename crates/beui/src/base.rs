@@ -11,6 +11,7 @@ pub(crate) mod sized;
 pub(crate) mod text;
 pub(crate) mod visibility;
 
+pub use focusable::focus_within;
 pub use list::{Align, Direction, ItemSize};
 pub use scroll::ScrollPosition;
 pub use text::{text_index_at, TextAlign};
