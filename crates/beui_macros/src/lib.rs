@@ -565,16 +565,16 @@ pub fn component(attr: TokenStream, item: TokenStream) -> TokenStream {
         #(#attrs)*
         #vis struct #builder_ident #generics #where_clause {
             #(#fields,)*
-            test_id: Option<String>,
-            node_ref: Option<::beui::reactive::NodeRef>,
+            with_test_id: Option<String>,
+            with_node_ref: Option<::beui::reactive::NodeRef>,
         }
 
         impl #generics ::core::default::Default for #builder_ident #generics #where_clause {
             fn default() -> Self {
                 Self {
                     #(#prop_idents: ::core::default::Default::default(),)*
-                    test_id: None,
-                    node_ref: None,
+                    with_test_id: None,
+                    with_node_ref: None,
                 }
             }
         }
@@ -584,20 +584,20 @@ pub fn component(attr: TokenStream, item: TokenStream) -> TokenStream {
 
             #children_methods
 
-            pub fn test_id(mut self, value: impl Into<String>) -> Self {
-                self.test_id = Some(value.into());
+            pub fn with_test_id(mut self, value: impl Into<String>) -> Self {
+                self.with_test_id = Some(value.into());
                 self
             }
 
-            pub fn node_ref(mut self, value: &::beui::reactive::NodeRef) -> Self {
-                self.node_ref = Some(value.clone());
+            pub fn with_node_ref(mut self, value: &::beui::reactive::NodeRef) -> Self {
+                self.with_node_ref = Some(value.clone());
                 self
             }
 
             #[track_caller]
             pub fn build(self) #output {
-                let test_id = self.test_id;
-                let node_ref = self.node_ref;
+                let test_id = self.with_test_id;
+                let node_ref = self.with_node_ref;
                 #(#field_lets)*
                 let node = #finish;
                 if let Some(test_id) = test_id {
@@ -713,39 +713,39 @@ impl Parse for ViewAttr {
     }
 }
 
-enum ViewSizing {
-    Intrinsic,
-    Fixed(Expr),
-    Percent(Expr),
-    Size(Expr),
+const SPECIAL_NAMES: &str = "`@sizing`, `@node_ref`, `@test_id`";
+
+enum Special {
+    Sizing,
+    Setter(&'static str),
 }
 
-impl Parse for ViewSizing {
-    fn parse(input: ParseStream) -> syn::Result<Self> {
-        let ident: Ident = input.parse()?;
-        match ident.to_string().as_str() {
-            "intrinsic" => Ok(ViewSizing::Intrinsic),
-            "fixed" => {
-                let args;
-                parenthesized!(args in input);
-                Ok(ViewSizing::Fixed(args.parse()?))
-            }
-            "percent" => {
-                let args;
-                parenthesized!(args in input);
-                Ok(ViewSizing::Percent(args.parse()?))
-            }
-            "size" => {
-                let args;
-                parenthesized!(args in input);
-                Ok(ViewSizing::Size(args.parse()?))
-            }
-            other => Err(syn::Error::new(
-                ident.span(),
-                format!("unknown sizing `@{other}`, expected `@intrinsic`, `@fixed(size)`, `@percent(weight)`, or `@size(item_size)`"),
-            )),
-        }
+fn special_kind(name: &Ident) -> syn::Result<Special> {
+    match name.to_string().as_str() {
+        "sizing" => Ok(Special::Sizing),
+        "node_ref" => Ok(Special::Setter("with_node_ref")),
+        "test_id" => Ok(Special::Setter("with_test_id")),
+        other => Err(syn::Error::new(
+            name.span(),
+            format!("unknown special prop `@{other}`, expected one of {SPECIAL_NAMES}"),
+        )),
     }
+}
+
+fn reserved_plain_prop(name: &Ident) -> syn::Result<()> {
+    let name_str = name.to_string();
+    if matches!(name_str.as_str(), "node_ref" | "test_id") {
+        return Err(syn::Error::new(
+            name.span(),
+            format!("`{name_str}` is a framework slot rather than a prop, write `@{name_str}=...`"),
+        ));
+    }
+    Ok(())
+}
+
+struct ViewSizing {
+    span: proc_macro2::Span,
+    value: Expr,
 }
 
 enum ViewChildKind {
@@ -754,21 +754,11 @@ enum ViewChildKind {
 }
 
 struct ViewChild {
-    sizing: Option<ViewSizing>,
-    sizing_span: proc_macro2::Span,
     kind: ViewChildKind,
 }
 
 impl Parse for ViewChild {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        let mut sizing_span = input.span();
-        let sizing = if input.peek(Token![@]) {
-            sizing_span = input.parse::<Token![@]>()?.span;
-            Some(input.parse()?)
-        } else {
-            None
-        };
-
         let kind = if input.peek(Token![<]) {
             ViewChildKind::Node(input.parse()?)
         } else {
@@ -777,17 +767,15 @@ impl Parse for ViewChild {
             ViewChildKind::Expr(content.parse()?)
         };
 
-        Ok(ViewChild {
-            sizing,
-            sizing_span,
-            kind,
-        })
+        Ok(ViewChild { kind })
     }
 }
 
 struct ViewNode {
     tag_path: Vec<Ident>,
     props: Vec<ViewAttr>,
+    specials: Vec<ViewAttr>,
+    sizing: Option<ViewSizing>,
     children: Option<Vec<ViewChild>>,
 }
 
@@ -814,8 +802,32 @@ impl Parse for ViewNode {
         let tag_path = parse_tag_path(input)?;
 
         let mut props = Vec::new();
+        let mut specials = Vec::new();
+        let mut sizing = None;
         while !input.peek(Token![>]) && !input.peek(Token![/]) {
-            props.push(input.parse::<ViewAttr>()?);
+            if input.peek(Token![@]) {
+                let at = input.parse::<Token![@]>()?;
+                let attr = input.parse::<ViewAttr>()?;
+                match special_kind(&attr.key)? {
+                    Special::Sizing => {
+                        if sizing.is_some() {
+                            return Err(syn::Error::new(at.span, "duplicate `@sizing`"));
+                        }
+                        sizing = Some(ViewSizing {
+                            span: at.span,
+                            value: attr.value,
+                        });
+                    }
+                    Special::Setter(method) => specials.push(ViewAttr {
+                        key: format_ident!("{}", method, span = attr.key.span()),
+                        value: attr.value,
+                    }),
+                }
+                continue;
+            }
+            let attr = input.parse::<ViewAttr>()?;
+            reserved_plain_prop(&attr.key)?;
+            props.push(attr);
         }
 
         if input.peek(Token![/]) {
@@ -824,6 +836,8 @@ impl Parse for ViewNode {
             return Ok(ViewNode {
                 tag_path,
                 props,
+                specials,
+                sizing,
                 children: None,
             });
         }
@@ -850,6 +864,8 @@ impl Parse for ViewNode {
         Ok(ViewNode {
             tag_path,
             props,
+            specials,
+            sizing,
             children: Some(children),
         })
     }
@@ -859,22 +875,15 @@ fn expand_child_items(children: &[ViewChild]) -> Vec<proc_macro2::TokenStream> {
     children
         .iter()
         .map(|child| {
-            let node = match &child.kind {
-                ViewChildKind::Node(node) => expand_view_node(node),
-                ViewChildKind::Expr(expr) => quote! { #expr },
+            let (node, sizing) = match &child.kind {
+                ViewChildKind::Node(node) => (expand_view_node(node), node.sizing.as_ref()),
+                ViewChildKind::Expr(expr) => (quote! { #expr }, None),
             };
-            match &child.sizing {
-                None | Some(ViewSizing::Intrinsic) => {
-                    quote! { ::beui::reactive::intrinsic(#node) }
-                }
-                Some(ViewSizing::Fixed(size)) => {
-                    quote! { ::beui::reactive::fixed(#node, #size) }
-                }
-                Some(ViewSizing::Percent(weight)) => {
-                    quote! { ::beui::reactive::percent(#node, #weight) }
-                }
-                Some(ViewSizing::Size(size)) => {
-                    quote! { ::beui::reactive::size(#node, #size) }
+            match sizing {
+                None => quote! { ::beui::reactive::intrinsic(#node) },
+                Some(sizing) => {
+                    let value = &sizing.value;
+                    quote! { ::beui::reactive::size(#node, #value) }
                 }
             }
         })
@@ -894,20 +903,23 @@ fn expand_view_node(node: &ViewNode) -> proc_macro2::TokenStream {
     } else {
         quote! { #(#segments::)* #builder_name }
     };
-    let setters = node.props.iter().map(|prop| {
-        let key = &prop.key;
-        let value = &prop.value;
-        quote! { .#key(#value) }
-    });
+    let setters = node
+        .props
+        .iter()
+        .chain(node.specials.iter())
+        .map(|prop| {
+            let key = &prop.key;
+            let value = &prop.value;
+            quote! { .#key(#value) }
+        })
+        .collect::<Vec<_>>();
 
     match &node.children {
         None => quote! { #builder_path::default() #(#setters)* .build() },
         Some(children) => {
             let tag = last.span();
             if let [ViewChild {
-                sizing: None,
                 kind: ViewChildKind::Expr(Expr::Closure(closure)),
-                ..
             }] = children.as_slice()
             {
                 let children_render = format_ident!("children_render", span = tag);
@@ -941,10 +953,14 @@ impl Parse for View {
 
 fn expand_view(view: &View) -> proc_macro2::TokenStream {
     if let [root] = view.roots.as_slice() {
-        if root.sizing.is_some() {
+        if let ViewChildKind::Node(ViewNode {
+            sizing: Some(sizing),
+            ..
+        }) = &root.kind
+        {
             return syn::Error::new(
-                root.sizing_span,
-                "a sizing prefix gives a child its share of its siblings' space, and a `view!` with one root builds that node on its own; write the sizing where the node is used as a child",
+                sizing.span,
+                "`@sizing` gives a child its share of its siblings' space, and a `view!` with one root builds that node on its own; write the sizing where the node is used as a child",
             )
             .to_compile_error();
         }

@@ -21,8 +21,9 @@ pub enum Align {
     Stretch,
 }
 
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, PartialEq, Debug, Default)]
 pub enum ItemSize {
+    #[default]
     Intrinsic,
     Fixed(f32),
     Percent(f32),

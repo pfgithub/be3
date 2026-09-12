@@ -4,7 +4,9 @@ use std::collections::HashMap;
 use std::hash::Hash;
 use std::rc::Rc;
 
-use crate::base::{Align, Direction, ItemSize};
+pub use crate::base::ItemSize;
+
+use crate::base::{Align, Direction};
 use crate::color::Color32;
 use crate::document::Document;
 use crate::geometry::Vec2;
