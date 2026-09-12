@@ -199,6 +199,13 @@ from the component's own handlers and writes from the caller's signal both land
 in one place. Use `map` first when the value needs adjusting on the way in:
 `value.map(|value| value.clamp(0.0, 1.0)).signal()`.
 
+A component's child arity is part of its signature. A prop named `children`
+typed `Children` takes however many are written between its tags; typed `Child`
+it takes exactly one and arrives as the `NodeId` itself, so wrappers use
+`{children}` in their `view!` without unwrapping, and a caller who writes none
+gets a panic naming the component. `Option<Child>` is the same for a wrapper
+whose child is optional, like `fill` or a `button` that takes `content` instead.
+
 Props that build part of the tree are typed `Render<H>` when the component calls
 them once, `RenderFn<H>` when it may call them many times, and `Option<..>` when
 they have a default. Their setters take a bare closure, so a component hands

@@ -6,7 +6,7 @@ use crate::painter::Painter;
 
 use crate::document::Document;
 use crate::node::{Element, InteractInput, NodeId};
-use crate::reactive::{with_document, Children, Prop};
+use crate::reactive::{with_document, Child, Prop};
 
 use beui_macros::component;
 
@@ -134,13 +134,10 @@ impl Document {
 }
 
 #[component(base)]
-pub fn sized(width: Option<Prop<f32>>, height: Option<Prop<f32>>, children: Children) -> NodeId {
-    let child = children
-        .into_first()
-        .expect("sized requires a child, e.g. <sized>{content}</sized>");
+pub fn sized(width: Option<Prop<f32>>, height: Option<Prop<f32>>, children: Child) -> NodeId {
     let sized = with_document(|document| {
         let sized = document.create_sized(None, None);
-        document.set_sized_child(sized, child);
+        document.set_sized_child(sized, children);
         sized
     });
     if let Some(width) = width {

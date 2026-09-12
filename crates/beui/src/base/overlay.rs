@@ -12,7 +12,7 @@ use beui_macros::{component, view};
 use crate::document::Document;
 use crate::node::{ClickHandler, Element, InteractInput, NodeId};
 use crate::reactive::{
-    with_document, with_reactive_scope, Children, ClickCallback, ClickCatcherBuilder, IntoProp,
+    with_document, with_reactive_scope, Child, ClickCallback, ClickCatcherBuilder, IntoProp,
     NodeRef, Prop,
 };
 
@@ -180,9 +180,9 @@ pub(crate) fn overlay(
     #[prop(default = Placement::BelowStart)] placement: Prop<Placement>,
     open: Prop<bool>,
     on_dismiss: ClickCallback,
-    children: Children,
+    children: Option<Child>,
 ) -> NodeId {
-    let content = children.into_first();
+    let content = children;
     let overlay = with_document(|document| {
         let overlay = document.create_overlay(anchor.peek(), Placement::BelowStart);
         if let Some(content) = content {

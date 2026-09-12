@@ -6,7 +6,7 @@ use crate::painter::Painter;
 
 use crate::document::Document;
 use crate::node::{Element, InteractInput, NodeId};
-use crate::reactive::{create_effect, create_signal, with_document, Children, Prop};
+use crate::reactive::{create_effect, create_signal, with_document, Child, Prop};
 
 use beui_macros::component;
 
@@ -116,13 +116,10 @@ impl Document {
 }
 
 #[component(base)]
-pub fn padding(horizontal: Prop<f32>, vertical: Prop<f32>, children: Children) -> NodeId {
-    let child = children
-        .into_first()
-        .expect("padding requires a child, e.g. <padding>{content}</padding>");
+pub fn padding(horizontal: Prop<f32>, vertical: Prop<f32>, children: Child) -> NodeId {
     let padding = with_document(|document| {
         let padding = document.create_padding(0.0, 0.0);
-        document.set_padding_child(padding, child);
+        document.set_padding_child(padding, children);
         padding
     });
     let (horizontal_read, set_horizontal) = create_signal(0.0);

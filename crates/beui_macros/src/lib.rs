@@ -19,6 +19,8 @@ struct Prop {
     func_args: Option<Vec<Type>>,
     optional_func_args: Option<Vec<Type>>,
     is_children: bool,
+    is_child: bool,
+    is_optional_child: bool,
     callback_args: Option<Vec<Type>>,
     is_click_callback: bool,
     default: Option<Expr>,
@@ -229,6 +231,10 @@ pub fn component(attr: TokenStream, item: TokenStream) -> TokenStream {
             let optional_render = inner_ty.as_ref().and_then(render_kind);
             let optional_func_args = inner_ty.as_ref().and_then(func_args);
             let is_children = is_named_type(ty, "Children");
+            let is_child = is_named_type(ty, "Child");
+            let is_optional_child = inner_ty
+                .as_ref()
+                .is_some_and(|inner| is_named_type(inner, "Child"));
             Prop {
                 ident,
                 ty: (**ty).clone(),
@@ -240,6 +246,8 @@ pub fn component(attr: TokenStream, item: TokenStream) -> TokenStream {
                 func_args: func_args(ty),
                 optional_func_args,
                 is_children,
+                is_child,
+                is_optional_child,
                 callback_args: generic_args(ty, "Callback"),
                 is_click_callback: is_named_type(ty, "ClickCallback"),
                 default,
@@ -259,6 +267,19 @@ pub fn component(attr: TokenStream, item: TokenStream) -> TokenStream {
             quote! {
                 pub fn #ident(mut self, children: impl Into<::beui::reactive::Children>) -> Self {
                     self.#ident = Some(children.into());
+                    self
+                }
+            }
+        } else if prop.is_child || prop.is_optional_child {
+            let stored = if prop.is_optional_child {
+                quote! { Some(children.only()) }
+            } else {
+                quote! { children.only() }
+            };
+            quote! {
+                pub fn #ident(mut self, children: impl Into<::beui::reactive::Children>) -> Self {
+                    let children: ::beui::reactive::Children = children.into();
+                    self.#ident = #stored;
                     self
                 }
             }
@@ -328,6 +349,12 @@ pub fn component(attr: TokenStream, item: TokenStream) -> TokenStream {
             quote! { self.#ident.unwrap_or(None) }
         } else if prop.is_children {
             quote! { self.#ident.unwrap_or_default() }
+        } else if prop.is_child {
+            quote! {
+                self.#ident.unwrap_or_else(|| {
+                    panic!("component `{}` requires exactly one child", #name)
+                })
+            }
         } else if let Some(default) = &prop.default {
             if prop.reactive_inner_ty.is_some() {
                 quote! {

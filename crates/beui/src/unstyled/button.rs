@@ -5,7 +5,7 @@ use crate::input::{CursorIcon, KeyPress};
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
-    self, create_signal, set_component_state, untrack, Callback, Children, ClickCallback,
+    self, create_signal, set_component_state, untrack, Callback, Child, ClickCallback,
     ClickCatcherBuilder, FocusableBuilder, Prop, ReadSignal, Render,
 };
 
@@ -22,7 +22,7 @@ struct State {
 
 #[component]
 pub fn button(
-    children: Children,
+    children: Option<Child>,
     content: Option<Render<ButtonHandle>>,
     disabled: Prop<bool>,
     #[prop(default = true)] tab_stop: Prop<bool>,
@@ -45,7 +45,7 @@ pub fn button(
             active: active.clone(),
             focused: focused.clone(),
         })),
-        None => children.into_first(),
+        None => children,
     };
 
     let click = {

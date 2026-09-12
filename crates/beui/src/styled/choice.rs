@@ -31,10 +31,7 @@ pub(super) fn choice_option(kind: Kind, handle: ChoiceOptionHandle) -> NodeId {
         focused,
         ..
     } = handle;
-    let label_color = create_memo({
-        let selected = selected.clone();
-        move || if selected.get() { TEXT } else { TEXT_MUTED }
-    });
+    let label_color = selected.map(|selected| if selected { TEXT } else { TEXT_MUTED });
     let checked = selected.clone();
     let fill_color = create_memo(move || background(selected.get(), hovered.get()));
     view! {

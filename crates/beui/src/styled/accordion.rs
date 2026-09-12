@@ -6,7 +6,7 @@ use crate::base::TextAlign;
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
-    component_detail, create_memo, Callback, CenteredRowBuilder, Children, FillBuilder, Memo,
+    component_detail, create_memo, Callback, CenteredRowBuilder, Child, FillBuilder, Memo,
     OutlineBuilder, PaddingBuilder, Prop, SizedBuilder, TextBuilder,
 };
 use crate::styled::theme::{
@@ -25,12 +25,8 @@ pub fn accordion(
     title: Prop<String>,
     open: Prop<bool>,
     on_toggle: Callback<bool>,
-    children: Children,
+    children: Child,
 ) -> NodeId {
-    let child = children
-        .into_first()
-        .expect("accordion requires a child, e.g. <accordion>{content}</accordion>");
-
     let title_text = title.memo();
     component_detail(title_text.clone());
 
@@ -41,7 +37,7 @@ pub fn accordion(
             header={move |handle| view! { <accordion_header handle={handle} title={title_text} /> }}
             open={open}
         >
-            {child}
+            {children}
         </unstyled::disclosure>
     }
 }

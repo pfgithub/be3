@@ -539,6 +539,8 @@ pub fn size(node: NodeId, size: impl IntoProp<ItemSize>) -> (NodeId, Prop<ItemSi
     (node, size.into_prop())
 }
 
+pub type Child = NodeId;
+
 #[derive(Default)]
 pub struct Children(Vec<(NodeId, Prop<ItemSize>)>);
 
@@ -576,7 +578,7 @@ impl Children {
         });
     }
 
-    pub(crate) fn into_first(self) -> Option<NodeId> {
+    pub fn only(self) -> Option<NodeId> {
         self.0.into_iter().next().map(|(child, _)| child)
     }
 

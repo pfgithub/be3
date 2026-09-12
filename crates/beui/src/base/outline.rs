@@ -7,7 +7,7 @@ use crate::painter::Painter;
 
 use crate::document::Document;
 use crate::node::{Element, InteractInput, NodeId};
-use crate::reactive::{with_document, Children, Prop};
+use crate::reactive::{with_document, Child, Prop};
 
 use beui_macros::component;
 
@@ -152,14 +152,11 @@ pub fn outline(
     radius: Prop<u8>,
     offset: Prop<f32>,
     visible: Prop<bool>,
-    children: Children,
+    children: Child,
 ) -> NodeId {
-    let child = children
-        .into_first()
-        .expect("outline requires a child, e.g. <outline>{content}</outline>");
     let outline = with_document(|document| {
         let outline = document.create_outline(Color32::TRANSPARENT, 0.0, 0, 0.0);
-        document.set_outline_child(outline, child);
+        document.set_outline_child(outline, children);
         outline
     });
     color.apply(move |color| with_document(|document| document.set_outline_color(outline, color)));

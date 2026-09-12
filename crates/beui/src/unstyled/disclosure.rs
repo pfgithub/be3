@@ -3,7 +3,7 @@ use beui_macros::{component, view};
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
-    component_detail, set_component_state, untrack, Callback, Children, ColumnBuilder, Prop,
+    component_detail, set_component_state, untrack, Callback, Child, ColumnBuilder, Prop,
     ReadSignal, Render, VisibilityBuilder,
 };
 use crate::unstyled;
@@ -24,14 +24,10 @@ struct State {
 pub fn disclosure(
     spacing: Prop<f32>,
     header: Render<DisclosureHandle>,
-    children: Children,
+    children: Child,
     open: Prop<bool>,
     on_toggle: Callback<bool>,
 ) -> NodeId {
-    let content = children
-        .into_first()
-        .expect("disclosure requires content, e.g. <unstyled::disclosure>{intrinsic(node)}</unstyled::disclosure>");
-
     let (open_read, set_open) = open.signal();
 
     component_detail(open_read.map(|open| if open { "open" } else { "closed" }.to_owned()));
@@ -60,7 +56,7 @@ pub fn disclosure(
                     })
                 }}
             />
-            <visibility visible={open_read}>{content}</visibility>
+            <visibility visible={open_read}>{children}</visibility>
         </column>
     }
 }

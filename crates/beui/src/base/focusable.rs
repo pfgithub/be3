@@ -10,7 +10,7 @@ use crate::painter::Painter;
 
 use crate::document::Document;
 use crate::node::{Element, InteractInput, NodeId};
-use crate::reactive::{with_document, Callback, Children, ClickCallback, Prop};
+use crate::reactive::{with_document, Callback, Child, ClickCallback, Prop};
 
 use beui_macros::component;
 
@@ -375,7 +375,7 @@ pub fn focusable(
     on_step: Callback<f32>,
     on_text: Callback<String>,
     on_key: Callback<KeyPress, bool>,
-    children: Children,
+    children: Option<Child>,
 ) -> NodeId {
     let focusable = with_document(|document| {
         let focusable = document.create_focusable();
@@ -386,7 +386,7 @@ pub fn focusable(
         node.on_step = on_step;
         node.on_text = on_text;
         node.on_key = on_key;
-        if let Some(child) = children.into_first() {
+        if let Some(child) = children {
             document.set_focusable_child(focusable, child);
         }
         focusable

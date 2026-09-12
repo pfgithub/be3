@@ -7,7 +7,7 @@ use crate::painter::Painter;
 
 use crate::document::Document;
 use crate::node::{Element, InteractInput, NodeId};
-use crate::reactive::{with_document, Callback, Children, ClickCallback, Prop};
+use crate::reactive::{with_document, Callback, Child, ClickCallback, Prop};
 
 use beui_macros::component;
 
@@ -222,7 +222,7 @@ pub fn click_catcher(
     on_press: Callback<PointerPress>,
     on_secondary_press: Callback<PointerPress>,
     on_drag: Callback<PointerPress>,
-    children: Children,
+    children: Option<Child>,
 ) -> NodeId {
     let click_catcher = with_document(|document| {
         let click_catcher = document.create_click_catcher(CursorIcon::Default);
@@ -233,7 +233,7 @@ pub fn click_catcher(
         node.on_press = on_press;
         node.on_secondary_press = on_secondary_press;
         node.on_drag = on_drag;
-        if let Some(child) = children.into_first() {
+        if let Some(child) = children {
             document.set_click_catcher_child(click_catcher, child);
         }
         click_catcher
