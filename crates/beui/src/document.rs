@@ -2,6 +2,9 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::Instant;
 
+use accesskit::Node;
+
+use crate::accessibility;
 use crate::context::Context;
 use crate::geometry::{pos2, Rect, Vec2};
 use crate::input::{Event, Key};
@@ -36,6 +39,8 @@ pub struct Document {
     reactive_scope: ::reactive::Scope,
     node_scopes: HashMap<NodeId, Vec<::reactive::Scope>>,
     sizes: HashMap<NodeId, SizeWatcher>,
+    pub(crate) accessibility_id: u32,
+    pub(crate) accessibility: HashMap<NodeId, Node>,
 }
 
 struct SizeWatcher {
@@ -66,6 +71,8 @@ impl Document {
             reactive_scope: ::reactive::Scope::new(),
             node_scopes: HashMap::new(),
             sizes: HashMap::new(),
+            accessibility_id: accessibility::next_document_id(),
+            accessibility: HashMap::new(),
         }
     }
 
@@ -116,6 +123,13 @@ impl Document {
         self.arena.contains(id)
     }
 
+    pub fn set_accessibility(&mut self, id: NodeId, node: Node) {
+        if self.accessibility.get(&id) != Some(&node) {
+            self.accessibility.insert(id, node);
+            self.arena.invalidate();
+        }
+    }
+
     pub(crate) fn copy_text(&mut self, text: impl Into<String>) {
         self.copied_text = Some(text.into());
     }
@@ -133,6 +147,7 @@ impl Document {
         }
         self.arena.remove(id);
         self.sizes.remove(&id);
+        self.accessibility.remove(&id);
         scopes.extend(self.node_scopes.remove(&id).unwrap_or_default());
         if self.root == Some(id) {
             self.root = None;
@@ -192,6 +207,18 @@ impl Document {
             self.viewport = Some((ctx.clone(), rect, scale));
         }
         self.settle_layout(ctx, rect);
+        let actions = ctx.take_accessibility_actions(self.accessibility_id);
+        if !actions.is_empty() {
+            let context = self.reactive_scope().context();
+            let _guard = crate::reactive::install(self);
+            context.run(|| {
+                crate::reactive::with_document(|document| {
+                    for request in actions {
+                        document.handle_accessibility_action(request);
+                    }
+                });
+            });
+        }
         for (test_id, id) in &self.test_ids {
             if let Some(node_rect) = self.rects.get(id) {
                 ctx.publish_test_id(test_id, *node_rect);
@@ -240,6 +267,9 @@ impl Document {
             ctx.request_repaint_after(deadline.saturating_duration_since(Instant::now()));
         }
         ctx.extend(&self.shapes);
+        if let Some(fragment) = self.accessibility_fragment() {
+            ctx.publish_accessibility(fragment);
+        }
     }
 
     pub(crate) fn watch_size(&mut self, id: NodeId) -> ::reactive::ReadSignal<Vec2> {

@@ -4,15 +4,17 @@ use crate::document::Document;
 use crate::input::{Key, KeyPress};
 use crate::node::NodeId;
 use crate::reactive::{
-    clone, create_effect, create_selector, create_signal, intrinsic, set_component_state, Callback,
-    Child, Column, ItemSize, Memo, NodeRef, Prop, ReadSignal, Render, RenderFn, Scroll, Selector,
-    Visibility, WriteSignal,
+    clone, create_effect, create_memo, create_selector, create_signal, intrinsic,
+    set_component_state, Callback, Child, Column, ItemSize, Memo, NodeRef, Prop, ReadSignal,
+    Render, RenderFn, Scroll, Selector, Visibility, WriteSignal,
 };
 use crate::unstyled;
 use crate::unstyled::button::ButtonHandle;
 use crate::unstyled::text_input::TextInputHandle;
 use beui_macros::{component, view};
 use std::rc::Rc;
+
+use accesskit::{Node, Role};
 
 const OPTIONS_MAX_HEIGHT: f32 = 240.0;
 
@@ -79,6 +81,7 @@ pub fn Select(
     trigger: Option<Render<SelectTriggerHandle>>,
     option: Option<RenderFn<SelectOptionHandle>>,
     #[prop(children)] popup: Option<Render<Child>>,
+    accessibility: Option<Prop<Node>>,
 ) -> NodeId {
     let selected_prop = selected;
     let initial = selected_prop.peek().filter(|index| *index < options.len());
@@ -122,6 +125,15 @@ pub fn Select(
     set_component_state(state.clone());
 
     let trigger_view = trigger.unwrap_or_else(|| Render::new(|_| view! { <Column spacing=0.0 /> }));
+    let accessibility = accessibility.unwrap_or_else(|| Prop::Static(Node::new(Role::ComboBox)));
+    let trigger_accessibility = create_memo(clone!(state -> move || {
+        let mut node = accessibility.get();
+        if let Some(index) = state.selected.get() {
+            node.set_value(state.rows[index].label.clone());
+        }
+        node.set_expanded(state.open.get());
+        node
+    }));
     let trigger_content = move |handle: ButtonHandle| {
         trigger_view.call(SelectTriggerHandle {
             selected,
@@ -165,6 +177,7 @@ pub fn Select(
         <Column spacing=0.0>
             <unstyled::Button
                 @node_ref={&state.trigger}
+                accessibility={trigger_accessibility}
                 focused={focused.memo(Focus::Trigger)}
                 on_focus_change={move |has_focus: bool| blur(&trigger_blur, has_focus, Focus::Trigger)}
                 content={trigger_content}
@@ -218,10 +231,19 @@ fn SelectRow(
 ) -> NodeId {
     let (hover_state, click_state) = (state.clone(), state.clone());
     let visible = state.rows[index].visible.clone();
+    let accessibility_state = state.clone();
+    let accessibility_label = label.clone();
+    let accessibility = create_memo(move || {
+        let mut node = Node::new(Role::ListBoxOption);
+        node.set_label(accessibility_label.clone());
+        node.set_selected(accessibility_state.selected.get() == Some(index));
+        node
+    });
     view! {
         <Visibility visible>
             <unstyled::Button
                 @node_ref={&state.rows[index].button}
+                accessibility
                 tab_stop=false
                 content={move |button: ButtonHandle| {
                     let hovered = button.hovered.clone();

@@ -1,3 +1,4 @@
+use accesskit::{Node, Role};
 use beui_macros::{component, view};
 
 use crate::color::Color32;
@@ -22,9 +23,20 @@ const FOCUS_RING_WIDTH: f32 = 2.0;
 const FOCUS_RING_OFFSET: f32 = 4.0;
 
 #[component]
-pub fn Switch(on: Prop<bool>, on_change: Callback<bool>) -> NodeId {
+pub fn Switch(
+    on: Prop<bool>,
+    #[prop(default = String::new())] label: Prop<String>,
+    on_change: Callback<bool>,
+) -> NodeId {
+    let accessibility = label.map(|label| {
+        let mut node = Node::new(Role::Switch);
+        if !label.is_empty() {
+            node.set_label(label);
+        }
+        node
+    });
     view! {
-        <Toggle checked={on} on_change={move |on| on_change.call(on)}>
+        <Toggle checked={on} accessibility on_change={move |on| on_change.call(on)}>
             {move |handle: ToggleHandle| {
                 let checked = handle.checked.clone();
                 component_detail(create_memo(move || detail(checked.get()).to_owned()));

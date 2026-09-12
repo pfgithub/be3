@@ -7,10 +7,19 @@ license.workspace = true
 [features]
 default = ["window"]
 render = ["dep:bytemuck", "dep:wgpu", "wgpu/std", "wgpu/wgsl"]
-window = ["render", "dep:arboard", "dep:pollster", "dep:winit", "wgpu/default"]
+window = [
+    "render",
+    "dep:accesskit_winit",
+    "dep:arboard",
+    "dep:pollster",
+    "dep:winit",
+    "wgpu/default",
+]
 
 [dependencies]
 beui_macros = { path = "../beui_macros" }
+accesskit = "0.24.1"
+accesskit_winit = { version = "0.33.2", features = ["accesskit_android"], optional = true }
 bytemuck = { version = "1", features = ["derive"], optional = true }
 freetype = "0.7"
 harfbuzz_rs = "2"

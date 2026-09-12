@@ -72,7 +72,7 @@ pub(crate) struct ScrollNode {
     last_update: Instant,
     pub(crate) focused: bool,
     focus_color: Color32,
-    position: Option<ScrollPosition>,
+    pub(crate) position: Option<ScrollPosition>,
     anchor: Option<ScrollAnchor>,
     pub(crate) on_change: Callback<ScrollPosition>,
     pub(crate) reported: Option<ScrollPosition>,

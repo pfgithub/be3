@@ -1,3 +1,4 @@
+use accesskit::{Node, Role};
 use beui_macros::{component, view};
 
 use crate::base::TextAlign;
@@ -25,13 +26,22 @@ const FOCUS_RING_OFFSET: f32 = 3.0;
 pub fn Select(
     options: Vec<String>,
     selected: Prop<Option<usize>>,
+    #[prop(default = String::new())] label: Prop<String>,
     on_change: Callback<Option<usize>>,
 ) -> NodeId {
     let trigger_options = options.clone();
+    let accessibility = label.map(|label| {
+        let mut node = Node::new(Role::ComboBox);
+        if !label.is_empty() {
+            node.set_label(label);
+        }
+        node
+    });
     view! {
         <unstyled::Select
             options
             selected
+            accessibility
             on_change={move |selected| on_change.call(selected)}
             search_placeholder="Search"
             search_font_size=FONT_BODY

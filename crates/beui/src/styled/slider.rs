@@ -1,3 +1,4 @@
+use accesskit::{Node, Role};
 use beui_macros::{component, view};
 
 use crate::color::Color32;
@@ -21,9 +22,20 @@ const FOCUS_RING_WIDTH: f32 = 2.0;
 const FOCUS_RING_OFFSET: f32 = 3.0;
 
 #[component]
-pub fn Slider(value: Prop<f32>, on_change: Callback<f32>) -> NodeId {
+pub fn Slider(
+    value: Prop<f32>,
+    #[prop(default = String::new())] label: Prop<String>,
+    on_change: Callback<f32>,
+) -> NodeId {
+    let accessibility = label.map(|label| {
+        let mut node = Node::new(Role::Slider);
+        if !label.is_empty() {
+            node.set_label(label);
+        }
+        node
+    });
     view! {
-        <unstyled::Slider value on_change={move |value| on_change.call(value)}>
+        <unstyled::Slider value accessibility on_change={move |value| on_change.call(value)}>
             {move |handle: SliderHandle| {
                 let value = handle.value.clone();
                 component_detail(create_memo(move || detail(value.get())));

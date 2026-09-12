@@ -161,6 +161,14 @@ impl Document {
         }
     }
 
+    pub(crate) fn step_focusable(&mut self, focusable: NodeId, delta: f32) {
+        self.call_focusable_handler(focusable, delta, |node| &node.on_step);
+    }
+
+    pub(crate) fn activate_focusable(&mut self, focusable: NodeId) {
+        self.call_focusable_activate(focusable, false, true);
+    }
+
     pub(crate) fn focus_focusable(&mut self, focusable: NodeId) {
         self.update_focus(Some(focusable));
     }

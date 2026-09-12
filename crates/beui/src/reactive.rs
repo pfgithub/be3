@@ -27,6 +27,7 @@ thread_local! {
     static COMPONENT_NAME: Cell<Option<&'static str>> = const { Cell::new(None) };
     static PENDING_DETAIL: RefCell<HashMap<NodeId, String>> = RefCell::new(HashMap::new());
     static PENDING_STATE: RefCell<HashMap<NodeId, Box<dyn Any>>> = RefCell::new(HashMap::new());
+    static PENDING_ACCESSIBILITY: RefCell<HashMap<NodeId, accesskit::Node>> = RefCell::new(HashMap::new());
 }
 
 struct ActiveDocumentGuard;
@@ -156,6 +157,9 @@ pub fn component(name: &'static str, f: impl FnOnce() -> NodeId) -> NodeId {
     if let Some(state) = PENDING_STATE.with(|cell| cell.borrow_mut().remove(&shadow)) {
         with_document(|document| document.set_component_state_dyn(shadow, state));
     }
+    if let Some(node) = PENDING_ACCESSIBILITY.with(|cell| cell.borrow_mut().remove(&shadow)) {
+        with_document(|document| document.set_accessibility(shadow, node));
+    }
     shadow
 }
 
@@ -194,6 +198,24 @@ pub fn set_component_state<T: 'static>(state: T) {
             });
         }
     });
+}
+
+fn set_accessibility(shadow: NodeId, node: accesskit::Node) {
+    with_document(|document| {
+        if document.contains(shadow) {
+            document.set_accessibility(shadow, node);
+        } else {
+            PENDING_ACCESSIBILITY.with(|cell| {
+                cell.borrow_mut().insert(shadow, node);
+            });
+        }
+    });
+}
+
+pub fn component_accessibility(node: impl IntoProp<accesskit::Node>) {
+    let shadow = current_component();
+    let node = node.into_prop();
+    create_effect(move || set_accessibility(shadow, node.get()));
 }
 
 #[derive(Clone, Default)]

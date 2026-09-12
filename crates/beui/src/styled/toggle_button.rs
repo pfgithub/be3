@@ -1,3 +1,4 @@
+use accesskit::{Node, Role};
 use beui_macros::{component, view};
 
 use crate::color::Color32;
@@ -16,9 +17,18 @@ use crate::unstyled::{Toggle, ToggleHandle};
 pub fn ToggleButton(label: Prop<String>, pressed: Prop<bool>, on_change: Callback<bool>) -> NodeId {
     let label_text = create_memo(move || label.get());
     component_detail(label_text.clone());
+    let accessibility = create_memo({
+        let label_text = label_text.clone();
+        move || {
+            let label = label_text.get();
+            let mut node = Node::new(Role::Button);
+            node.set_label(label);
+            node
+        }
+    });
 
     view! {
-        <Toggle checked={pressed} on_change={move |pressed| on_change.call(pressed)}>
+        <Toggle checked={pressed} accessibility on_change={move |pressed| on_change.call(pressed)}>
             {move |handle| view! { <ToggleButtonFace handle label={label_text} /> }}
         </Toggle>
     }

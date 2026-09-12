@@ -3,10 +3,11 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::Arc;
 use std::time::Instant;
 
+use accesskit_winit::{Adapter as AccessKitAdapter, Event as AccessKitEvent};
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalPosition};
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
-use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
+use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{Window, WindowId};
 
@@ -32,7 +33,7 @@ pub trait App {
 }
 
 pub fn run(title: impl Into<String>, app: impl App + 'static) -> Result<(), Box<dyn Error>> {
-    let event_loop = EventLoop::new()?;
+    let event_loop = EventLoop::<AccessKitEvent>::with_user_event().build()?;
     event_loop.set_control_flow(ControlFlow::Wait);
     let mut runner = Runner {
         title: title.into(),
@@ -46,6 +47,7 @@ pub fn run(title: impl Into<String>, app: impl App + 'static) -> Result<(), Box<
         error: None,
         next_update: None,
         clipboard: Clipboard::new(),
+        event_loop_proxy: event_loop.create_proxy(),
     };
     event_loop.run_app(&mut runner)?;
     match runner.error {
@@ -65,6 +67,7 @@ struct Surface {
     touch_emulation: bool,
     prepared_size: Option<(Vec2, f32)>,
     clear_color: Option<Color32>,
+    accessibility: AccessKitAdapter,
 }
 
 struct Runner {
@@ -79,6 +82,7 @@ struct Runner {
     error: Option<String>,
     next_update: Option<Instant>,
     clipboard: Clipboard,
+    event_loop_proxy: EventLoopProxy<AccessKitEvent>,
 }
 
 impl Runner {
@@ -121,6 +125,8 @@ impl Runner {
         let output = self.context.run(raw, |context| {
             app.update(context, Rect::from_min_size(Pos2::ZERO, screen));
         });
+        let accessibility = output.accessibility_tree(&self.title, screen);
+        surface.accessibility.update_if_active(|| accessibility);
 
         if let Some(text) = &output.copied_text {
             self.clipboard.set(text.clone());
@@ -201,7 +207,7 @@ impl Runner {
     }
 }
 
-impl ApplicationHandler for Runner {
+impl ApplicationHandler<AccessKitEvent> for Runner {
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         if (!self.events.is_empty()
             || self
@@ -225,12 +231,19 @@ impl ApplicationHandler for Runner {
         }
         let attributes = Window::default_attributes()
             .with_title(self.title.clone())
+            .with_visible(false)
             .with_inner_size(LogicalSize::new(DEFAULT_SIZE.x, DEFAULT_SIZE.y));
         let window = match event_loop.create_window(attributes) {
             Ok(window) => Arc::new(window),
             Err(error) => return self.fail(event_loop, error),
         };
-        match pollster::block_on(create_surface(window)) {
+        let accessibility = AccessKitAdapter::with_event_loop_proxy(
+            event_loop,
+            &window,
+            self.event_loop_proxy.clone(),
+        );
+        window.set_visible(true);
+        match pollster::block_on(create_surface(window, accessibility)) {
             Ok(surface) => self.surface = Some(surface),
             Err(error) => self.fail(event_loop, error),
         }
@@ -245,6 +258,9 @@ impl ApplicationHandler for Runner {
         let window = self.surface.as_ref().map(|surface| surface.window.id());
         if window != Some(window_id) {
             return;
+        }
+        if let Some(surface) = &mut self.surface {
+            surface.accessibility.process_event(&surface.window, &event);
         }
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
@@ -379,6 +395,28 @@ impl ApplicationHandler for Runner {
             _ => {}
         }
     }
+
+    fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: AccessKitEvent) {
+        let Some(surface) = &self.surface else {
+            return;
+        };
+        if event.window_id != surface.window.id() {
+            return;
+        }
+        match event.window_event {
+            accesskit_winit::WindowEvent::InitialTreeRequested => {
+                self.update();
+                if let Some(surface) = &self.surface {
+                    surface.window.request_redraw();
+                }
+            }
+            accesskit_winit::WindowEvent::ActionRequested(request) => {
+                self.context.accessibility_action(request);
+                surface.window.request_redraw();
+            }
+            accesskit_winit::WindowEvent::AccessibilityDeactivated => {}
+        }
+    }
 }
 
 fn hash(value: impl Hash) -> u64 {
@@ -419,7 +457,10 @@ fn touch_force(force: winit::event::Force) -> f32 {
     }
 }
 
-async fn create_surface(window: Arc<Window>) -> Result<Surface, Box<dyn Error>> {
+async fn create_surface(
+    window: Arc<Window>,
+    accessibility: AccessKitAdapter,
+) -> Result<Surface, Box<dyn Error>> {
     let size = window.inner_size();
     let instance = wgpu::Instance::default();
     let surface = instance.create_surface(window.clone())?;
@@ -461,6 +502,7 @@ async fn create_surface(window: Arc<Window>) -> Result<Surface, Box<dyn Error>> 
         touch_emulation: false,
         prepared_size: None,
         clear_color: None,
+        accessibility,
     })
 }
 

@@ -1,3 +1,4 @@
+use accesskit::{Node, Role};
 use beui_macros::{component, view};
 
 use crate::color::Color32;
@@ -20,13 +21,22 @@ const FOCUS_RING_OFFSET: f32 = 3.0;
 pub fn TextInput(
     value: Prop<String>,
     placeholder: Prop<String>,
+    #[prop(default = String::new())] label: Prop<String>,
     on_change: Callback<String>,
     on_submit: Callback<String>,
 ) -> NodeId {
+    let accessibility = label.map(|label| {
+        let mut node = Node::new(Role::TextInput);
+        if !label.is_empty() {
+            node.set_label(label);
+        }
+        node
+    });
     view! {
         <unstyled::TextInput
             value
             placeholder
+            accessibility
             font_size=FONT_BODY
             color=TEXT
             placeholder_color=TEXT_MUTED

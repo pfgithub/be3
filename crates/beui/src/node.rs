@@ -10,6 +10,16 @@ use crate::document::Document;
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct NodeId(u32);
 
+impl NodeId {
+    pub(crate) fn index(self) -> u32 {
+        self.0
+    }
+
+    pub(crate) fn from_index(index: u32) -> Self {
+        Self(index)
+    }
+}
+
 pub(crate) struct InteractInput {
     pub(crate) pointer_pos: Option<Pos2>,
     pub(crate) pointer_down: bool,

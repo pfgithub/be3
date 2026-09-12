@@ -1,5 +1,6 @@
 extern crate self as beui;
 
+mod accessibility;
 #[cfg(feature = "window")]
 mod app;
 mod base;
@@ -22,6 +23,7 @@ mod renderer;
 pub mod styled;
 pub mod unstyled;
 
+pub use accesskit;
 #[cfg(feature = "window")]
 pub use app::{run, App};
 pub use base::{focus_within, Align, Direction, ItemSize, ScrollPosition, TextAlign};

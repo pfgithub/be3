@@ -1,3 +1,4 @@
+use accesskit::{Node, Role};
 use beui_macros::{component, view};
 
 use crate::input::{CursorIcon, Key, KeyPress, PointerPress};
@@ -5,8 +6,9 @@ use crate::input::{CursorIcon, Key, KeyPress, PointerPress};
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
-    self, clone, component_detail, create_effect, create_memo, create_signal, set_component_state,
-    untrack, Callback, ClickCatcher, Focusable, Prop, ReadSignal, Render,
+    self, clone, component_accessibility, component_detail, create_effect, create_memo,
+    create_signal, set_component_state, untrack, Callback, ClickCatcher, Focusable, Prop,
+    ReadSignal, Render,
 };
 
 const STEP: f32 = 0.05;
@@ -24,12 +26,23 @@ pub fn Slider(
     on_change: Callback<f32>,
     on_drag_change: Callback<bool>,
     on_focus_change: Callback<bool>,
+    accessibility: Option<Prop<Node>>,
 ) -> NodeId {
     let value = value.map(|value| value.clamp(0.0, 1.0));
     let (value_read, set_value_signal) = create_signal(value.peek());
     create_effect(clone!(set_value_signal -> move || set_value_signal.set(value.get())));
     let (dragging, set_dragging) = create_signal(false);
     let (focused, set_focused) = create_signal(false);
+
+    let accessibility = accessibility.unwrap_or_else(|| Prop::Static(Node::new(Role::Slider)));
+    component_accessibility(create_memo(clone!(value_read -> move || {
+        let mut node = accessibility.get();
+        node.set_numeric_value(value_read.get().into());
+        node.set_min_numeric_value(0.0);
+        node.set_max_numeric_value(1.0);
+        node.set_numeric_value_step(STEP.into());
+        node
+    })));
 
     component_detail(create_memo(
         clone!(value_read -> move || detail(value_read.get())),

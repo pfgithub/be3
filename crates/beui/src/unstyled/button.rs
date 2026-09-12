@@ -1,3 +1,4 @@
+use accesskit::{Node, Role};
 use beui_macros::{component, view};
 
 use crate::input::{CursorIcon, KeyPress};
@@ -5,8 +6,8 @@ use crate::input::{CursorIcon, KeyPress};
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
-    self, create_memo, create_signal, set_component_state, untrack, Callback, Child, ClickCallback,
-    ClickCatcher, Focusable, Prop, ReadSignal, Render,
+    self, clone, component_accessibility, create_memo, create_signal, set_component_state, untrack,
+    Callback, Child, ClickCallback, ClickCatcher, Focusable, Prop, ReadSignal, Render,
 };
 
 pub struct ButtonHandle {
@@ -31,6 +32,7 @@ pub fn Button(
     on_key: Callback<KeyPress, bool>,
     on_text: Callback<String>,
     on_focus_change: Callback<bool>,
+    accessibility: Option<Prop<Node>>,
 ) -> NodeId {
     let focus_request = focused;
     let (hovered, set_hovered) = create_signal(false);
@@ -38,6 +40,16 @@ pub fn Button(
     let (focused, set_focused) = create_signal(false);
     let (key_active, set_key_active) = create_signal(false);
     let disabled = create_memo(move || disabled.get());
+    let accessibility = accessibility.unwrap_or_else(|| Prop::Static(Node::new(Role::Button)));
+    component_accessibility(create_memo(clone!(disabled -> move || {
+        let mut node = accessibility.get();
+        if disabled.get() {
+            node.set_disabled();
+        } else {
+            node.clear_disabled();
+        }
+        node
+    })));
 
     let content_node = match content {
         Some(build) => Some(build.call(ButtonHandle {

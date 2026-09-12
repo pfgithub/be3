@@ -3,6 +3,9 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::Duration;
 
+use accesskit::{ActionRequest, TreeUpdate};
+
+use crate::accessibility::{self, Fragment};
 use crate::color::Color32;
 use crate::font::{FontId, FontSources, Fonts, Galley};
 use crate::geometry::{pos2, vec2, Pos2, Rect};
@@ -26,6 +29,8 @@ struct Inner {
     repaint: Cell<bool>,
     repaint_after: Cell<Duration>,
     previous: RefCell<Option<(Vec<Shape>, f32)>>,
+    accessibility: RefCell<Vec<Fragment>>,
+    accessibility_actions: RefCell<Vec<ActionRequest>>,
 }
 
 pub struct FrameOutput {
@@ -36,6 +41,8 @@ pub struct FrameOutput {
     pub repaint: bool,
     pub repaint_after: Duration,
     pub changed: bool,
+    accessibility: Vec<Fragment>,
+    pixels_per_point: f32,
 }
 
 impl FrameOutput {
@@ -45,6 +52,15 @@ impl FrameOutput {
 
     pub fn test_id_rect(&self, test_id: &str) -> Option<Rect> {
         self.test_ids.get(test_id).copied()
+    }
+
+    pub fn accessibility_tree(&self, title: &str, viewport: crate::Vec2) -> TreeUpdate {
+        accessibility::tree_update(
+            title,
+            viewport,
+            self.pixels_per_point,
+            self.accessibility.clone(),
+        )
     }
 }
 
@@ -67,6 +83,8 @@ impl Context {
                 repaint: Cell::new(false),
                 repaint_after: Cell::new(Duration::MAX),
                 previous: RefCell::new(None),
+                accessibility: RefCell::new(Vec::new()),
+                accessibility_actions: RefCell::new(Vec::new()),
             }),
         }
     }
@@ -79,6 +97,7 @@ impl Context {
         self.inner.cursor_icon.set(CursorIcon::Default);
         self.inner.repaint.set(false);
         self.inner.repaint_after.set(Duration::MAX);
+        self.inner.accessibility.borrow_mut().clear();
     }
 
     pub fn end_frame(&self) -> FrameOutput {
@@ -99,6 +118,8 @@ impl Context {
             repaint_after: self.inner.repaint_after.get(),
             cursor_icon: self.inner.cursor_icon.get(),
             repaint: self.inner.repaint.get(),
+            accessibility: std::mem::take(&mut *self.inner.accessibility.borrow_mut()),
+            pixels_per_point: scale,
         }
     }
 
@@ -171,6 +192,25 @@ impl Context {
             .test_ids
             .borrow_mut()
             .insert(test_id.to_owned(), rect);
+    }
+
+    pub(crate) fn publish_accessibility(&self, fragment: Fragment) {
+        self.inner.accessibility.borrow_mut().push(fragment);
+    }
+
+    pub fn accessibility_action(&self, request: ActionRequest) {
+        self.inner.accessibility_actions.borrow_mut().push(request);
+        self.request_repaint();
+    }
+
+    pub(crate) fn take_accessibility_actions(&self, document_id: u32) -> Vec<ActionRequest> {
+        let mut actions = self.inner.accessibility_actions.borrow_mut();
+        let all = std::mem::take(&mut *actions);
+        let (matched, remaining) = all
+            .into_iter()
+            .partition(|request| request.target_node.0 >> 32 == document_id as u64);
+        *actions = remaining;
+        matched
     }
 
     pub fn pixels_per_point(&self) -> f32 {

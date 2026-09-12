@@ -1,11 +1,12 @@
+use accesskit::{Node, Role};
 use beui_macros::{component, view};
 
 use crate::input::CursorIcon;
 
 use crate::node::NodeId;
 use crate::reactive::{
-    self, clone, create_memo, create_signal, untrack, Callback, Child, ClickCallback, ClickCatcher,
-    Focusable, Prop,
+    self, clone, component_accessibility, create_memo, create_signal, untrack, Callback, Child,
+    ClickCallback, ClickCatcher, Focusable, Prop,
 };
 
 #[component]
@@ -16,9 +17,11 @@ pub fn Pressable(
     on_focus_change: Callback<bool>,
     on_hover_change: Callback<bool>,
     on_active_change: Callback<bool>,
+    accessibility: Option<Prop<Node>>,
 ) -> NodeId {
     let enabled = create_memo(move || enabled.get());
     let (key_active, set_key_active) = create_signal(false);
+    component_accessibility(accessibility.unwrap_or_else(|| Prop::Static(Node::new(Role::Button))));
     let click = clone!(enabled -> move || {
         if untrack(|| enabled.get()) {
             on_click.call();

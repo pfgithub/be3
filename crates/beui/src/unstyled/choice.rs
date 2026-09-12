@@ -2,14 +2,16 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
+use accesskit::{Node, Role, Toggled};
+
 use crate::base::Direction;
 use crate::document::Document;
 use crate::input::{Key, KeyPress};
 use crate::node::NodeId;
 use crate::reactive::{
-    clone, component_detail, create_effect, create_memo, create_selector, create_signal, intrinsic,
-    set_component_name, set_component_state, Callback, List, Memo, Prop, ReadSignal, RenderFn,
-    WriteSignal,
+    clone, component_accessibility, component_detail, create_effect, create_memo, create_selector,
+    create_signal, intrinsic, set_component_name, set_component_state, Callback, List, Memo, Prop,
+    ReadSignal, RenderFn, WriteSignal,
 };
 use crate::unstyled;
 use crate::unstyled::ButtonHandle;
@@ -73,6 +75,12 @@ pub fn Choice(
     let (focus, set_focus) = create_signal(None);
     let focused = create_selector(clone!(focus -> move || focus.get()));
 
+    component_accessibility(Node::new(match kind {
+        ChoiceKind::Tabs => Role::TabList,
+        ChoiceKind::Radio => Role::RadioGroup,
+        ChoiceKind::Listbox => Role::ListBox,
+    }));
+
     let state: Handle = Rc::new(State {
         options: labels
             .iter()
@@ -102,13 +110,30 @@ pub fn Choice(
         .map(|(index, label)| {
             let option = option.clone();
             let label = label.clone();
+            let accessibility_label = label.clone();
             let is_selected = selection.memo(Some(index));
+            let selected_accessibility = is_selected.clone();
+            let accessibility = create_memo(move || {
+                let mut node = Node::new(match kind {
+                    ChoiceKind::Tabs => Role::Tab,
+                    ChoiceKind::Radio => Role::RadioButton,
+                    ChoiceKind::Listbox => Role::ListBoxOption,
+                });
+                node.set_label(accessibility_label.clone());
+                if kind == ChoiceKind::Radio {
+                    node.set_toggled(Toggled::from(selected_accessibility.get()));
+                } else {
+                    node.set_selected(selected_accessibility.get());
+                }
+                node
+            });
             let (blur, click, key_press, text) =
                 (state.clone(), state.clone(), state.clone(), state.clone());
             intrinsic(view! {
                 <unstyled::Button
                     tab_stop={tab_stop_owner.memo(index)}
                     focused={focused.memo(Some(index))}
+                    accessibility
                     on_focus_change={move |has_focus: bool| track_focus(&blur, index, has_focus)}
                     content={move |button: ButtonHandle| {
                         option.call(ChoiceOptionHandle {

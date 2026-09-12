@@ -1,3 +1,4 @@
+use accesskit::{Node, Role};
 use beui_macros::{component, view};
 
 use crate::document::Document;
@@ -41,10 +42,16 @@ pub fn Disclosure(
 
     let open_for_header = open_read.clone();
     let open_for_click = open_read.clone();
+    let accessibility = create_memo(clone!(open_read -> move || {
+        let mut node = Node::new(Role::DisclosureTriangle);
+        node.set_expanded(open_read.get());
+        node
+    }));
 
     view! {
         <Column spacing>
             <unstyled::Button
+                accessibility
                 on_click={move || {
                     let next = !untrack(|| open_for_click.get());
                     set_open.set(next);

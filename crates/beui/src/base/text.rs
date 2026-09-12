@@ -54,6 +54,14 @@ pub(crate) struct TextNode {
 }
 
 impl TextNode {
+    pub(crate) fn accessible_text(&self) -> Option<&str> {
+        if self.icon {
+            None
+        } else {
+            Some(&self.content)
+        }
+    }
+
     fn font(&self) -> FontId {
         if self.icon {
             FontId::icons(self.font_size)

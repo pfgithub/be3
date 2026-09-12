@@ -1,3 +1,4 @@
+use accesskit::{Node, Role, Toggled};
 use beui_macros::{component, view};
 
 use crate::input::CursorIcon;
@@ -5,8 +6,9 @@ use crate::input::CursorIcon;
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
-    self, clone, component_detail, create_effect, create_memo, create_signal, set_component_state,
-    untrack, Callback, ClickCatcher, Focusable, Prop, ReadSignal, Render,
+    self, clone, component_accessibility, component_detail, create_effect, create_memo,
+    create_signal, set_component_state, untrack, Callback, ClickCatcher, Focusable, Prop,
+    ReadSignal, Render,
 };
 
 pub struct ToggleHandle {
@@ -21,6 +23,7 @@ pub fn Toggle(
     checked: Prop<bool>,
     #[prop(children)] content: Option<Render<ToggleHandle>>,
     on_change: Callback<bool>,
+    accessibility: Option<Prop<Node>>,
 ) -> NodeId {
     let (checked_read, set_checked) = create_signal(checked.peek());
     create_effect(clone!(set_checked -> move || set_checked.set(checked.get())));
@@ -28,6 +31,13 @@ pub fn Toggle(
     let (active, set_active) = create_signal(false);
     let (focused, set_focused) = create_signal(false);
     let (key_active, set_key_active) = create_signal(false);
+
+    let accessibility = accessibility.unwrap_or_else(|| Prop::Static(Node::new(Role::CheckBox)));
+    component_accessibility(create_memo(clone!(checked_read -> move || {
+        let mut node = accessibility.get();
+        node.set_toggled(Toggled::from(checked_read.get()));
+        node
+    })));
 
     component_detail(create_memo(
         clone!(checked_read -> move || detail(checked_read.get()).to_owned()),

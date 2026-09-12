@@ -3,6 +3,8 @@ use std::ops::Range;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use accesskit::{Node, Role};
+
 use text_editor_core::{
     CopyMode, Core, CursorLeftRightStop, DragSelectionMode, EditorCommand, LRDirection, MoveMode,
     TextBuffer, TextLanguage,
@@ -18,9 +20,9 @@ use crate::node::NodeId;
 use beui_macros::{component, view};
 
 use crate::reactive::{
-    clone, component_detail, copy_text, create_effect, create_memo, create_signal,
-    set_component_state, Callback, Child, ClickCatcher, Focusable, Memo, NodeRef, Padding, Prop,
-    ReadSignal, Render, Text, WriteSignal,
+    clone, component_accessibility, component_detail, copy_text, create_effect, create_memo,
+    create_signal, set_component_state, Callback, Child, ClickCatcher, Focusable, Memo, NodeRef,
+    Padding, Prop, ReadSignal, Render, Text, WriteSignal,
 };
 
 const FONT_SIZE: f32 = 14.0;
@@ -68,6 +70,7 @@ pub fn TextInput(
     on_hover_change: Callback<bool>,
     on_focus_change: Callback<bool>,
     on_key_override: Callback<KeyPress, bool>,
+    accessibility: Option<Prop<Node>>,
 ) -> NodeId {
     let initial = value.peek();
     let focus_request = focused;
@@ -77,8 +80,16 @@ pub fn TextInput(
     let (caret, set_caret) = create_signal(None);
     let (selection, set_selection) = create_signal(Vec::new());
     let text = NodeRef::new();
-    let string = shown_string(&text_value, placeholder);
+    let placeholder = create_memo(move || placeholder.get());
+    let string = shown_string(&text_value, placeholder.clone());
     let color = shown_color(&text_value, color, placeholder_color);
+    let accessibility = accessibility.unwrap_or_else(|| Prop::Static(Node::new(Role::TextInput)));
+    component_accessibility(create_memo(clone!(text_value placeholder -> move || {
+        let mut node = accessibility.get();
+        node.set_value(text_value.get());
+        node.set_placeholder(placeholder.get());
+        node
+    })));
 
     let editor: Handle = Rc::new(RefCell::new(Editor {
         core: core(&initial),
@@ -173,7 +184,7 @@ pub fn TextInput(
     }
 }
 
-fn shown_string(value: &ReadSignal<String>, placeholder: Prop<String>) -> Memo<String> {
+fn shown_string(value: &ReadSignal<String>, placeholder: Memo<String>) -> Memo<String> {
     let value = value.clone();
     create_memo(move || match value.get() {
         text if text.is_empty() => placeholder.get(),
