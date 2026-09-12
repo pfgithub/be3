@@ -16,7 +16,7 @@ fn tab_is_trapped_inside_an_open_context_menu() {
                 view! { <labelled_button label="Before" /> },
                 view! {
                     <context_menu items>
-                        <menu_region node_ref=&region />
+                        <menu_region @node_ref=&region />
                     </context_menu>
                 },
                 view! { <labelled_button label="After" /> },

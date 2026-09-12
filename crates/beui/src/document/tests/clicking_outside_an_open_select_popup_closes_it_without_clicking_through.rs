@@ -16,9 +16,9 @@ fn clicking_outside_an_open_select_popup_closes_it_without_clicking_through() {
         move || {
             view! {
                 <row spacing=20.0>
-                    <select node_ref=&select options selected=Some(0) />
+                    <select @node_ref=&select options selected=Some(0) />
                     <unstyled::button
-                        node_ref=&other
+                        @node_ref=&other
                         on_click={move || counter.set(counter.get() + 1)}
                     >
                         <button_face label="Other" />

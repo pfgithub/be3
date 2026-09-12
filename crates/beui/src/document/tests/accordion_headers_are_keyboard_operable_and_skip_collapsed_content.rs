@@ -11,7 +11,7 @@ fn accordion_headers_are_keyboard_operable_and_skip_collapsed_content() {
             [
                 view! {
                     <accordion title="Options" open=false>
-                        <labelled_button node_ref=&child label="Child" />
+                        <labelled_button @node_ref=&child label="Child" />
                     </accordion>
                 },
                 view! { <labelled_button label="After" /> },

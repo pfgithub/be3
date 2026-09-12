@@ -13,7 +13,7 @@ fn focus_loss_and_hidden_content_cancel_keyboard_activation() {
                 view! {
                     <visibility visible=true>
                         <labelled_button
-                            node_ref=&button
+                            @node_ref=&button
                             label="Click"
                             on_click={move || counter.set(counter.get() + 1)}
                         />

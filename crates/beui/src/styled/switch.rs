@@ -5,8 +5,8 @@ use crate::color::Color32;
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
-    component_detail, create_memo, Callback, CenteredRowBuilder, FillBuilder, OutlineBuilder,
-    PaddingBuilder, Prop, SizedBuilder, SpacerBuilder,
+    component_detail, create_memo, Callback, CenteredRowBuilder, FillBuilder, ItemSize,
+    OutlineBuilder, PaddingBuilder, Prop, SizedBuilder, SpacerBuilder,
 };
 use crate::styled::theme::{ACCENT, ACCENT_HOVER, BORDER, KNOB, RADIUS, SURFACE_RAISED};
 use crate::unstyled;
@@ -58,11 +58,11 @@ fn switch_track(handle: ToggleHandle) -> NodeId {
                 <fill color={track_color} radius=TRACK_RADIUS>
                     <padding horizontal=PADDING vertical=PADDING>
                         <centered_row spacing=0.0>
-                            @percent(before_percent) <spacer />
+                            <spacer @sizing={before_percent} />
                             <sized width=KNOB_SIZE height=KNOB_SIZE>
                                 <fill color=KNOB radius=KNOB_RADIUS></fill>
                             </sized>
-                            @percent(after_percent) <spacer />
+                            <spacer @sizing={after_percent} />
                         </centered_row>
                     </padding>
                 </fill>
@@ -83,19 +83,19 @@ fn detail(on: bool) -> &'static str {
     }
 }
 
-fn before_size(on: bool) -> f32 {
+fn before_size(on: bool) -> ItemSize {
     if on {
-        100.0
+        ItemSize::Percent(100.0)
     } else {
-        0.0
+        ItemSize::Percent(0.0)
     }
 }
 
-fn after_size(on: bool) -> f32 {
+fn after_size(on: bool) -> ItemSize {
     if on {
-        0.0
+        ItemSize::Percent(0.0)
     } else {
-        100.0
+        ItemSize::Percent(100.0)
     }
 }
 

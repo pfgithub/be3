@@ -14,7 +14,7 @@ fn picking_a_node_reveals_it_in_the_tree() {
                             <padding horizontal=4.0 vertical=4.0>
                                 <padding horizontal=4.0 vertical=4.0>
                                     <text
-                                        node_ref=&text
+                                        @node_ref=&text
                                         string="Hello"
                                         font_size=14.0
                                         color=Color32::WHITE

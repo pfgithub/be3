@@ -10,8 +10,9 @@ use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
     clone, component, create_memo, create_signal, on_cleanup, view, CenteredRowBuilder,
-    ClickCatcherBuilder, ColumnBuilder, FillBuilder, ForEachBuilder, Memo, NodeRef, OutlineBuilder,
-    PaddingBuilder, ReadSignal, RowBuilder, ScrollBuilder, SpacerBuilder, WriteSignal,
+    ClickCatcherBuilder, ColumnBuilder, FillBuilder, ForEachBuilder, ItemSize, Memo, NodeRef,
+    OutlineBuilder, PaddingBuilder, ReadSignal, RowBuilder, ScrollBuilder, SpacerBuilder,
+    WriteSignal,
 };
 use crate::styled::theme::{
     ACCENT, BORDER_WIDTH, CHIP_RADIUS, ON_ACCENT, RADIUS, SCROLLBAR_WIDTH, SEPARATOR_HEIGHT,
@@ -92,20 +93,20 @@ pub(crate) fn build(state: &Rc<State>) -> Panel {
         let (list_state, list_rows) = (state.clone(), rows.clone());
         view! {
         <row spacing=0.0>
-            @fixed(SEPARATOR_HEIGHT) <separator />
-            @percent(100.0) <fill color=SURFACE radius=0>
+            <separator @sizing=ItemSize::Fixed(SEPARATOR_HEIGHT) />
+            <fill @sizing=ItemSize::Percent(100.0) color=SURFACE radius=0>
                 <column spacing=0.0>
                     <padding horizontal=HEADER_PADDING vertical=HEADER_PADDING>
                         <centered_row spacing=HEADER_SPACING>
                             <heading content="Inspector" />
-                            @percent(100.0) <caption content={count_text} align=TextAlign::End />
+                            <caption @sizing=ItemSize::Percent(100.0) content={count_text} align=TextAlign::End />
                             <pick_toggle state={state.clone()} picking />
                         </centered_row>
                     </padding>
-                    @fixed(SEPARATOR_HEIGHT) <separator />
-                    @percent(100.0) <padding horizontal=BODY_PADDING vertical=BODY_PADDING>
+                    <separator @sizing=ItemSize::Fixed(SEPARATOR_HEIGHT) />
+                    <padding @sizing=ItemSize::Percent(100.0) horizontal=BODY_PADDING vertical=BODY_PADDING>
                         <row spacing=BODY_SPACING>
-                            @percent(100.0) <scroll
+                            <scroll @sizing=ItemSize::Percent(100.0)
                                 focus_color=ACCENT
                                 reveal
                                 on_change={move |value| set_position.set(value)}
@@ -121,10 +122,10 @@ pub(crate) fn build(state: &Rc<State>) -> Panel {
                                     }}
                                 </for_each>
                             </scroll>
-                            @fixed(SCROLLBAR_WIDTH) <scrollbar position />
+                            <scrollbar @sizing=ItemSize::Fixed(SCROLLBAR_WIDTH) position />
                         </row>
                     </padding>
-                    @fixed(SEPARATOR_HEIGHT) <separator />
+                    <separator @sizing=ItemSize::Fixed(SEPARATOR_HEIGHT) />
                     <padding horizontal=FOOTER_PADDING vertical=FOOTER_PADDING>
                         <column spacing=FOOTER_SPACING>
                             <code content={selection_text} />
@@ -210,7 +211,9 @@ fn entry_field<T: Clone + Default + PartialEq + 'static>(
 fn tree_row(row_key: Key, entries: Entries, state: Rc<State>, rows: Rows) -> NodeId {
     let key = row_key;
     let node = key.node();
-    let indent = entry_field(&entries, key, |entry| entry.depth as f32 * INDENT);
+    let indent = entry_field(&entries, key, |entry| {
+        ItemSize::Fixed(entry.depth as f32 * INDENT)
+    });
     let kind = entry_field(&entries, key, |entry| entry.kind.to_owned());
     let detail = entry_field(&entries, key, |entry| entry.detail.clone());
     let size = entry_field(&entries, key, |entry| entry.size.clone());
@@ -239,7 +242,7 @@ fn tree_row(row_key: Key, entries: Entries, state: Rc<State>, rows: Rows) -> Nod
     let (hover, selection, expansion) = (state.clone(), state.clone(), state);
     view! {
         <click_catcher
-            node_ref=&row
+            @node_ref=&row
             cursor=CursorIcon::PointingHand
             on_click={move || selection.select(node)}
             on_hover_change={move |hovered| hover.hover(node, hovered)}
@@ -253,9 +256,9 @@ fn tree_row(row_key: Key, entries: Entries, state: Rc<State>, rows: Rows) -> Nod
             >
                 <list_row>
                     <centered_row spacing=ROW_SPACING>
-                        @fixed(indent) <spacer />
-                        @fixed(MARKER_WIDTH) <unstyled::pressable
-                            node_ref=&marker
+                        <spacer @sizing={indent} />
+                        <unstyled::pressable @sizing=ItemSize::Fixed(MARKER_WIDTH)
+                            @node_ref=&marker
                             enabled={expandable}
                             on_click={move || {
                                 expansion.set_expanded(key, !expanded.get_untracked());
@@ -264,7 +267,7 @@ fn tree_row(row_key: Key, entries: Entries, state: Rc<State>, rows: Rows) -> Nod
                             <code content={glyph} color=TEXT_MUTED align=TextAlign::Center />
                         </unstyled::pressable>
                         <code content={kind} />
-                        @percent(100.0) <code content={detail} color=TEXT_MUTED />
+                        <code @sizing=ItemSize::Percent(100.0) content={detail} color=TEXT_MUTED />
                         <code content={size} color=TEXT_MUTED align=TextAlign::End />
                     </centered_row>
                 </list_row>

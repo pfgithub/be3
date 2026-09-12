@@ -11,7 +11,7 @@ fn clicking_an_accordion_header_hides_its_content() {
             [view! {
                 <accordion title="About" open=true>
                     <text
-                        node_ref=&body
+                        @node_ref=&body
                         string="beui keeps a retained tree of nodes."
                         font_size=14.0
                         color=Color32::WHITE

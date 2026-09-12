@@ -5,7 +5,7 @@ use crate::color::Color32;
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
-    clone, component_detail, create_memo, Callback, CenteredRowBuilder, FillBuilder,
+    clone, component_detail, create_memo, Callback, CenteredRowBuilder, FillBuilder, ItemSize,
     OutlineBuilder, Prop, SizedBuilder,
 };
 use crate::styled::theme::{ACCENT, ACCENT_HOVER, KNOB, RADIUS, TRACK};
@@ -48,9 +48,9 @@ fn slider_track(handle: SliderHandle) -> NodeId {
         <outline color=ACCENT width=FOCUS_RING_WIDTH radius=RADIUS offset=FOCUS_RING_OFFSET visible={focused}>
             <sized height=HEIGHT>
                 <centered_row spacing=0.0>
-                    @percent(filled_percent) <sized height=TRACK_HEIGHT><fill color=ACCENT radius=TRACK_RADIUS></fill></sized>
+                    <sized @sizing={filled_percent} height=TRACK_HEIGHT><fill color=ACCENT radius=TRACK_RADIUS></fill></sized>
                     <sized width=KNOB_SIZE height=KNOB_SIZE><fill color={knob_color} radius=KNOB_RADIUS></fill></sized>
-                    @percent(rest_percent) <sized height=TRACK_HEIGHT><fill color=TRACK radius=TRACK_RADIUS></fill></sized>
+                    <sized @sizing={rest_percent} height=TRACK_HEIGHT><fill color=TRACK radius=TRACK_RADIUS></fill></sized>
                 </centered_row>
             </sized>
         </outline>
@@ -65,12 +65,12 @@ fn detail(value: f32) -> String {
     format!("{value:.2}")
 }
 
-fn filled_size(value: f32) -> f32 {
-    value * 100.0
+fn filled_size(value: f32) -> ItemSize {
+    ItemSize::Percent(value * 100.0)
 }
 
-fn rest_size(value: f32) -> f32 {
-    (1.0 - value) * 100.0
+fn rest_size(value: f32) -> ItemSize {
+    ItemSize::Percent((1.0 - value) * 100.0)
 }
 
 fn knob_fill_color(dragging: bool) -> Color32 {

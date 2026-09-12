@@ -11,7 +11,7 @@ fn right_click_opens_a_context_menu_at_the_cursor_position() {
     ];
     let (document, [menu]) = toolbar_of({
         let region = region.clone();
-        move || [view! { <context_menu items><menu_region node_ref=&region /></context_menu> }]
+        move || [view! { <context_menu items><menu_region @node_ref=&region /></context_menu> }]
     });
     let region = region.get();
     let mut harness = Harness::new(document);

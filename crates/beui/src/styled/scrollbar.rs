@@ -4,7 +4,9 @@ use crate::color::Color32;
 
 use crate::base::ScrollPosition;
 use crate::node::NodeId;
-use crate::reactive::{clone, create_memo, ColumnBuilder, FillBuilder, Prop, SpacerBuilder};
+use crate::reactive::{
+    clone, create_memo, ColumnBuilder, FillBuilder, ItemSize, Prop, SpacerBuilder,
+};
 use crate::styled::theme::{SCROLL_THUMB, SURFACE_RAISED};
 
 const RADIUS: u8 = 3;
@@ -22,9 +24,9 @@ pub fn scrollbar(position: Prop<ScrollPosition>) -> NodeId {
     view! {
         <fill color=SURFACE_RAISED radius=RADIUS>
             <column spacing=0.0>
-                @percent(before) <spacer />
-                @percent(thumb) <fill color radius=RADIUS></fill>
-                @percent(after) <spacer />
+                <spacer @sizing={before} />
+                <fill @sizing={thumb} color radius=RADIUS></fill>
+                <spacer @sizing={after} />
             </column>
         </fill>
     }
@@ -46,18 +48,18 @@ fn progress_fraction(position: ScrollPosition) -> f32 {
     }
 }
 
-fn before_percent(position: ScrollPosition) -> f32 {
+fn before_percent(position: ScrollPosition) -> ItemSize {
     let rest = 100.0 - visible_fraction(position) * 100.0;
-    rest * progress_fraction(position)
+    ItemSize::Percent(rest * progress_fraction(position))
 }
 
-fn thumb_percent(position: ScrollPosition) -> f32 {
-    visible_fraction(position) * 100.0
+fn thumb_percent(position: ScrollPosition) -> ItemSize {
+    ItemSize::Percent(visible_fraction(position) * 100.0)
 }
 
-fn after_percent(position: ScrollPosition) -> f32 {
+fn after_percent(position: ScrollPosition) -> ItemSize {
     let rest = 100.0 - visible_fraction(position) * 100.0;
-    rest * (1.0 - progress_fraction(position))
+    ItemSize::Percent(rest * (1.0 - progress_fraction(position)))
 }
 
 fn thumb_color(position: ScrollPosition) -> Color32 {

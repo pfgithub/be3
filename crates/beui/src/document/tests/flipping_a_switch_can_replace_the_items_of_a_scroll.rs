@@ -1,5 +1,5 @@
 use super::*;
-use crate::reactive::{build, create_memo, create_signal, view, NodeRef};
+use crate::reactive::{build, create_memo, create_signal, view, ItemSize, NodeRef};
 use crate::styled::SwitchBuilder;
 
 #[test]
@@ -27,12 +27,12 @@ fn check_compact_rows(inset: f32) {
             view! {
                 <column spacing=0.0>
                     <switch
-                        node_ref=&switch
+                        @node_ref=&switch
                         on=false
                         on_change={move |on: bool| set_compact.set(on)}
                     />
-                    @percent(100.0) <virtual_list
-                        node_ref=&scroll
+                    <virtual_list @sizing=ItemSize::Percent(100.0)
+                        @node_ref=&scroll
                         count=VIRTUAL_ITEM_COUNT
                         item_height
                     >

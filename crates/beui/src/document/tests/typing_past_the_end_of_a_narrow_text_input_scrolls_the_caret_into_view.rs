@@ -11,7 +11,7 @@ fn typing_past_the_end_of_a_narrow_text_input_scrolls_the_caret_into_view() {
         move || {
             [view! {
                 <sized width=80.0>
-                    <text_input node_ref=&input value=String::new() />
+                    <text_input @node_ref=&input value=String::new() />
                 </sized>
             }]
         }

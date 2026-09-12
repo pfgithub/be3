@@ -150,7 +150,7 @@ pub fn text_input(
                     let field = view! {
                         <padding horizontal={padding_horizontal} vertical={padding_vertical}>
                             <text
-                                node_ref=&text
+                                @node_ref=&text
                                 string
                                 font_size
                                 color

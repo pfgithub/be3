@@ -15,9 +15,9 @@ fn view_attributes_can_pun_a_bare_name_as_its_own_value() {
             let font_size = 18.0f32;
             let spacing = 0.0f32;
             let children = [intrinsic(view! {
-                <text node_ref=&label string font_size />
+                <text @node_ref=&label string font_size />
             })];
-            view! { <column node_ref=&column spacing children /> }
+            view! { <column @node_ref=&column spacing children /> }
         }
     });
 

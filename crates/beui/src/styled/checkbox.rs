@@ -6,7 +6,7 @@ use crate::color::Color32;
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
-    clone, component_detail, create_memo, Callback, CenteredRowBuilder, FillBuilder,
+    clone, component_detail, create_memo, Callback, CenteredRowBuilder, FillBuilder, ItemSize,
     OutlineBuilder, Prop, SizedBuilder, SpacerBuilder, TextBuilder, VisibilityBuilder,
 };
 use crate::styled::theme::{
@@ -54,18 +54,18 @@ fn checkbox_face(handle: ToggleHandle, label: Prop<String>) -> NodeId {
                     <outline color=BORDER width=BORDER_WIDTH radius=CHIP_RADIUS offset=0.0 visible={border_visible}>
                         <fill color={fill_color} radius=CHIP_RADIUS>
                             <centered_row spacing=0.0>
-                                @percent(100.0) <spacer />
+                                <spacer @sizing=ItemSize::Percent(100.0) />
                                 <visibility visible={checked}>
                                     <sized width=MARK_SIZE height=MARK_SIZE>
                                         <fill color=ON_ACCENT radius=MARK_RADIUS></fill>
                                     </sized>
                                 </visibility>
-                                @percent(100.0) <spacer />
+                                <spacer @sizing=ItemSize::Percent(100.0) />
                             </centered_row>
                         </fill>
                     </outline>
                 </sized>
-                @percent(100.0) <text string={label} font_size=FONT_BODY color=TEXT align=TextAlign::Start />
+                <text @sizing=ItemSize::Percent(100.0) string={label} font_size=FONT_BODY color=TEXT align=TextAlign::Start />
             </centered_row>
         </outline>
     }

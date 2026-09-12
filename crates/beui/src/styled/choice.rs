@@ -6,8 +6,8 @@ use beui_macros::{component, view};
 
 use crate::reactive::Memo;
 use crate::reactive::{
-    clone, create_memo, CenteredRowBuilder, FillBuilder, OutlineBuilder, PaddingBuilder, Prop,
-    SizedBuilder, SpacerBuilder, TextBuilder, VisibilityBuilder,
+    clone, create_memo, CenteredRowBuilder, FillBuilder, ItemSize, OutlineBuilder, PaddingBuilder,
+    Prop, SizedBuilder, SpacerBuilder, TextBuilder, VisibilityBuilder,
 };
 use crate::styled::theme::{
     ACCENT, ACCENT_SOFT, BORDER, FONT_BODY, RADIUS, SURFACE_RAISED, TEXT, TEXT_MUTED,
@@ -64,7 +64,7 @@ fn choice_label(kind: Kind, label: String, color: Prop<Color32>, checked: Memo<b
     view! {
         <centered_row spacing=MARK_SPACING>
             <radio_mark checked />
-            @percent(100.0) <text string={label} font_size=FONT_BODY color align />
+            <text @sizing=ItemSize::Percent(100.0) string={label} font_size=FONT_BODY color align />
         </centered_row>
     }
 }
@@ -75,13 +75,13 @@ fn radio_mark(checked: Memo<bool>) -> NodeId {
         <sized width=MARK_BOX height=MARK_BOX>
             <outline color=BORDER width=2.0 radius=MARK_RADIUS offset=0.0 visible=true>
                 <centered_row spacing=0.0>
-                    @percent(100.0) <spacer />
+                    <spacer @sizing=ItemSize::Percent(100.0) />
                     <visibility visible={checked}>
                         <sized width=MARK_DOT height=MARK_DOT>
                             <fill color=ACCENT radius=MARK_RADIUS />
                         </sized>
                     </visibility>
-                    @percent(100.0) <spacer />
+                    <spacer @sizing=ItemSize::Percent(100.0) />
                 </centered_row>
             </outline>
         </sized>

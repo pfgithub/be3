@@ -23,12 +23,12 @@ fn children_written_between_show_tags_are_not_built_until_it_is_shown() {
             view! {
                 <column spacing=0.0>
                     <button
-                        node_ref=&toggle
+                        @node_ref=&toggle
                         on_click={move || set_visible.update(|visible| *visible = !*visible)}
                     >
                         <text string="toggle" />
                     </button>
-                    <show node_ref=&panel condition=visible>
+                    <show @node_ref=&panel condition=visible>
                         <counted_panel builds />
                     </show>
                 </column>

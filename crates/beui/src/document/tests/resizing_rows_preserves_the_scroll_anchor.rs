@@ -16,7 +16,7 @@ fn resizing_rows_preserves_the_scroll_anchor() {
                 .map(|(index, row)| {
                     intrinsic(view! {
                         <padding
-                            node_ref={row}
+                            @node_ref={row}
                             horizontal=0.0
                             vertical={10.0 + (index % 3) as f32}
                         >
@@ -27,7 +27,7 @@ fn resizing_rows_preserves_the_scroll_anchor() {
                 .collect();
             view! {
                 <scroll
-                    node_ref=&scroll
+                    @node_ref=&scroll
                     on_change={move |position| sink.set(Some(position))}
                     children={items}
                 />

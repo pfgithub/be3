@@ -48,7 +48,7 @@ pub fn context_menu(
             <column spacing=0.0>
                 {children}
                 <overlay
-                    node_ref=&overlay
+                    @node_ref=&overlay
                     anchor
                     placement=Placement::BelowStart
                     open
@@ -61,7 +61,7 @@ pub fn context_menu(
                             let on_select = on_select.clone();
                             panel.call(view! {
                                 <menu_list
-                                    node_ref=&content
+                                    @node_ref=&content
                                     items
                                     row
                                     panel={panel.clone()}

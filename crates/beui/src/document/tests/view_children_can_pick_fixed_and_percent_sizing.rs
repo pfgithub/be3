@@ -1,5 +1,5 @@
 use super::*;
-use crate::reactive::{build, view, with_document, ColumnBuilder, RowBuilder};
+use crate::reactive::{build, view, with_document, ColumnBuilder, ItemSize, RowBuilder};
 
 #[test]
 fn view_children_can_pick_fixed_and_percent_sizing() {
@@ -11,8 +11,8 @@ fn view_children_can_pick_fixed_and_percent_sizing() {
     let document = build(move || {
         let tree = view! {
             <row spacing=0.0>
-                @fixed(30.0) <column spacing=0.0></column>
-                @percent(100.0) <column spacing=0.0></column>
+                <column @sizing=ItemSize::Fixed(30.0) spacing=0.0></column>
+                <column @sizing=ItemSize::Percent(100.0) spacing=0.0></column>
             </row>
         };
         let children = with_document(|document| document.children(tree));

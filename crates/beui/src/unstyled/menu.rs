@@ -156,7 +156,7 @@ pub(crate) fn menu_list(
     view! {
         <column spacing=0.0>
             <focusable
-                node_ref={&state.root}
+                @node_ref={&state.root}
                 tab_stop={root_tab_stop}
                 focused={focused.memo(Focus::Root)}
                 on_focus_change={move |has_focus: bool| {
@@ -207,7 +207,7 @@ fn menu_row(
     view! {
         <column spacing=0.0>
             <unstyled::button
-                node_ref=&button
+                @node_ref=&button
                 tab_stop={focused.memo(Focus::Row(index))}
                 focused={focused.memo(Focus::Row(index))}
                 on_focus_change={move |has_focus: bool| {
@@ -252,7 +252,7 @@ fn menu_row(
                     >
                         {panel.call(view! {
                             <menu_list
-                                node_ref={&submenu.content}
+                                @node_ref={&submenu.content}
                                 items={children}
                                 row
                                 panel={panel.clone()}

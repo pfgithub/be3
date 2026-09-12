@@ -6,8 +6,8 @@ use crate::base::TextAlign;
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
-    component_detail, create_memo, Callback, CenteredRowBuilder, Child, FillBuilder, Memo,
-    OutlineBuilder, PaddingBuilder, Prop, SizedBuilder, TextBuilder,
+    component_detail, create_memo, Callback, CenteredRowBuilder, Child, FillBuilder, ItemSize,
+    Memo, OutlineBuilder, PaddingBuilder, Prop, SizedBuilder, TextBuilder,
 };
 use crate::styled::theme::{
     ACCENT, FONT_HEADING, FONT_SMALL, RADIUS, SURFACE_RAISED, TEXT, TEXT_MUTED,
@@ -66,7 +66,7 @@ fn accordion_header(handle: DisclosureHandle, title: Memo<String>) -> NodeId {
                                 align=TextAlign::Center
                             />
                         </sized>
-                        @percent(100.0) <text
+                        <text @sizing=ItemSize::Percent(100.0)
                             string={title}
                             font_size=FONT_HEADING
                             color=TEXT

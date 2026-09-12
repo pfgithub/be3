@@ -1,5 +1,5 @@
 use super::*;
-use crate::reactive::{build, ScrollBuilder};
+use crate::reactive::{build, ItemSize, ScrollBuilder};
 
 #[test]
 fn the_scroll_position_is_reported_to_its_listener() {
@@ -17,7 +17,7 @@ fn the_scroll_position_is_reported_to_its_listener() {
             .collect();
         view! {
             <column spacing=0.0>
-                @percent(100.0) <scroll
+                <scroll @sizing=ItemSize::Percent(100.0)
                     on_change={move |position| sink.set(Some(position))}
                     children={items}
                 />

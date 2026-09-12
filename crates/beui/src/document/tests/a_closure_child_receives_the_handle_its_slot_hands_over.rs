@@ -19,7 +19,7 @@ fn a_closure_child_receives_the_handle_its_slot_hands_over() {
                         {move |size: ReadSignal<Vec2>| {
                             *measured.borrow_mut() = Some(size);
                             view! {
-                                <sized node_ref=&item height=ITEM_HEIGHT>
+                                <sized @node_ref=&item height=ITEM_HEIGHT>
                                     <spacer />
                                 </sized>
                             }

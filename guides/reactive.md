@@ -193,8 +193,10 @@ let document = build(|| view! { <app /> });
 generating a `NameBuilder` that `view!` fills in. A prop typed `Prop<T>` accepts
 either a plain `T` or a signal or memo of `T`; the reactive forms create an
 effect that keeps that property in sync. `#[component(base)]` is for the base
-elements, which do the same but without a shadow node of their own. Every
-builder also accepts `test_id` and `node_ref`.
+elements, which do the same but without a shadow node of their own. Every tag
+also accepts the framework slots `@test_id`, `@node_ref`, and `@sizing`, which
+live in their own `@` namespace so a component is free to name its own props
+whatever it likes.
 
 ## Writing attributes
 
@@ -207,7 +209,7 @@ path, a unary expression, and a reference to a path.
 <fill color=SURFACE radius=0>
 <caption content=count_text align=TextAlign::End />
 <list direction=Direction::Horizontal />
-<sized node_ref=&panel width=TRIGGER_WIDTH height=HEIGHT>
+<sized @node_ref=&panel width=TRIGGER_WIDTH height=HEIGHT>
 <fill color=Color32::from_gray(40) radius=4>
 ```
 
@@ -218,6 +220,13 @@ means `visible={visible}`, never `visible={true}`.
 
 A prop typed `String`, `Option<String>`, or `Prop<String>` accepts a string
 literal directly, so `content="Inspector"` needs no `to_string()`.
+
+An attribute whose name starts with `@` is a framework slot rather than a prop
+of the component: `@test_id="toolbar.button"` names the node for
+`find_test_id`, `@node_ref=&panel` fills a `NodeRef` with the node once it is
+built, and `@sizing` gives the node its `ItemSize` among its siblings. Writing
+`test_id=` or `node_ref=` without the `@`, or an `@name` that is not one of
+those three, is a compile error from `view!`.
 
 A tag whose required props are missing panics from the `view!` line that wrote
 it, not from inside the generated builder.
@@ -381,11 +390,25 @@ swapped out.
 <dynamic value={items}>{move |items: Vec<MenuItem>| view! { <menu_list items /> }}</dynamic>
 ```
 
-`@intrinsic`/`@fixed(size)`/`@percent(weight)` prefix a child inside `view!`, or
-a root of a multi-root one, to give it an `ItemSize` in a `row`/`column`, and `@size(item_size)` takes a whole
-`ItemSize` so a child can switch between kinds reactively — a memo that reads
-`narrower_than` and returns `ItemSize::Fixed` in a column where it returned
-`ItemSize::Percent` in a row, for instance. A percent child takes its share of
+`@sizing` on a child inside `view!`, or on a root of a multi-root one, gives it
+an `ItemSize` in the `row`/`column` that lays it out, and a child without one is
+`ItemSize::Intrinsic`. The value is `impl IntoProp<ItemSize>`, so it takes a
+plain `ItemSize::Fixed(HEIGHT)` or `ItemSize::Percent(100.0)` as well as a
+signal or memo of one, and a child can switch between kinds reactively — a memo
+that reads `narrower_than` and returns `ItemSize::Fixed` in a column where it
+returned `ItemSize::Percent` in a row, for instance.
+
+```rust
+<separator @sizing=ItemSize::Fixed(SEPARATOR_HEIGHT) />
+<caption @sizing=ItemSize::Percent(100.0) content=count_text align=TextAlign::End />
+<card @sizing={rows_size}>
+```
+
+An attribute has nothing to attach to on an `{expr}` child, which is always
+intrinsic; wrap the expression with `intrinsic`, `fixed`, `percent`, or `size`
+and pass the list as `children={...}` when such a child needs a size of its own.
+`@sizing` on the single root of a `view!` is a compile error, since that root is
+built on its own rather than as somebody's child. A percent child takes its share of
 what is left over, so it needs a bounded main axis: inside a list that is being
 measured intrinsically there is no leftover space to share, and percent children
 fall back to their intrinsic length there, the way `height: 50%` of an

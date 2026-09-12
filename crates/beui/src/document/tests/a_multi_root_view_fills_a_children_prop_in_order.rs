@@ -10,11 +10,11 @@ fn a_multi_root_view_fills_a_children_prop_in_order() {
         let (first, second, third) = (first.clone(), second.clone(), third.clone());
         move || {
             let toolbar = view! {
-                <text node_ref=&first string="One" font_size=14.0 color=Color32::WHITE />
-                <text node_ref=&second string="Two" font_size=14.0 color=Color32::WHITE />
-                {view! { <text node_ref=&third string="Three" font_size=14.0 color=Color32::WHITE /> }}
+                <text @node_ref=&first string="One" font_size=14.0 color=Color32::WHITE />
+                <text @node_ref=&second string="Two" font_size=14.0 color=Color32::WHITE />
+                {view! { <text @node_ref=&third string="Three" font_size=14.0 color=Color32::WHITE /> }}
             };
-            view! { <column node_ref=&column spacing=0.0 children={toolbar} /> }
+            view! { <column @node_ref=&column spacing=0.0 children={toolbar} /> }
         }
     });
 

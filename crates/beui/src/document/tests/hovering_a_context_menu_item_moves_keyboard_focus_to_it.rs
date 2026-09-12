@@ -12,7 +12,7 @@ fn hovering_a_context_menu_item_moves_keyboard_focus_to_it() {
     ];
     let (document, [menu]) = toolbar_of({
         let region = region.clone();
-        move || [view! { <context_menu items><menu_region node_ref=&region /></context_menu> }]
+        move || [view! { <context_menu items><menu_region @node_ref=&region /></context_menu> }]
     });
     let region = region.get();
     let mut harness = Harness::new(document);

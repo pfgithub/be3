@@ -13,12 +13,12 @@ fn for_each_reuses_nodes_for_keys_that_persist_across_an_update() {
             view! {
                 <column spacing=0.0>
                     <button
-                        node_ref=&shuffle
+                        @node_ref=&shuffle
                         on_click={move || set_items.set(vec![3, 2, 4])}
                     >
                         <text string="shuffle" />
                     </button>
-                    <for_each node_ref=&list spacing=0.0 items key={|value: i64| value}>
+                    <for_each @node_ref=&list spacing=0.0 items key={|value: i64| value}>
                         {|value: i64| view! { <text string={value.to_string()} /> }}
                     </for_each>
                 </column>

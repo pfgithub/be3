@@ -58,7 +58,7 @@ search box) intercept arrows before the text input's own key handling runs;
 returning `false` falls through to the normal behavior. `Document::focused_node`
 reports the current focus.
 
-Use `node_ref={&a_node_ref}` on any tag when an enclosing component needs the
+Use `@node_ref=&a_node_ref` on any tag when an enclosing component needs the
 `NodeId` of something nested inside its tree; `NodeRef::get` reads it back once
 the tree is built.
 

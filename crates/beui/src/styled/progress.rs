@@ -2,7 +2,7 @@ use beui_macros::{component, view};
 
 use crate::node::NodeId;
 use crate::reactive::{
-    clone, component_detail, create_memo, FillBuilder, Prop, RowBuilder, SizedBuilder,
+    clone, component_detail, create_memo, FillBuilder, ItemSize, Prop, RowBuilder, SizedBuilder,
     SpacerBuilder,
 };
 use crate::styled::theme::{ACCENT, TRACK};
@@ -23,8 +23,8 @@ pub fn progress(value: Prop<f32>) -> NodeId {
         <sized height=HEIGHT>
             <fill color=TRACK radius=RADIUS>
                 <row spacing=0.0>
-                    @percent(filled) <fill color=ACCENT radius=RADIUS></fill>
-                    @percent(rest) <spacer />
+                    <fill @sizing={filled} color=ACCENT radius=RADIUS></fill>
+                    <spacer @sizing={rest} />
                 </row>
             </fill>
         </sized>
@@ -35,10 +35,10 @@ fn detail(value: f32) -> String {
     format!("{}%", (value * 100.0).round())
 }
 
-fn filled_size(value: f32) -> f32 {
-    value * 100.0
+fn filled_size(value: f32) -> ItemSize {
+    ItemSize::Percent(value * 100.0)
 }
 
-fn rest_size(value: f32) -> f32 {
-    (1.0 - value) * 100.0
+fn rest_size(value: f32) -> ItemSize {
+    ItemSize::Percent((1.0 - value) * 100.0)
 }

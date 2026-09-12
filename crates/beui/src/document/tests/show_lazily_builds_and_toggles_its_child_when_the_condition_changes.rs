@@ -16,13 +16,13 @@ fn show_lazily_builds_and_toggles_its_child_when_the_condition_changes() {
             view! {
                 <column spacing=0.0>
                     <button
-                        node_ref=&toggle
+                        @node_ref=&toggle
                         on_click={move || set_visible.update(|visible| *visible = !*visible)}
                     >
                         <text string="toggle" />
                     </button>
                     <show
-                        node_ref=&panel
+                        @node_ref=&panel
                         condition={visible}
                         then={move || {
                             sink.set(sink.get() + 1);

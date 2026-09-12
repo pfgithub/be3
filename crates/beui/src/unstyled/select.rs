@@ -5,8 +5,8 @@ use crate::input::{Key, KeyPress};
 use crate::node::NodeId;
 use crate::reactive::{
     clone, create_effect, create_selector, create_signal, intrinsic, set_component_state, Callback,
-    Child, ColumnBuilder, Memo, NodeRef, Prop, ReadSignal, Render, RenderFn, ScrollBuilder,
-    Selector, VisibilityBuilder, WriteSignal,
+    Child, ColumnBuilder, ItemSize, Memo, NodeRef, Prop, ReadSignal, Render, RenderFn,
+    ScrollBuilder, Selector, VisibilityBuilder, WriteSignal,
 };
 use crate::unstyled;
 use crate::unstyled::button::ButtonHandle;
@@ -164,7 +164,7 @@ pub fn select(
     view! {
         <column spacing=0.0>
             <unstyled::button
-                node_ref={&state.trigger}
+                @node_ref={&state.trigger}
                 focused={focused.memo(Focus::Trigger)}
                 on_focus_change={move |has_focus: bool| blur(&trigger_blur, has_focus, Focus::Trigger)}
                 content={trigger_content}
@@ -180,7 +180,7 @@ pub fn select(
                 {popup.call(view! {
                     <column spacing=6.0>
                         <unstyled::text_input
-                            node_ref={&state.search}
+                            @node_ref={&state.search}
                             value={search_text}
                             focused={focused.memo(Focus::Search)}
                             placeholder={search_placeholder}
@@ -200,7 +200,7 @@ pub fn select(
                             }}
                             on_key_override={move |press: KeyPress| navigate(&navigate_state, press)}
                         />
-                        @fixed(OPTIONS_MAX_HEIGHT) <scroll reveal children={items} />
+                        <scroll @sizing=ItemSize::Fixed(OPTIONS_MAX_HEIGHT) reveal children={items} />
                     </column>
                 })}
             </overlay>
@@ -221,7 +221,7 @@ fn select_row(
     view! {
         <visibility visible>
             <unstyled::button
-                node_ref={&state.rows[index].button}
+                @node_ref={&state.rows[index].button}
                 tab_stop=false
                 content={move |button: ButtonHandle| {
                     let hovered = button.hovered.clone();

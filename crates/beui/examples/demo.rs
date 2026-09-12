@@ -163,7 +163,7 @@ fn scroll_row_face(
             <fill color={fill_color} radius=RADIUS>
                 <padding horizontal=ROW_PADDING_HORIZONTAL vertical>
                     <centered_row spacing=12.0>
-                        @percent(100.0) <body content={format!("Row {index}")} />
+                        <body @sizing=ItemSize::Percent(100.0) content={format!("Row {index}")} />
                         <visibility visible={timings}>
                             <caption
                                 content={format!("{} ms", 7 + index * 3 % 91)}
@@ -183,16 +183,16 @@ fn demo_shell(count: ReadSignal<i64>, set_count: WriteSignal<i64>) -> NodeId {
     let narrow = narrower_than(NARROW_WIDTH);
     let header_height = create_memo(move || {
         if narrow.get() {
-            COMPACT_HEADER_HEIGHT
+            ItemSize::Fixed(COMPACT_HEADER_HEIGHT)
         } else {
-            HEADER_HEIGHT
+            ItemSize::Fixed(HEADER_HEIGHT)
         }
     });
     view! {
         <column spacing=0.0>
-            @fixed(header_height) <demo_header set_count />
-            @fixed(SEPARATOR_HEIGHT) <separator/>
-            @percent(100.0) <demo_body count />
+            <demo_header @sizing={header_height} set_count />
+            <separator @sizing=ItemSize::Fixed(SEPARATOR_HEIGHT) />
+            <demo_body @sizing=ItemSize::Percent(100.0) count />
         </column>
     }
 }
@@ -220,14 +220,14 @@ fn demo_header(set_count: WriteSignal<i64>) -> NodeId {
                             <caption content="retained mode ui" />
                         </visibility>
                     </centered_row>
-                    @percent(100.0) <spacer />
+                    <spacer @sizing=ItemSize::Percent(100.0) />
                     <button label="Reset" variant=ButtonVariant::Secondary on_click={move || {
                         reset_count.set(0);
                     }} />
-                    @fixed(ICON_BUTTON_WIDTH) <button label="-" variant=ButtonVariant::Primary on_click={move || {
+                    <button @sizing=ItemSize::Fixed(ICON_BUTTON_WIDTH) label="-" variant=ButtonVariant::Primary on_click={move || {
                         decrement_count.update(|value| *value = value.saturating_sub(1));
                     }} />
-                    @fixed(ICON_BUTTON_WIDTH) <button label="+" variant=ButtonVariant::Primary on_click={move || {
+                    <button @sizing=ItemSize::Fixed(ICON_BUTTON_WIDTH) label="+" variant=ButtonVariant::Primary on_click={move || {
                         set_count.update(|value| *value = value.saturating_add(1));
                     }} />
                 </centered_row>
@@ -249,8 +249,8 @@ fn demo_body(count: ReadSignal<i64>) -> NodeId {
     view! {
         <padding horizontal={padding.clone()} vertical={padding}>
             <stack spacing=BODY_SPACING>
-                @percent(32.0) <sidebar />
-                @percent(68.0) <main_panel count />
+                <sidebar @sizing=ItemSize::Percent(32.0) />
+                <main_panel @sizing=ItemSize::Percent(68.0) count />
             </stack>
         </padding>
     }
@@ -268,7 +268,7 @@ fn sidebar() -> NodeId {
                     <paragraph content="beui keeps a retained tree of nodes. Base nodes carry behaviour only, unstyled \
                          components compose them, and the styled components paint them." />
                 </accordion>
-                @fixed(SEPARATOR_HEIGHT) <separator/>
+                <separator @sizing=ItemSize::Fixed(SEPARATOR_HEIGHT) />
                 <accordion title="Keyboard" open={keyboard_open}>
                     <column spacing=12.0>
                         <shortcut keys="Tab" description="move focus to the next control" />
@@ -319,15 +319,15 @@ fn main_panel(count: ReadSignal<i64>) -> NodeId {
                 </column>
             </card>
             <controls rows={rows.clone()} />
-            @size(rows_size) <card>
+            <card @sizing={rows_size}>
                 <column spacing=12.0>
                     <centered_row spacing=12.0>
                         <heading content={format!("Rows ({ROW_COUNT})")} />
-                        @percent(100.0) <caption content={status_text} align=TextAlign::End />
+                        <caption @sizing=ItemSize::Percent(100.0) content={status_text} align=TextAlign::End />
                     </centered_row>
-                    @fixed(SEPARATOR_HEIGHT) <separator/>
-                    @percent(100.0) <row spacing=10.0>
-                        @percent(100.0) <virtual_list
+                    <separator @sizing=ItemSize::Fixed(SEPARATOR_HEIGHT) />
+                    <row @sizing=ItemSize::Percent(100.0) spacing=10.0>
+                        <virtual_list @sizing=ItemSize::Percent(100.0)
                             count=ROW_COUNT
                             item_height={row_height}
                             focus_color=ACCENT
@@ -339,7 +339,7 @@ fn main_panel(count: ReadSignal<i64>) -> NodeId {
                                 view! { <scroll_row index rows compact /> }
                             }}
                         </virtual_list>
-                        @fixed(SCROLLBAR_WIDTH) <scrollbar position={scroll_position} />
+                        <scrollbar @sizing=ItemSize::Fixed(SCROLLBAR_WIDTH) position={scroll_position} />
                     </row>
                 </column>
             </card>
@@ -395,7 +395,7 @@ fn list_controls(rows: Rows) -> NodeId {
             }} />
             <centered_row spacing=12.0>
                 <switch on=false on_change={move |on| compact_rows.set_compact(on)} />
-                @percent(100.0) <body content="Compact rows" />
+                <body @sizing=ItemSize::Percent(100.0) content="Compact rows" />
             </centered_row>
         </column>
     }
@@ -410,7 +410,7 @@ fn load_controls() -> NodeId {
         <column spacing=12.0>
             <centered_row spacing=12.0>
                 <caption content="Simulated load" />
-                @percent(100.0) <caption content={create_memo(move || percent_label(readout_value.get()))} align=TextAlign::End />
+                <caption @sizing=ItemSize::Percent(100.0) content={create_memo(move || percent_label(readout_value.get()))} align=TextAlign::End />
             </centered_row>
             <slider value=0.4 on_change={move |value| {
                 set_progress_value.set(value);
@@ -428,7 +428,7 @@ fn name_controls() -> NodeId {
         <column spacing=12.0>
             <centered_row spacing=12.0>
                 <caption content="Display name" />
-                @percent(100.0) <caption content={greeting_text} align=TextAlign::End />
+                <caption @sizing=ItemSize::Percent(100.0) content={greeting_text} align=TextAlign::End />
             </centered_row>
             <text_input value=String::new() placeholder="Type a name" on_change={move |value| {
                 set_greeting_text.set(greeting_label(&value));
@@ -460,7 +460,7 @@ fn choice_controls() -> NodeId {
 
     view! {
         <stack spacing=20.0 breakpoint=CARD_NARROW_WIDTH>
-            @percent(50.0) <column spacing=8.0>
+            <column @sizing=ItemSize::Percent(50.0) spacing=8.0>
                 <caption content="Update mode" />
                 <radio_group labels={vec!["Automatic".to_string(), "Manual".to_string(), "Scheduled".to_string()]} selected=Some(0) on_change={move |selected| {
                     if let Some(index) = selected {
@@ -480,7 +480,7 @@ fn choice_controls() -> NodeId {
                 }} />
                 <caption content={pin_status_text} />
             </column>
-            @percent(50.0) <column spacing=8.0>
+            <column @sizing=ItemSize::Percent(50.0) spacing=8.0>
                 <caption content="Highlight color (type to search)" />
                 <listbox labels={vec!["Amber".to_string(), "Blue".to_string(), "Green".to_string(), "Purple".to_string()]} selected=Some(1) on_change={move |selected| {
                     if let Some(index) = selected {
@@ -518,7 +518,7 @@ fn menu_controls() -> NodeId {
 
     view! {
         <stack spacing=20.0 breakpoint=CARD_NARROW_WIDTH>
-            @percent(50.0) <column spacing=8.0>
+            <column @sizing=ItemSize::Percent(50.0) spacing=8.0>
                 <caption content="Favorite fruit (type to search)" />
                 <select options={fruits} selected=Some(0) on_change={move |selected| {
                     let text = selected
@@ -531,7 +531,7 @@ fn menu_controls() -> NodeId {
                 }} />
                 <caption content={fruit_status_text} />
             </column>
-            @percent(50.0) <column spacing=8.0>
+            <column @sizing=ItemSize::Percent(50.0) spacing=8.0>
                 <context_menu items on_select={move |path: Vec<usize>| {
                     let label = match path.as_slice() {
                         [0] => "Copy".to_owned(),

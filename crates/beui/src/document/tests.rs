@@ -6,10 +6,12 @@ mod a_disabled_button_prop_tracks_a_signal_and_blocks_clicks_while_true;
 mod a_missing_required_prop_panics_at_the_view_that_wrote_it;
 mod a_multi_root_view_fills_a_children_prop_in_order;
 mod a_nested_container_reports_its_own_width_not_the_windows;
+mod a_reactive_sizing_attribute_moves_a_child_between_fixed_and_percent;
 mod a_reactive_tree_can_nest_builder_calls_without_threading_the_document;
 mod a_signal_write_from_a_click_handler_updates_its_bound_text_in_the_same_frame;
 mod a_stack_becomes_a_column_when_its_container_gets_narrow;
 mod a_stack_built_inside_a_show_still_measures_the_container_above_it;
+mod a_tag_can_take_a_node_ref_and_a_test_id_slot_at_once;
 mod a_virtual_list_in_a_stacked_stack_only_builds_the_items_in_view;
 mod a_virtual_scroll_only_builds_the_items_in_view;
 mod a_virtual_scroll_row_can_build_reactive_content_during_dispatch;
@@ -70,7 +72,7 @@ mod setting_the_value_of_a_text_input_reports_the_change;
 mod shift_arrow_selects_the_character_that_typing_then_replaces;
 mod shift_tab_moves_focus_to_the_previous_button;
 mod show_lazily_builds_and_toggles_its_child_when_the_condition_changes;
-mod sizing_prefixes_on_the_roots_of_a_multi_root_view_are_honoured;
+mod sizing_attributes_on_the_roots_of_a_multi_root_view_are_honoured;
 mod tab_is_trapped_inside_an_open_context_menu;
 mod tab_moves_focus_from_one_text_input_to_the_next;
 mod tab_moves_focus_to_the_next_button;
@@ -320,8 +322,8 @@ pub(crate) fn virtual_list(built: &Rc<RefCell<Vec<usize>>>) -> (Document, NodeId
         move || {
             view! {
                 <column spacing=0.0>
-                    @percent(100.0) <virtual_list
-                        node_ref=&scroll
+                    <virtual_list @sizing=ItemSize::Percent(100.0)
+                        @node_ref=&scroll
                         count=VIRTUAL_ITEM_COUNT
                         item_height=VIRTUAL_ITEM_HEIGHT
                     >
@@ -354,9 +356,9 @@ pub(crate) fn hello_column() -> HelloColumn {
         move || {
             view! {
                 <column spacing=0.0>
-                    <padding node_ref=&padding horizontal=4.0 vertical=4.0>
+                    <padding @node_ref=&padding horizontal=4.0 vertical=4.0>
                         <text
-                            node_ref=&text
+                            @node_ref=&text
                             string="Hello"
                             font_size=14.0
                             color=Color32::WHITE

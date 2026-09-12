@@ -14,13 +14,13 @@ fn tabbing_to_an_offscreen_control_reveals_it() {
                 .map(|(index, button)| {
                     intrinsic(view! {
                         <labelled_button
-                            node_ref={button}
+                            @node_ref={button}
                             label={format!("Button {index}")}
                         />
                     })
                 })
                 .collect();
-            view! { <scroll node_ref=&scroll children={items} /> }
+            view! { <scroll @node_ref=&scroll children={items} /> }
         }
     });
     let scroll = scroll.get();

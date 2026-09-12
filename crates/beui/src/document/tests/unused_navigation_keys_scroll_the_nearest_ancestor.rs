@@ -11,19 +11,19 @@ fn unused_navigation_keys_scroll_the_nearest_ancestor() {
             let mut items = vec![
                 intrinsic(view! {
                     <tabs
-                        node_ref=&tabs
+                        @node_ref=&tabs
                         labels={vec!["One".to_string(), "Two".to_string()]}
                         selected=0
                     />
                 }),
-                intrinsic(view! { <slider node_ref=&slider value=0.5 /> }),
+                intrinsic(view! { <slider @node_ref=&slider value=0.5 /> }),
             ];
             items.extend((0..20).map(|_| {
                 intrinsic(view! {
                     <text string="Content" font_size=14.0 color=Color32::WHITE />
                 })
             }));
-            view! { <scroll node_ref=&scroll children={items} /> }
+            view! { <scroll @node_ref=&scroll children={items} /> }
         }
     });
     let (scroll, tabs, slider) = (scroll.get(), tabs.get(), slider.get());

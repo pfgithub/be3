@@ -16,7 +16,7 @@ fn hover_only_repaints_when_its_handler_changes_a_node() {
                     cursor=crate::CursorIcon::PointingHand
                     on_hover_change={move |hovered| set_hover_paints.set(hovered)}
                 >
-                    <fill node_ref=&fill color=Color32::WHITE radius=0 />
+                    <fill @node_ref=&fill color=Color32::WHITE radius=0 />
                 </click_catcher>
             }
         }

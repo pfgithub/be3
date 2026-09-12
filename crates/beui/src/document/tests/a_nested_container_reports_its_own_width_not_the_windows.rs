@@ -1,5 +1,5 @@
 use super::*;
-use crate::reactive::{build, view, Memo, ReadSignal};
+use crate::reactive::{build, view, ItemSize, Memo, ReadSignal};
 use crate::styled::StackBuilder;
 use crate::unstyled::{narrower_than, ContainerBuilder};
 
@@ -26,7 +26,7 @@ fn a_nested_container_reports_its_own_width_not_the_windows() {
                         view! {
                             <column spacing=0.0>
                                 <stack spacing=0.0 breakpoint=BREAKPOINT>
-                                    @percent(100.0) <sized node_ref=&outer_item height=ITEM_HEIGHT>
+                                    <sized @sizing=ItemSize::Percent(100.0) @node_ref=&outer_item height=ITEM_HEIGHT>
                                         <spacer />
                                     </sized>
                                 </stack>
@@ -39,8 +39,8 @@ fn a_nested_container_reports_its_own_width_not_the_windows() {
                                                 .push(narrower_than(BREAKPOINT));
                                             view! {
                                                 <stack spacing=0.0 breakpoint=BREAKPOINT>
-                                                    @percent(100.0) <sized
-                                                        node_ref=&inner_item
+                                                    <sized @sizing=ItemSize::Percent(100.0)
+                                                        @node_ref=&inner_item
                                                         height=ITEM_HEIGHT
                                                     >
                                                         <spacer />
