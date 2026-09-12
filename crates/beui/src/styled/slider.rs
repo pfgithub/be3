@@ -23,15 +23,13 @@ const FOCUS_RING_OFFSET: f32 = 3.0;
 #[component]
 pub fn slider(value: Prop<f32>, on_change: Callback<f32>) -> NodeId {
     view! {
-        <unstyled::slider
-            value
-            on_change={move |value| on_change.call(value)}
-            content={move |handle: SliderHandle| {
+        <unstyled::slider value on_change={move |value| on_change.call(value)}>
+            {move |handle: SliderHandle| {
                 let value = handle.value.clone();
                 component_detail(create_memo(move || detail(value.get())));
                 view! { <slider_track handle /> }
             }}
-        />
+        </unstyled::slider>
     }
 }
 

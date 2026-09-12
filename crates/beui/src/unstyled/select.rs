@@ -78,7 +78,7 @@ pub fn select(
     search_content: Option<Render<TextInputHandle>>,
     trigger: Option<Render<SelectTriggerHandle>>,
     option: Option<RenderFn<SelectOptionHandle>>,
-    popup: Option<Render<Child>>,
+    #[prop(children)] popup: Option<Render<Child>>,
 ) -> NodeId {
     let selected_prop = selected;
     let initial = selected_prop.peek().filter(|index| *index < options.len());

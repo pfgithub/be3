@@ -321,7 +321,8 @@ pub(crate) fn virtual_list(built: &Rc<RefCell<Vec<usize>>>) -> (Document, NodeId
                         node_ref=&scroll
                         count=VIRTUAL_ITEM_COUNT
                         item_height=VIRTUAL_ITEM_HEIGHT
-                        item={move |index: usize| {
+                    >
+                        {move |index: usize| {
                             sink.borrow_mut().push(index);
                             view! {
                                 <padding horizontal=0.0 vertical={VIRTUAL_ITEM_HEIGHT / 2.0}>
@@ -329,7 +330,7 @@ pub(crate) fn virtual_list(built: &Rc<RefCell<Vec<usize>>>) -> (Document, NodeId
                                 </padding>
                             }
                         }}
-                    />
+                    </virtual_list>
                 </column>
             }
         }

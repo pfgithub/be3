@@ -18,13 +18,9 @@ fn for_each_reuses_nodes_for_keys_that_persist_across_an_update() {
                     >
                         <text string="shuffle" />
                     </button>
-                    <for_each
-                        node_ref=&list
-                        spacing=0.0
-                        items
-                        key={|value: i64| value}
-                        view={|value: i64| view! { <text string={value.to_string()} /> }}
-                    />
+                    <for_each node_ref=&list spacing=0.0 items key={|value: i64| value}>
+                        {|value: i64| view! { <text string={value.to_string()} /> }}
+                    </for_each>
                 </column>
             }
         }

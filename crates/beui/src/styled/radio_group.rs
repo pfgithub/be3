@@ -18,8 +18,9 @@ pub fn radio_group(
             selected
             kind=Kind::Radio
             on_change={move |selected| on_change.call(selected)}
-            option={|handle| view! { <choice_option kind=Kind::Radio handle /> }}
-        />
+        >
+            {|handle| view! { <choice_option kind=Kind::Radio handle /> }}
+        </choice>
     }
 }
 

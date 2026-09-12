@@ -46,8 +46,9 @@ pub fn select(
             search_content={|handle| view! { <search_field handle /> }}
             trigger={move |handle| view! { <select_trigger options={trigger_options} handle /> }}
             option={|handle| view! { <select_option handle /> }}
-            popup={|content| view! { <select_popup>{content}</select_popup> }}
-        />
+        >
+            {|content| view! { <select_popup>{content}</select_popup> }}
+        </unstyled::select>
     }
 }
 

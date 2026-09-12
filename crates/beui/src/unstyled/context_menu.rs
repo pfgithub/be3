@@ -54,9 +54,8 @@ pub fn context_menu(
                     open
                     on_dismiss={move || dismiss.set(false)}
                 >
-                    <dynamic
-                        value={items}
-                        view={move |items: Vec<MenuItem>| {
+                    <dynamic value={items}>
+                        {move |items: Vec<MenuItem>| {
                             let (row, panel, close) = (row.clone(), panel.clone(), close.clone());
                             let content = content.clone();
                             let on_select = on_select.clone();
@@ -74,7 +73,7 @@ pub fn context_menu(
                                 />
                             })
                         }}
-                    />
+                    </dynamic>
                 </overlay>
             </column>
         </click_catcher>

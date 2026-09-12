@@ -35,14 +35,15 @@ fn check_compact_rows(inset: f32) {
                         node_ref=&scroll
                         count=VIRTUAL_ITEM_COUNT
                         item_height
-                        item={move |index: usize| {
+                    >
+                        {move |index: usize| {
                             sink.borrow_mut().push(index);
                             let height = row_height.get() / 2.0;
                             view! {
                                 <padding horizontal=0.0 vertical={height}><spacer /></padding>
                             }
                         }}
-                    />
+                    </virtual_list>
                 </column>
             }
         }

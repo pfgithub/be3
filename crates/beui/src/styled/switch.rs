@@ -24,15 +24,13 @@ const FOCUS_RING_OFFSET: f32 = 4.0;
 #[component]
 pub fn switch(on: Prop<bool>, on_change: Callback<bool>) -> NodeId {
     view! {
-        <toggle
-            checked={on}
-            on_change={move |on| on_change.call(on)}
-            content={move |handle: ToggleHandle| {
+        <toggle checked={on} on_change={move |on| on_change.call(on)}>
+            {move |handle: ToggleHandle| {
                 let checked = handle.checked.clone();
                 component_detail(create_memo(move || detail(checked.get()).to_owned()));
                 view! { <switch_track handle /> }
             }}
-        />
+        </toggle>
     }
 }
 

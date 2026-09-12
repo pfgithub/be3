@@ -73,18 +73,15 @@ fn app() -> NodeId {
                 <button on_click={increment_click}>
                     <text string="+" />
                 </button>
-                <show condition={is_nonzero} then={move || view! {
+                <show condition={is_nonzero}>
                     <button on_click={reset_click}>
                         <text string="reset" />
                     </button>
-                }} />
+                </show>
             </row>
-            <for_each
-                spacing=4.0
-                items={history}
-                key={|(id, _): (u64, i64)| id}
-                view={|(_, value): (u64, i64)| view! { <history_entry value /> }}
-            />
+            <for_each spacing=4.0 items={history} key={|(id, _): (u64, i64)| id}>
+                {|(_, value): (u64, i64)| view! { <history_entry value /> }}
+            </for_each>
         </column>
     }
 }

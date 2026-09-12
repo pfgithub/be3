@@ -18,8 +18,9 @@ pub fn listbox(
             selected
             kind=Kind::Listbox
             on_change={move |selected| on_change.call(selected)}
-            option={|handle| view! { <choice_option kind=Kind::Listbox handle /> }}
-        />
+        >
+            {|handle| view! { <choice_option kind=Kind::Listbox handle /> }}
+        </choice>
     }
 }
 

@@ -110,11 +110,8 @@ pub(crate) fn build(state: &Rc<State>) -> Panel {
                                 reveal
                                 on_change={move |value| set_position.set(value)}
                             >
-                                <for_each
-                                    spacing=0.0
-                                    items={keys}
-                                    key={|key: Key| key}
-                                    view={move |key: Key| view! {
+                                <for_each spacing=0.0 items={keys} key={|key: Key| key}>
+                                    {move |key: Key| view! {
                                         <tree_row
                                             row_key={key}
                                             entries={entries.clone()}
@@ -122,7 +119,7 @@ pub(crate) fn build(state: &Rc<State>) -> Panel {
                                             rows={list_rows.clone()}
                                         />
                                     }}
-                                />
+                                </for_each>
                             </scroll>
                             @fixed(SCROLLBAR_WIDTH) <scrollbar position />
                         </row>

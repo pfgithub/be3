@@ -15,7 +15,8 @@ fn a_virtual_list_in_a_stacked_stack_only_builds_the_items_in_view() {
         let scroll = scroll.clone();
         move || {
             view! {
-                <container content={move |_| {
+                <container>
+                    {move |_| {
                     let (sink, scroll) = (sink.clone(), scroll.clone());
                     let narrow = narrower_than(BREAKPOINT);
                     let size = create_memo(move || if narrow.get() {
@@ -32,7 +33,8 @@ fn a_virtual_list_in_a_stacked_stack_only_builds_the_items_in_view() {
                                         node_ref=&scroll
                                         count=VIRTUAL_ITEM_COUNT
                                         item_height=VIRTUAL_ITEM_HEIGHT
-                                        item={move |index: usize| {
+                                    >
+                                        {move |index: usize| {
                                             sink.borrow_mut().push(index);
                                             view! {
                                                 <padding horizontal=0.0 vertical={VIRTUAL_ITEM_HEIGHT / 2.0}>
@@ -40,12 +42,13 @@ fn a_virtual_list_in_a_stacked_stack_only_builds_the_items_in_view() {
                                                 </padding>
                                             }
                                         }}
-                                    />
+                                    </virtual_list>
                                 </column>
                             </column>
                         </stack>
                     }
-                }} />
+                    }}
+                </container>
             }
         }
     });

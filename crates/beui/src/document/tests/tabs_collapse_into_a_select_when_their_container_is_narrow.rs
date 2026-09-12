@@ -12,14 +12,16 @@ fn tabs_collapse_into_a_select_when_their_container_is_narrow() {
         let tabs = tabs.clone();
         move || {
             view! {
-                <container content={move |_| view! {
-                    <responsive_tabs
-                        node_ref=&tabs
-                        labels={vec!["List".to_string(), "Load".to_string(), "Name".to_string()]}
-                        selected=1
-                        breakpoint=BREAKPOINT
-                    />
-                }} />
+                <container>
+                    {move |_| view! {
+                        <responsive_tabs
+                            node_ref=&tabs
+                            labels={vec!["List".to_string(), "Load".to_string(), "Name".to_string()]}
+                            selected=1
+                            breakpoint=BREAKPOINT
+                        />
+                    }}
+                </container>
             }
         }
     });

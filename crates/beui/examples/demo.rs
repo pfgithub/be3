@@ -51,9 +51,9 @@ impl DemoApp {
             let (count, set_count) = create_signal(0i64);
             view! {
                 <fill color=BACKGROUND radius=0>
-                    <container content={move |_| view! {
-                        <demo_shell count set_count />
-                    }} />
+                    <container>
+                        {move |_| view! { <demo_shell count set_count /> }}
+                    </container>
                 </fill>
             }
         });
@@ -332,12 +332,13 @@ fn main_panel(count: ReadSignal<i64>) -> NodeId {
                             item_height={row_height}
                             focus_color=ACCENT
                             on_change={move |position| set_scroll_position.set(position)}
-                            item={move |index: usize| {
+                        >
+                            {move |index: usize| {
                                 let rows = item_rows.clone();
                                 let compact = rows.compact.get();
                                 view! { <scroll_row index rows compact /> }
                             }}
-                        />
+                        </virtual_list>
                         @fixed(SCROLLBAR_WIDTH) <scrollbar position={scroll_position} />
                     </row>
                 </column>
@@ -350,7 +351,7 @@ fn main_panel(count: ReadSignal<i64>) -> NodeId {
 fn controls(rows: Rows) -> NodeId {
     view! {
         <card>
-            <container content={move |_| view! { <control_panels rows /> }} />
+            <container>{move |_| view! { <control_panels rows /> }}</container>
         </card>
     }
 }
@@ -373,11 +374,11 @@ fn control_panels(rows: Rows) -> NodeId {
                 }}
             />
             <column spacing=0.0>
-                <show condition={tab.memo(0)} then={move || view! { <list_controls rows={list_rows} /> }} />
-                <show condition={tab.memo(1)} then={|| view! { <load_controls /> }} />
-                <show condition={tab.memo(2)} then={|| view! { <name_controls /> }} />
-                <show condition={tab.memo(3)} then={|| view! { <choice_controls /> }} />
-                <show condition={tab.memo(4)} then={|| view! { <menu_controls /> }} />
+                <show condition={tab.memo(0)}><list_controls rows=list_rows /></show>
+                <show condition={tab.memo(1)}><load_controls /></show>
+                <show condition={tab.memo(2)}><name_controls /></show>
+                <show condition={tab.memo(3)}><choice_controls /></show>
+                <show condition={tab.memo(4)}><menu_controls /></show>
             </column>
         </column>
     }

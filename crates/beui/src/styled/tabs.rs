@@ -20,8 +20,9 @@ pub fn tabs(labels: Vec<String>, selected: Prop<usize>, on_change: Callback<usiz
                     on_change.call(selected);
                 }
             }}
-            option={|handle| view! { <choice_option kind=Kind::Tabs handle /> }}
-        />
+        >
+            {|handle| view! { <choice_option kind=Kind::Tabs handle /> }}
+        </choice>
     }
 }
 

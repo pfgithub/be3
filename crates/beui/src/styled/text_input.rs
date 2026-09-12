@@ -35,8 +35,9 @@ pub fn text_input(
             padding_horizontal=PADDING_HORIZONTAL
             on_change={move |value| on_change.call(value)}
             on_submit={move |value| on_submit.call(value)}
-            content={move |handle| view! { <text_input_frame handle /> }}
-        />
+        >
+            {move |handle| view! { <text_input_frame handle /> }}
+        </unstyled::text_input>
     }
 }
 

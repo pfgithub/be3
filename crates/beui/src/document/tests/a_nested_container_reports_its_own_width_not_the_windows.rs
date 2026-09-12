@@ -19,32 +19,41 @@ fn a_nested_container_reports_its_own_width_not_the_windows() {
             let inner_sizes = sizes.clone();
             let inner_collapsed = collapsed.clone();
             view! {
-                <container content={move |size| {
-                    sizes.borrow_mut().push(size);
-                    collapsed.borrow_mut().push(narrower_than(BREAKPOINT));
-                    view! {
-                        <column spacing=0.0>
-                            <stack spacing=0.0 breakpoint=BREAKPOINT>
-                                @percent(100.0) <sized node_ref=&outer_item height=ITEM_HEIGHT>
-                                    <spacer />
+                <container>
+                    {move |size| {
+                        sizes.borrow_mut().push(size);
+                        collapsed.borrow_mut().push(narrower_than(BREAKPOINT));
+                        view! {
+                            <column spacing=0.0>
+                                <stack spacing=0.0 breakpoint=BREAKPOINT>
+                                    @percent(100.0) <sized node_ref=&outer_item height=ITEM_HEIGHT>
+                                        <spacer />
+                                    </sized>
+                                </stack>
+                                <sized width=INNER_WIDTH>
+                                    <container>
+                                        {move |size| {
+                                            inner_sizes.borrow_mut().push(size);
+                                            inner_collapsed
+                                                .borrow_mut()
+                                                .push(narrower_than(BREAKPOINT));
+                                            view! {
+                                                <stack spacing=0.0 breakpoint=BREAKPOINT>
+                                                    @percent(100.0) <sized
+                                                        node_ref=&inner_item
+                                                        height=ITEM_HEIGHT
+                                                    >
+                                                        <spacer />
+                                                    </sized>
+                                                </stack>
+                                            }
+                                        }}
+                                    </container>
                                 </sized>
-                            </stack>
-                            <sized width=INNER_WIDTH>
-                                <container content={move |size| {
-                                    inner_sizes.borrow_mut().push(size);
-                                    inner_collapsed.borrow_mut().push(narrower_than(BREAKPOINT));
-                                    view! {
-                                        <stack spacing=0.0 breakpoint=BREAKPOINT>
-                                            @percent(100.0) <sized node_ref=&inner_item height=ITEM_HEIGHT>
-                                                <spacer />
-                                            </sized>
-                                        </stack>
-                                    }
-                                }} />
-                            </sized>
-                        </column>
-                    }
-                }} />
+                            </column>
+                        }
+                    }}
+                </container>
             }
         }
     });

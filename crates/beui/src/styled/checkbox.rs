@@ -26,15 +26,13 @@ const FOCUS_RING_OFFSET: f32 = 4.0;
 #[component]
 pub fn checkbox(label: Prop<String>, checked: Prop<bool>, on_change: Callback<bool>) -> NodeId {
     view! {
-        <toggle
-            checked
-            on_change={move |checked| on_change.call(checked)}
-            content={move |handle: ToggleHandle| {
+        <toggle checked on_change={move |checked| on_change.call(checked)}>
+            {move |handle: ToggleHandle| {
                 let checked = handle.checked.clone();
                 component_detail(create_memo(move || detail(checked.get()).to_owned()));
                 view! { <checkbox_face handle label /> }
             }}
-        />
+        </toggle>
     }
 }
 

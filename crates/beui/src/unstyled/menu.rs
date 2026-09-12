@@ -226,7 +226,8 @@ fn menu_row(
                 }}
                 on_key={move |press: KeyPress| key(&key_state, index, parent.clone(), press)}
             />
-            <show condition={has_children} then={move || {
+            <show condition={has_children}>
+                {move || {
                 let select_state = submenu_state.clone();
                 let leave_state = submenu_state.clone();
                 let submenu = submenu_state.rows[index]
@@ -266,7 +267,8 @@ fn menu_row(
                         })}
                     </overlay>
                 }
-            }} />
+                }}
+            </show>
         </column>
     }
 }

@@ -23,11 +23,9 @@ pub fn toggle_button(
     component_detail(label_text.clone());
 
     view! {
-        <toggle
-            checked={pressed}
-            on_change={move |pressed| on_change.call(pressed)}
-            content={move |handle| view! { <toggle_button_face handle label={label_text} /> }}
-        />
+        <toggle checked={pressed} on_change={move |pressed| on_change.call(pressed)}>
+            {move |handle| view! { <toggle_button_face handle label={label_text} /> }}
+        </toggle>
     }
 }
 

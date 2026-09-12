@@ -16,7 +16,8 @@ fn evicting_a_virtual_scroll_row_disposes_its_effects() {
                         node_ref=&scroll
                         count=100
                         item_height=20.0
-                        item={move |index: usize| {
+                    >
+                        {move |index: usize| {
                             let shown = shown.clone();
                             view! {
                                 <visibility visible={shown}>
@@ -24,7 +25,7 @@ fn evicting_a_virtual_scroll_row_disposes_its_effects() {
                                 </visibility>
                             }
                         }}
-                    />
+                    </virtual_list>
                 </column>
             }
         }

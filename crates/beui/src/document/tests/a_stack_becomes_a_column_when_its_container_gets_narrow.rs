@@ -13,16 +13,18 @@ fn a_stack_becomes_a_column_when_its_container_gets_narrow() {
         let (left, right) = (left.clone(), right.clone());
         move || {
             view! {
-                <container content={move |_| view! {
-                    <stack spacing=0.0 breakpoint=BREAKPOINT>
-                        @percent(50.0) <sized node_ref=&left height=ITEM_HEIGHT>
-                            <spacer />
-                        </sized>
-                        @percent(50.0) <sized node_ref=&right height=ITEM_HEIGHT>
-                            <spacer />
-                        </sized>
-                    </stack>
-                }} />
+                <container>
+                    {move |_| view! {
+                        <stack spacing=0.0 breakpoint=BREAKPOINT>
+                            @percent(50.0) <sized node_ref=&left height=ITEM_HEIGHT>
+                                <spacer />
+                            </sized>
+                            @percent(50.0) <sized node_ref=&right height=ITEM_HEIGHT>
+                                <spacer />
+                            </sized>
+                        </stack>
+                    }}
+                </container>
             }
         }
     });

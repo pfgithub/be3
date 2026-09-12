@@ -267,19 +267,39 @@ whose child is optional, like `fill` or a `button` that takes `content` instead.
 Props that build part of the tree are typed `Render<H>` when the component calls
 them once, `RenderFn<H>` when it may call them many times, and `Option<..>` when
 they have a default. Their setters take a bare closure, so a component hands
-part of its chrome to its caller the way JSX passes children as a function:
+part of its chrome to its caller the way JSX passes children as a function.
+
+`#[prop(children)]` marks the one of them that the block between the tags fills,
+so a caller writes that subtree where it reads as the body instead of as an
+attribute. A prop named `children` already is that slot and needs no annotation;
+a component has at most one, and a component with both keeps `children`.
 
 ```rust
 #[component]
 fn checkbox(label: Prop<String>, checked: Prop<bool>) -> NodeId {
     view! {
-        <toggle
-            checked
-            content={move |handle| view! { <checkbox_face handle label /> }}
-        />
+        <toggle checked>
+            {move |handle| view! { <checkbox_face handle label /> }}
+        </toggle>
     }
 }
 ```
+
+A slot that hands something over — `toggle`'s `content` above, `for_each`'s
+`view`, `container`'s `content` — takes one closure as its only child, and that
+closure receives the handle. A slot whose handle is `()`, like `show`'s `then`,
+takes tags instead: `view!` wraps them in the closure itself, so they stay
+unbuilt until the component asks for them.
+
+```rust
+<show condition={tab.memo(0)}><list_controls rows=list_rows /></show>
+```
+
+Either way the block is exactly one child, because a `Render` returns one
+`NodeId`; two tags there are a compile error naming the tag that wrote them.
+Handing a slot a `Render`/`RenderFn` a component was given itself stays an
+attribute, like `panel={panel.clone()}` — only a closure or a tag block can be
+written between the tags.
 
 A render prop runs with the component that *wrote* it installed, not the one
 that calls it, so `component_detail` inside one labels the outer component.
@@ -338,7 +358,7 @@ need the value itself rather than a boolean, like a menu whose items can be
 swapped out.
 
 ```rust
-<dynamic value={items} view={move |items: Vec<MenuItem>| view! { <menu_list items /> }} />
+<dynamic value={items}>{move |items: Vec<MenuItem>| view! { <menu_list items /> }}</dynamic>
 ```
 
 `@intrinsic`/`@fixed(size)`/`@percent(weight)` prefix a child inside `view!` to
@@ -369,9 +389,13 @@ created it. Provide a distinct wrapper type per concern rather than a bare `f32`
 or two providers will collide on the same key.
 
 One ordering rule matters: `view!` builds a tag's children before the tag itself,
-so children written inside a provider's angle brackets are built *before* its
-body calls `provide_context`. A provider must therefore take the subtree it
-covers as a render prop, which the body calls after providing.
+so a subtree passed as `Children` or `Child` is already built *before* the body
+that would provide to it runs. A provider therefore takes the subtree it covers
+as a render prop and calls it after `provide_context`. That prop is where
+`#[prop(children)]` earns its keep: the caller still writes the subtree between
+the provider's tags, but `view!` hands it over as a closure rather than as
+finished nodes, so the provide-then-build order holds while the provider reads
+like any other wrapper.
 
 ## Containers and responsive layout
 
