@@ -755,13 +755,15 @@ enum ViewChildKind {
 
 struct ViewChild {
     sizing: Option<ViewSizing>,
+    sizing_span: proc_macro2::Span,
     kind: ViewChildKind,
 }
 
 impl Parse for ViewChild {
     fn parse(input: ParseStream) -> syn::Result<Self> {
+        let mut sizing_span = input.span();
         let sizing = if input.peek(Token![@]) {
-            input.parse::<Token![@]>()?;
+            sizing_span = input.parse::<Token![@]>()?.span;
             Some(input.parse()?)
         } else {
             None
@@ -775,7 +777,11 @@ impl Parse for ViewChild {
             ViewChildKind::Expr(content.parse()?)
         };
 
-        Ok(ViewChild { sizing, kind })
+        Ok(ViewChild {
+            sizing,
+            sizing_span,
+            kind,
+        })
     }
 }
 
@@ -849,6 +855,32 @@ impl Parse for ViewNode {
     }
 }
 
+fn expand_child_items(children: &[ViewChild]) -> Vec<proc_macro2::TokenStream> {
+    children
+        .iter()
+        .map(|child| {
+            let node = match &child.kind {
+                ViewChildKind::Node(node) => expand_view_node(node),
+                ViewChildKind::Expr(expr) => quote! { #expr },
+            };
+            match &child.sizing {
+                None | Some(ViewSizing::Intrinsic) => {
+                    quote! { ::beui::reactive::intrinsic(#node) }
+                }
+                Some(ViewSizing::Fixed(size)) => {
+                    quote! { ::beui::reactive::fixed(#node, #size) }
+                }
+                Some(ViewSizing::Percent(weight)) => {
+                    quote! { ::beui::reactive::percent(#node, #weight) }
+                }
+                Some(ViewSizing::Size(size)) => {
+                    quote! { ::beui::reactive::size(#node, #size) }
+                }
+            }
+        })
+        .collect()
+}
+
 fn expand_view_node(node: &ViewNode) -> proc_macro2::TokenStream {
     let mut segments = node.tag_path.clone();
     let last = segments.pop().expect("tag path always has one segment");
@@ -875,6 +907,7 @@ fn expand_view_node(node: &ViewNode) -> proc_macro2::TokenStream {
             if let [ViewChild {
                 sizing: None,
                 kind: ViewChildKind::Expr(Expr::Closure(closure)),
+                ..
             }] = children.as_slice()
             {
                 let children_render = format_ident!("children_render", span = tag);
@@ -882,26 +915,7 @@ fn expand_view_node(node: &ViewNode) -> proc_macro2::TokenStream {
                     #builder_path::default() #(#setters)* .#children_render(#closure) .build()
                 };
             }
-            let items = children.iter().map(|child| {
-                let node = match &child.kind {
-                    ViewChildKind::Node(node) => expand_view_node(node),
-                    ViewChildKind::Expr(expr) => quote! { #expr },
-                };
-                match &child.sizing {
-                    None | Some(ViewSizing::Intrinsic) => {
-                        quote! { ::beui::reactive::intrinsic(#node) }
-                    }
-                    Some(ViewSizing::Fixed(size)) => {
-                        quote! { ::beui::reactive::fixed(#node, #size) }
-                    }
-                    Some(ViewSizing::Percent(weight)) => {
-                        quote! { ::beui::reactive::percent(#node, #weight) }
-                    }
-                    Some(ViewSizing::Size(size)) => {
-                        quote! { ::beui::reactive::size(#node, #size) }
-                    }
-                }
-            });
+            let items = expand_child_items(children);
             let block = quote_spanned! { tag => move || [#(#items),*] };
             let children_block = format_ident!("children_block", span = tag);
             quote! {
@@ -911,9 +925,44 @@ fn expand_view_node(node: &ViewNode) -> proc_macro2::TokenStream {
     }
 }
 
+struct View {
+    roots: Vec<ViewChild>,
+}
+
+impl Parse for View {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let mut roots = Vec::new();
+        while !input.is_empty() {
+            roots.push(input.parse::<ViewChild>()?);
+        }
+        Ok(View { roots })
+    }
+}
+
+fn expand_view(view: &View) -> proc_macro2::TokenStream {
+    if let [root] = view.roots.as_slice() {
+        if root.sizing.is_some() {
+            return syn::Error::new(
+                root.sizing_span,
+                "a sizing prefix gives a child its share of its siblings' space, and a `view!` with one root builds that node on its own; write the sizing where the node is used as a child",
+            )
+            .to_compile_error();
+        }
+        return match &root.kind {
+            ViewChildKind::Node(node) => expand_view_node(node),
+            ViewChildKind::Expr(expr) => quote! { #expr },
+        };
+    }
+    if view.roots.is_empty() {
+        return quote! { ::beui::reactive::Children::default() };
+    }
+    let items = expand_child_items(&view.roots);
+    quote! { ::beui::reactive::Children::from([#(#items),*]) }
+}
+
 #[proc_macro]
 pub fn view(item: TokenStream) -> TokenStream {
-    let node = parse_macro_input!(item as ViewNode);
-    let expanded = expand_view_node(&node);
+    let view = parse_macro_input!(item as View);
+    let expanded = expand_view(&view);
     quote! { { #expanded } }.into()
 }

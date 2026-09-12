@@ -264,6 +264,26 @@ it takes exactly one and arrives as the `NodeId` itself, so wrappers use
 gets a panic naming the component. `Option<Child>` is the same for a wrapper
 whose child is optional, like `fill` or a `button` that takes `content` instead.
 
+A `view!` with more than one root is a `Children` rather than a `NodeId`, so a
+fixed set of siblings can be written in one place and handed to a `Children`
+prop somewhere else. The number of roots decides, and nothing else: one root is
+the `NodeId` it has always been.
+
+```rust
+let toolbar = view! {
+    <button label="Open" on_click={open} />
+    <button label="Save" on_click={save} />
+};
+view! { <row spacing=8.0 children={toolbar} /> }
+```
+
+Roots take the same `@` sizing prefixes and `{expr}` form that children between
+tags take, and `view! {}` is the empty `Children`. A sizing prefix on a lone
+root is an error rather than a one-item `Children`, because with no siblings
+there is nothing to take a share of. A list built from runtime data is still a
+`Vec` of `intrinsic`/`fixed`/`percent`/`size` pairs; fragments are for siblings
+written out in source.
+
 Props that build part of the tree are typed `Render<H>` when the component calls
 them once, `RenderFn<H>` when it may call them many times, and `Option<..>` when
 they have a default. Their setters take a bare closure, so a component hands
@@ -361,8 +381,8 @@ swapped out.
 <dynamic value={items}>{move |items: Vec<MenuItem>| view! { <menu_list items /> }}</dynamic>
 ```
 
-`@intrinsic`/`@fixed(size)`/`@percent(weight)` prefix a child inside `view!` to
-give it an `ItemSize` in a `row`/`column`, and `@size(item_size)` takes a whole
+`@intrinsic`/`@fixed(size)`/`@percent(weight)` prefix a child inside `view!`, or
+a root of a multi-root one, to give it an `ItemSize` in a `row`/`column`, and `@size(item_size)` takes a whole
 `ItemSize` so a child can switch between kinds reactively — a memo that reads
 `narrower_than` and returns `ItemSize::Fixed` in a column where it returned
 `ItemSize::Percent` in a row, for instance. A percent child takes its share of
