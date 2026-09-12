@@ -12,9 +12,13 @@ TARGET is native (the default), web or android. The web target builds the
 bundle and hosts it, and the android target installs the APK on the attached
 device and launches it.
 
-Native options:  [--release] [-- APPLICATION ARGUMENTS...]
+Native options:  [--release] [--smoke] [-- APPLICATION ARGUMENTS...]
 Web options:     [--release]
 Android options: [--android-sdk DIRECTORY] [--application-id ID] [--label LABEL]
+
+--smoke builds the native app, starts it for ten seconds in an isolated virtual
+display and data directory, and succeeds if it remains running. It requires
+xvfb-run and timeout.
 USAGE
 }
 

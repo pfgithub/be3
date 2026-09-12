@@ -134,6 +134,6 @@ fonts.
 
 5. Running them
 
-Build the workspace, not the package: cargo nextest run --workspace. An editor crate on its
-own fails to build, because it is block-app that turns on the windowing features eframe
-needs, and cargo only unifies those across a whole-workspace build.
+Run ./scripts/verify. It prepares the non-Cargo prerequisites and builds the complete workspace.
+Do not build or test an editor package by itself: block-app turns on the windowing features
+eframe needs, and Cargo only unifies those across a whole-workspace build.

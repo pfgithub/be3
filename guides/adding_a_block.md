@@ -134,8 +134,7 @@ Test meaningful behavior such as operation application, invalid or repeated oper
 From the workspace root, run:
 
 ```text
-cargo fmt
-cargo nextest run
+./scripts/verify
 ```
 
 If the block needs a UI, continue with the [editor guide](../../../block-app/src/editors/guide.md).

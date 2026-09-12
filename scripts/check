@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+source "$(dirname "${BASH_SOURCE[0]}")/internal/common.sh"
+
+if [[ $# -ne 0 ]]; then
+    echo 'Usage: ./scripts/check' >&2
+    exit 1
+fi
+
+assert_command cargo 'Install Rust from https://rustup.rs.'
+cd "$repository"
+
+host_triple="$(rustc --version --verbose | sed -n 's/^host: //p')"
+echo 'Preparing native build prerequisites...'
+"$internal/build-ghostty-vt.sh" --triple "$host_triple" > /dev/null
+
+echo 'Checking the complete workspace...'
+cargo check --workspace --all-targets --all-features
