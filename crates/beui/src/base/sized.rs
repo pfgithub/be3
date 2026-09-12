@@ -6,7 +6,7 @@ use crate::painter::Painter;
 
 use crate::document::Document;
 use crate::node::{Element, InteractInput, NodeId};
-use crate::reactive::{with_document, Child, Prop};
+use crate::reactive::{create_effect, with_document, Child, Prop};
 
 use beui_macros::component;
 
@@ -141,13 +141,13 @@ pub fn sized(width: Option<Prop<f32>>, height: Option<Prop<f32>>, children: Chil
         sized
     });
     if let Some(width) = width {
-        width.apply(move |width| {
-            with_document(|document| document.set_sized_width(sized, Some(width)));
+        create_effect(move || {
+            with_document(|document| document.set_sized_width(sized, Some(width.get())))
         });
     }
     if let Some(height) = height {
-        height.apply(move |height| {
-            with_document(|document| document.set_sized_height(sized, Some(height)));
+        create_effect(move || {
+            with_document(|document| document.set_sized_height(sized, Some(height.get())))
         });
     }
     sized

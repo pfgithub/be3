@@ -124,8 +124,8 @@ pub fn padding(horizontal: Prop<f32>, vertical: Prop<f32>, children: Child) -> N
     });
     let (horizontal_read, set_horizontal) = create_signal(0.0);
     let (vertical_read, set_vertical) = create_signal(0.0);
-    horizontal.apply(move |value| set_horizontal.set(value));
-    vertical.apply(move |value| set_vertical.set(value));
+    create_effect(move || set_horizontal.set(horizontal.get()));
+    create_effect(move || set_vertical.set(vertical.get()));
     create_effect(move || {
         let (horizontal, vertical) = (horizontal_read.get(), vertical_read.get());
         with_document(|document| document.set_padding(padding, horizontal, vertical));

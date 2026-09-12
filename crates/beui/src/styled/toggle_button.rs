@@ -19,7 +19,7 @@ pub fn toggle_button(
     pressed: Prop<bool>,
     on_change: Callback<bool>,
 ) -> NodeId {
-    let label_text = label.memo();
+    let label_text = create_memo(move || label.get());
     component_detail(label_text.clone());
 
     view! {

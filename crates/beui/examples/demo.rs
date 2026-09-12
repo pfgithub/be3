@@ -1,7 +1,7 @@
 use beui::reactive::{
-    build, create_memo, create_signal, view, CenteredRowBuilder, ColumnBuilder, FillBuilder, Memo,
-    OutlineBuilder, PaddingBuilder, ReadSignal, RowBuilder, Selector, ShowBuilder, SpacerBuilder,
-    VirtualListBuilder, VisibilityBuilder, WriteSignal,
+    build, clone, create_memo, create_selector, create_signal, view, CenteredRowBuilder,
+    ColumnBuilder, FillBuilder, Memo, OutlineBuilder, PaddingBuilder, ReadSignal, RowBuilder,
+    Selector, ShowBuilder, SpacerBuilder, VirtualListBuilder, VisibilityBuilder, WriteSignal,
 };
 use beui::styled::theme::{
     ACCENT, ACCENT_SOFT, BACKGROUND, NARROW_WIDTH, RADIUS, SCROLLBAR_WIDTH, SEPARATOR_HEIGHT,
@@ -86,7 +86,7 @@ struct Rows {
 impl Rows {
     fn new(set_status: WriteSignal<String>) -> Self {
         let (selected, set_selected) = create_signal(None);
-        let selection = selected.selector();
+        let selection = create_selector(clone!(selected -> move || selected.get()));
         let (timings, set_timings) = create_signal(true);
         let (compact, set_compact) = create_signal(false);
         Self {
@@ -150,7 +150,8 @@ fn scroll_row_face(
     } else {
         ROW_PADDING_VERTICAL
     };
-    let value_color = selected.map(|selected| if selected { ACCENT } else { TEXT_MUTED });
+    let value_color =
+        create_memo(clone!(selected -> move || if selected.get() { ACCENT } else { TEXT_MUTED }));
     let fill_color = create_memo(move || match (selected.get(), hovered.get()) {
         (true, _) => ACCENT_SOFT,
         (false, true) => SURFACE_RAISED,
@@ -180,8 +181,8 @@ fn scroll_row_face(
 #[component]
 fn demo_shell(count: ReadSignal<i64>, set_count: WriteSignal<i64>) -> NodeId {
     let narrow = narrower_than(NARROW_WIDTH);
-    let header_height = narrow.map(|narrow| {
-        if narrow {
+    let header_height = create_memo(move || {
+        if narrow.get() {
             COMPACT_HEADER_HEIGHT
         } else {
             HEADER_HEIGHT
@@ -201,9 +202,9 @@ fn demo_header(set_count: WriteSignal<i64>) -> NodeId {
     let reset_count = set_count.clone();
     let decrement_count = set_count.clone();
     let narrow = narrower_than(NARROW_WIDTH);
-    let wide = narrow.map(|narrow| !narrow);
-    let horizontal = narrow.map(|narrow| {
-        if narrow {
+    let wide = create_memo(clone!(narrow -> move || !narrow.get()));
+    let horizontal = create_memo(move || {
+        if narrow.get() {
             COMPACT_PADDING
         } else {
             HEADER_PADDING
@@ -238,8 +239,8 @@ fn demo_header(set_count: WriteSignal<i64>) -> NodeId {
 #[component]
 fn demo_body(count: ReadSignal<i64>) -> NodeId {
     let narrow = narrower_than(NARROW_WIDTH);
-    let padding = narrow.map(|narrow| {
-        if narrow {
+    let padding = create_memo(move || {
+        if narrow.get() {
             COMPACT_PADDING
         } else {
             BODY_PADDING
@@ -258,7 +259,7 @@ fn demo_body(count: ReadSignal<i64>) -> NodeId {
 #[component]
 fn sidebar() -> NodeId {
     let narrow = narrower_than(NARROW_WIDTH);
-    let open = narrow.map(|narrow| !narrow);
+    let open = create_memo(move || !narrow.get());
     let keyboard_open = open.clone();
     view! {
         <card>
@@ -289,8 +290,9 @@ fn sidebar() -> NodeId {
 fn main_panel(count: ReadSignal<i64>) -> NodeId {
     let (status_text, set_status_text) = create_signal("Nothing selected".to_string());
     let rows = Rows::new(set_status_text);
-    let row_height = rows.compact.map(|compact| {
-        if compact {
+    let compact = rows.compact.clone();
+    let row_height = create_memo(move || {
+        if compact.get() {
             COMPACT_ROW_HEIGHT
         } else {
             ROW_HEIGHT
@@ -299,8 +301,8 @@ fn main_panel(count: ReadSignal<i64>) -> NodeId {
     let item_rows = rows.clone();
     let (scroll_position, set_scroll_position) = create_signal(ScrollPosition::ZERO);
     let narrow = narrower_than(NARROW_WIDTH);
-    let rows_size = narrow.map(|narrow| {
-        if narrow {
+    let rows_size = create_memo(move || {
+        if narrow.get() {
             ItemSize::Fixed(NARROW_ROWS_HEIGHT)
         } else {
             ItemSize::Percent(100.0)
@@ -312,7 +314,7 @@ fn main_panel(count: ReadSignal<i64>) -> NodeId {
             <card>
                 <column spacing={4.0}>
                     <caption content={"Counter".to_string()} />
-                    <display content={count.map(|count| count.to_string())} />
+                    <display content={create_memo(clone!(count -> move || count.get().to_string()))} />
                     <paragraph content={"Click the header buttons, or focus one with Tab and press Enter.".to_string()} />
                 </column>
             </card>
@@ -357,7 +359,7 @@ fn controls(rows: Rows) -> NodeId {
 fn control_panels(rows: Rows) -> NodeId {
     let (selected_tab, set_selected_tab) = create_signal(0usize);
 
-    let tab = selected_tab.selector();
+    let tab = create_selector(clone!(selected_tab -> move || selected_tab.get()));
     let list_rows = rows.clone();
 
     view! {
@@ -407,7 +409,7 @@ fn load_controls() -> NodeId {
         <column spacing={12.0}>
             <centered_row spacing={12.0}>
                 <caption content={"Simulated load".to_string()} />
-                @percent(100.0) <caption content={readout_value.map(percent_label)} align={TextAlign::End} />
+                @percent(100.0) <caption content={create_memo(move || percent_label(readout_value.get()))} align={TextAlign::End} />
             </centered_row>
             <slider value={0.4} on_change={move |value| {
                 set_progress_value.set(value);

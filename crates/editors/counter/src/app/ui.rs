@@ -1,8 +1,8 @@
 use std::rc::Rc;
 
 use block_editor_plugin::beui::reactive::{
-    build, create_signal, view, with_reactive_scope, CenteredRowBuilder, ColumnBuilder,
-    FillBuilder, PaddingBuilder, WriteSignal,
+    build, clone, create_memo, create_signal, view, with_reactive_scope, CenteredRowBuilder,
+    ColumnBuilder, FillBuilder, PaddingBuilder, WriteSignal,
 };
 use block_editor_plugin::beui::styled::theme::BACKGROUND;
 use block_editor_plugin::beui::styled::{ButtonBuilder, ButtonVariant, DisplayBuilder};
@@ -51,7 +51,7 @@ impl CounterUi {
                     <padding horizontal={PADDING} vertical={PADDING}>
                         <column spacing={16.0}>
                             <display
-                                content={count.map(|count| count.to_string())}
+                                content={create_memo(clone!(count -> move || count.get().to_string()))}
                                 test_id={"counter.value"}
                             />
                             <centered_row spacing={10.0}>

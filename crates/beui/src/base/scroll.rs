@@ -551,8 +551,8 @@ pub fn virtual_list(
     let item = item.expect("virtual_list requires an `item` builder");
     let (count_read, set_count) = create_signal(0);
     let (height_read, set_height) = create_signal(0.0);
-    count.apply(move |value| set_count.set(value));
-    item_height.apply(move |value| set_height.set(value));
+    create_effect(move || set_count.set(count.get()));
+    create_effect(move || set_height.set(item_height.get()));
     create_effect(move || {
         let (count, height) = (count_read.get(), height_read.get());
         let item = item.clone();
@@ -573,10 +573,11 @@ pub fn scroll(
 ) -> NodeId {
     let scroll = create_scroll(focus_color, on_change);
     children.mount_scroll_items(scroll);
-    offset.apply(move |offset| {
-        with_document(|document| document.set_scroll_offset(scroll, offset));
+    create_effect(move || {
+        with_document(|document| document.set_scroll_offset(scroll, offset.get()))
     });
-    reveal.apply(move |index| {
+    create_effect(move || {
+        let index = reveal.get();
         let Some(index) = index else {
             return;
         };
@@ -591,8 +592,8 @@ fn create_scroll(focus_color: Prop<Color32>, on_change: Callback<ScrollPosition>
         document.set_scroll_on_change(scroll, move |position| on_change.call(position));
         scroll
     });
-    focus_color.apply(move |color| {
-        with_document(|document| document.set_scroll_focus_color(scroll, color));
+    create_effect(move || {
+        with_document(|document| document.set_scroll_focus_color(scroll, focus_color.get()))
     });
     scroll
 }

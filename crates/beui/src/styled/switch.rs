@@ -28,7 +28,8 @@ pub fn switch(on: Prop<bool>, on_change: Callback<bool>) -> NodeId {
             checked={on}
             on_change={move |on| on_change.call(on)}
             content={move |handle: ToggleHandle| {
-                component_detail(handle.checked.map(|checked| detail(checked).to_owned()));
+                let checked = handle.checked.clone();
+                component_detail(create_memo(move || detail(checked.get()).to_owned()));
                 view! { <switch_track handle={handle} /> }
             }}
         />

@@ -7,7 +7,7 @@ use crate::painter::Painter;
 
 use crate::document::Document;
 use crate::node::{Element, InteractInput, NodeId};
-use crate::reactive::{with_document, Callback, Child, ClickCallback, Prop};
+use crate::reactive::{create_effect, with_document, Callback, Child, ClickCallback, Prop};
 
 use beui_macros::component;
 
@@ -238,11 +238,13 @@ pub fn click_catcher(
         }
         click_catcher
     });
-    cursor.apply(move |cursor| {
-        with_document(|document| document.set_click_catcher_cursor(click_catcher, cursor));
+    create_effect(move || {
+        with_document(|document| document.set_click_catcher_cursor(click_catcher, cursor.get()))
     });
-    key_active.apply(move |active| {
-        with_document(|document| document.set_click_catcher_key_active(click_catcher, active));
+    create_effect(move || {
+        with_document(|document| {
+            document.set_click_catcher_key_active(click_catcher, key_active.get())
+        })
     });
     click_catcher
 }

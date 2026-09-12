@@ -12,5 +12,13 @@ pub use scope::{on_cleanup, owner_scope, provide_context, use_context, Scope, Sc
 pub use selector::{create_selector, Selector};
 pub use signal::{create_signal, ReadSignal, WriteSignal};
 
+#[macro_export]
+macro_rules! clone {
+    ($($name:ident)* -> $body:expr) => {{
+        $(let $name = $name.clone();)*
+        $body
+    }};
+}
+
 #[cfg(test)]
 mod tests;

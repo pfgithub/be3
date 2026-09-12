@@ -18,9 +18,9 @@ use crate::node::NodeId;
 use beui_macros::{component, view};
 
 use crate::reactive::{
-    component_detail, copy_text, create_memo, create_signal, set_component_state, Callback, Child,
-    ClickCatcherBuilder, FocusableBuilder, Memo, NodeRef, PaddingBuilder, Prop, ReadSignal, Render,
-    TextBuilder, WriteSignal,
+    clone, component_detail, copy_text, create_effect, create_memo, create_signal,
+    set_component_state, Callback, Child, ClickCatcherBuilder, FocusableBuilder, Memo, NodeRef,
+    PaddingBuilder, Prop, ReadSignal, Render, TextBuilder, WriteSignal,
 };
 
 const FONT_SIZE: f32 = 14.0;
@@ -93,16 +93,16 @@ pub fn text_input(
         on_submit,
     }));
     set_component_state(editor.clone());
-    component_detail(text_value.map(|value| detail(&value)));
+    component_detail(create_memo(
+        clone!(text_value -> move || detail(&text_value.get())),
+    ));
 
-    value.apply({
-        let editor = editor.clone();
-        move |value| {
-            if text_of(&editor.borrow().core) != value {
-                replace_all(&editor, value);
-            }
+    create_effect(clone!(editor -> move || {
+        let value = value.get();
+        if text_of(&editor.borrow().core) != value {
+            replace_all(&editor, value);
         }
-    });
+    }));
 
     view! {
         <focusable
@@ -174,9 +174,9 @@ pub fn text_input(
 }
 
 fn shown_string(value: &ReadSignal<String>, placeholder: Prop<String>) -> Memo<String> {
-    let (value, placeholder) = (value.clone(), placeholder.reader());
+    let value = value.clone();
     create_memo(move || match value.get() {
-        text if text.is_empty() => placeholder(),
+        text if text.is_empty() => placeholder.get(),
         text => text,
     })
 }
@@ -187,12 +187,11 @@ fn shown_color(
     placeholder_color: Prop<Color32>,
 ) -> Memo<Color32> {
     let value = value.clone();
-    let (color, placeholder_color) = (color.reader(), placeholder_color.reader());
     create_memo(move || {
         if value.get().is_empty() {
-            placeholder_color()
+            placeholder_color.get()
         } else {
-            color()
+            color.get()
         }
     })
 }

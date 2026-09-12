@@ -5,7 +5,8 @@ use crate::color::Color32;
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
-    component_detail, Callback, CenteredRowBuilder, FillBuilder, OutlineBuilder, Prop, SizedBuilder,
+    clone, component_detail, create_memo, Callback, CenteredRowBuilder, FillBuilder,
+    OutlineBuilder, Prop, SizedBuilder,
 };
 use crate::styled::theme::{ACCENT, ACCENT_HOVER, KNOB, RADIUS, TRACK};
 use crate::unstyled;
@@ -26,7 +27,8 @@ pub fn slider(value: Prop<f32>, on_change: Callback<f32>) -> NodeId {
             value={value}
             on_change={move |value| on_change.call(value)}
             content={move |handle: SliderHandle| {
-                component_detail(handle.value.map(detail));
+                let value = handle.value.clone();
+                component_detail(create_memo(move || detail(value.get())));
                 view! { <slider_track handle={handle} /> }
             }}
         />
@@ -40,9 +42,9 @@ fn slider_track(handle: SliderHandle) -> NodeId {
         dragging,
         focused,
     } = handle;
-    let filled_percent = value.map(filled_size);
-    let rest_percent = value.map(rest_size);
-    let knob_color = dragging.map(knob_fill_color);
+    let filled_percent = create_memo(clone!(value -> move || filled_size(value.get())));
+    let rest_percent = create_memo(move || rest_size(value.get()));
+    let knob_color = create_memo(move || knob_fill_color(dragging.get()));
 
     view! {
         <outline color={ACCENT} width={FOCUS_RING_WIDTH} radius={RADIUS} offset={FOCUS_RING_OFFSET} visible={focused}>

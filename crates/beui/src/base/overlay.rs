@@ -12,8 +12,8 @@ use beui_macros::{component, view};
 use crate::document::Document;
 use crate::node::{ClickHandler, Element, InteractInput, NodeId};
 use crate::reactive::{
-    with_document, with_reactive_scope, Child, ClickCallback, ClickCatcherBuilder, IntoProp,
-    NodeRef, Prop,
+    create_effect, with_document, with_reactive_scope, Child, ClickCallback, ClickCatcherBuilder,
+    IntoProp, NodeRef, Prop,
 };
 
 #[derive(Clone, PartialEq)]
@@ -193,13 +193,14 @@ pub(crate) fn overlay(
         }
         overlay
     });
-    anchor.apply(move |anchor| {
-        with_document(|document| document.set_overlay_anchor(overlay, anchor));
+    create_effect(move || {
+        with_document(|document| document.set_overlay_anchor(overlay, anchor.get()))
     });
-    placement.apply(move |placement| {
-        with_document(|document| document.set_overlay_placement(overlay, placement));
+    create_effect(move || {
+        with_document(|document| document.set_overlay_placement(overlay, placement.get()))
     });
-    open.apply(move |open| {
+    create_effect(move || {
+        let open = open.get();
         with_document(|document| match open {
             true => document.open_overlay(overlay),
             false => document.close_overlay(overlay),

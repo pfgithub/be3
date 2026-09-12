@@ -9,7 +9,7 @@ use crate::base::{ScrollPosition, TextAlign};
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
-    component, create_memo, create_signal, on_cleanup, view, CenteredRowBuilder,
+    clone, component, create_memo, create_signal, on_cleanup, view, CenteredRowBuilder,
     ClickCatcherBuilder, ColumnBuilder, FillBuilder, ForEachBuilder, Memo, NodeRef, OutlineBuilder,
     PaddingBuilder, ReadSignal, RowBuilder, ScrollBuilder, SpacerBuilder, WriteSignal,
 };
@@ -177,8 +177,8 @@ pub(crate) fn toggle_text(picking: bool) -> Color32 {
 
 #[component]
 fn pick_toggle(state: Rc<State>, picking: Memo<bool>) -> NodeId {
-    let label_color = picking.map(toggle_text);
-    let fill_color = picking.map(toggle_fill);
+    let label_color = create_memo(clone!(picking -> move || toggle_text(picking.get())));
+    let fill_color = create_memo(move || toggle_fill(picking.get()));
     let picker = state;
     view! {
         <unstyled::pressable on_click={move || picker.toggle_picking()}>

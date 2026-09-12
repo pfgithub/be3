@@ -2,35 +2,35 @@ use beui_macros::{component, view};
 
 use crate::base::{Direction, ItemSize};
 use crate::node::NodeId;
-use crate::reactive::{component_detail, Children, ListBuilder, Prop};
+use crate::reactive::{clone, component_detail, create_memo, Children, ListBuilder, Prop};
 
 #[component]
 pub fn stack(spacing: Prop<f32>, narrow: Prop<bool>, children: Children) -> NodeId {
-    let stacked = narrow.memo();
+    let stacked = create_memo(move || narrow.get());
 
-    component_detail(stacked.map(|stacked| if stacked { "column" } else { "row" }.to_owned()));
+    component_detail(create_memo(clone!(stacked -> move || {
+        if stacked.get() { "column" } else { "row" }.to_owned()
+    })));
 
-    let direction = stacked.map(|stacked| {
-        if stacked {
+    let direction = create_memo(clone!(stacked -> move || {
+        if stacked.get() {
             Direction::Vertical
         } else {
             Direction::Horizontal
         }
-    });
+    }));
 
     let children: Vec<(NodeId, Prop<ItemSize>)> = children
         .into_items()
         .into_iter()
         .map(|(child, size)| {
-            let stacked = stacked.clone();
-            let size = size.reader();
-            let size = Prop::Dynamic(Box::new(move || {
+            let size = Prop::Dynamic(Box::new(clone!(stacked -> move || {
                 if stacked.get() {
                     ItemSize::Intrinsic
                 } else {
-                    size()
+                    size.get()
                 }
-            }));
+            })));
             (child, size)
         })
         .collect();

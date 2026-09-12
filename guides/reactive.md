@@ -50,10 +50,6 @@ computations, but equal memo outputs suppress downstream execution. Reading a
 memo inside a batch returns its current value. Dependency chains and diamonds
 refresh before effects observe them, preventing intermediate derived values.
 
-`signal.map(f)` is `create_memo(move || f(signal.get()))` without the clone the
-closure would need: it takes `&self`, so the signal stays usable afterwards.
-Memos have it too, so derivations chain.
-
 Dependencies are discovered on each execution. Conditional branches unsubscribe
 from inputs they no longer read. `untrack(|| ...)` disables subscription for its
 closure while preserving the current cleanup scope. Memo computations must be
@@ -61,6 +57,22 @@ pure: writing a signal inside a memo panics, including inside `untrack`.
 
 `with` holds a shared borrow for the closure; `update` holds a mutable borrow.
 Do not access the same signal incompatibly from those closures.
+
+## Cloning handles into closures
+
+Signals, memos, selectors, and the `Rc` handles components keep are cheap to
+clone, and a `move` closure that keeps one has to own its own clone. `clone!`
+writes those clones for you: it takes the names to clone, an arrow, and the
+expression they are in scope for.
+
+```rust
+let text = create_memo(clone!(count -> move || count.get().to_string()));
+create_effect(clone!(count state -> move || state.show(count.get())));
+```
+
+`clone!(a b -> expr)` expands to `{ let a = a.clone(); let b = b.clone(); expr }`,
+so the originals stay usable afterwards and the last closure that needs a handle
+can still take it by move.
 
 ## Selectors
 
@@ -72,7 +84,7 @@ that gained it.
 
 ```rust
 let (selected, set_selected) = create_signal(Some(0usize));
-let selection = selected.selector();
+let selection = create_selector(clone!(selected -> move || selected.get()));
 
 for index in 0..rows {
     let selection = selection.clone();
@@ -80,8 +92,7 @@ for index in 0..rows {
 }
 ```
 
-`selector()` on a signal or memo is the short form of `create_selector(move ||
-source.get())`. `is_selected(&key)` subscribes the current computation to that key alone, never
+`is_selected(&key)` subscribes the current computation to that key alone, never
 to the source, so a computation reading it reruns only when its own answer
 flips. `memo(key)` wraps one key in a `Memo<bool>` for props and handles that
 want a value rather than a call. Keys need `Clone + Eq + Hash`, and the source's
@@ -101,6 +112,11 @@ again when its tracked inputs change. Effects run synchronously before a write
 returns, except inside `batch` or `Scope::run`, which flush when their outermost
 batch finishes. Multiple writes coalesce into one pending execution. Effects
 created inside effects run after their parent finishes.
+
+An effect that finishes its first execution without reading a signal, opening a
+scope, or registering a cleanup can never run again, so it is disposed right
+there and releases whatever its closure captured. This is what makes it cheap to
+bind a property with an effect that may turn out to hold a plain value.
 
 `create_effect` returns an `Effect` handle for explicit `dispose()` and
 `is_disposed()` checks. Dropping this handle does not stop the effect; its scope
@@ -137,7 +153,7 @@ value because it may already have mutated it. There is no transaction rollback.
 ## beui integration
 
 `beui::reactive` (re-exporting `create_signal`, `create_effect`, `create_memo`,
-`create_selector`, `Scope`, `batch`, `settle`, `untrack`, `on_cleanup`,
+`create_selector`, `clone!`, `Scope`, `batch`, `settle`, `untrack`, `on_cleanup`,
 `provide_context`, and `use_context` from this crate) binds signals and
 memos directly to `Document` nodes. Nothing in a view takes a `&mut Document`
 parameter, so tags nest the way JSX or solidjs would nest them: write the tree
@@ -195,14 +211,25 @@ let fill = create_memo(move || if hovered.get() { HOVER } else { REST });
 view! { <fill color={fill} radius={RADIUS}>{child}</fill> }
 ```
 
-A component that has to *read* one of its own `Prop<T>`s calls `memo()` on it,
-which turns either form into a `Memo<T>` it can read and pass on. When the
-component also writes that value itself — a toggle whose `checked` prop seeds
-state that clicking then changes — `signal()` returns a `(ReadSignal<T>,
-WriteSignal<T>)` pair seeded from the prop and kept in sync with it, so writes
-from the component's own handlers and writes from the caller's signal both land
-in one place. Use `map` first when the value needs adjusting on the way in:
-`value.map(|value| value.clamp(0.0, 1.0)).signal()`.
+`Prop<T>` reads with `get()`, which subscribes the computation around it, and
+with `peek()`, which does not. A component that has to *read* one of its own
+props wraps that in a memo it can read and pass on:
+
+```rust
+let text = create_memo(move || content.get());
+```
+
+When the component also writes that value itself — a toggle whose `checked` prop
+seeds state that clicking then changes — seed a signal from `peek()` and keep it
+in sync with an effect, so writes from the component's own handlers and writes
+from the caller's signal both land in one place. `Prop::map` adjusts the value on
+the way in:
+
+```rust
+let value = value.map(|value| value.clamp(0.0, 1.0));
+let (value_read, set_value) = create_signal(value.peek());
+create_effect(clone!(set_value -> move || set_value.set(value.get())));
+```
 
 A component's child arity is part of its signature. A prop named `children`
 typed `Children` takes however many are written between its tags; typed `Child`

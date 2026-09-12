@@ -200,8 +200,9 @@ impl Document {
             if let Some(root) = self.root {
                 let rects = Rc::clone(&self.rects);
                 let painter = ctx.painter();
+                let context = self.reactive_scope().context();
                 let _guard = crate::reactive::install(self);
-                crate::reactive::batch(|| {
+                context.run(|| {
                     crate::reactive::with_document(|document| {
                         interact::interact(document, ctx, &painter, &rects, root)
                     });

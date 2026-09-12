@@ -6,8 +6,8 @@ use crate::color::Color32;
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
-    component_detail, create_memo, Callback, CenteredRowBuilder, FillBuilder, OutlineBuilder, Prop,
-    SizedBuilder, SpacerBuilder, TextBuilder, VisibilityBuilder,
+    clone, component_detail, create_memo, Callback, CenteredRowBuilder, FillBuilder,
+    OutlineBuilder, Prop, SizedBuilder, SpacerBuilder, TextBuilder, VisibilityBuilder,
 };
 use crate::styled::theme::{
     ACCENT, ACCENT_HOVER, BORDER, BORDER_WIDTH, CHIP_RADIUS, FONT_BODY, ON_ACCENT, RADIUS,
@@ -30,7 +30,8 @@ pub fn checkbox(label: Prop<String>, checked: Prop<bool>, on_change: Callback<bo
             checked={checked}
             on_change={move |checked| on_change.call(checked)}
             content={move |handle: ToggleHandle| {
-                component_detail(handle.checked.map(|checked| detail(checked).to_owned()));
+                let checked = handle.checked.clone();
+                component_detail(create_memo(move || detail(checked.get()).to_owned()));
                 view! { <checkbox_face handle={handle} label={label} /> }
             }}
         />
@@ -45,11 +46,8 @@ fn checkbox_face(handle: ToggleHandle, label: Prop<String>) -> NodeId {
         focused,
         ..
     } = handle;
-    let fill_color = create_memo({
-        let (checked, hovered) = (checked.clone(), hovered);
-        move || box_fill(checked.get(), hovered.get())
-    });
-    let border_visible = checked.map(|checked| !checked);
+    let fill_color = create_memo(clone!(checked -> move || box_fill(checked.get(), hovered.get())));
+    let border_visible = create_memo(clone!(checked -> move || !checked.get()));
 
     view! {
         <outline color={ACCENT} width={FOCUS_RING_WIDTH} radius={RADIUS} offset={FOCUS_RING_OFFSET} visible={focused}>

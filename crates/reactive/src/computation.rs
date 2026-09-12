@@ -151,6 +151,16 @@ impl Computation {
             }
             Err(error) => std::panic::resume_unwind(error),
         }
+        if self.is_spent() {
+            self.dispose();
+        }
+    }
+
+    fn is_spent(&self) -> bool {
+        self.source.is_none()
+            && self.state.get() == State::Clean
+            && self.dependencies.borrow().is_empty()
+            && self.execution_owner.borrow().is_inert()
     }
 
     fn detach(&self) {

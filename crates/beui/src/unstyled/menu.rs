@@ -5,8 +5,9 @@ use crate::node::NodeId;
 use beui_macros::{component, view};
 
 use crate::reactive::{
-    create_effect, create_signal, intrinsic, set_component_state, Callback, Child, ColumnBuilder,
-    FocusableBuilder, NodeRef, Prop, ReadSignal, RenderFn, Selector, ShowBuilder, WriteSignal,
+    clone, create_effect, create_memo, create_selector, create_signal, intrinsic,
+    set_component_state, Callback, Child, ColumnBuilder, FocusableBuilder, NodeRef, Prop,
+    ReadSignal, RenderFn, Selector, ShowBuilder, WriteSignal,
 };
 use crate::unstyled;
 use crate::unstyled::button::ButtonHandle;
@@ -104,11 +105,11 @@ pub(crate) fn menu_list(
     } else {
         Focus::Root
     };
-    let (focus, set_focus) = active
-        .map(move |active| if active { entry } else { Focus::Away })
-        .signal();
-    let focused = focus.selector();
-    let root_tab_stop = focus.map(|focus| !matches!(focus, Focus::Row(_)));
+    let active_focus = active.map(move |active| if active { entry } else { Focus::Away });
+    let (focus, set_focus) = create_signal(active_focus.peek());
+    create_effect(clone!(set_focus -> move || set_focus.set(active_focus.get())));
+    let focused = create_selector(clone!(focus -> move || focus.get()));
+    let root_tab_stop = create_memo(clone!(focus -> move || !matches!(focus.get(), Focus::Row(_))));
 
     let state: Handle = Rc::new(State {
         rows: items

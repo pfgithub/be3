@@ -4,7 +4,7 @@ use crate::color::Color32;
 
 use crate::base::ScrollPosition;
 use crate::node::NodeId;
-use crate::reactive::{ColumnBuilder, FillBuilder, Prop, SpacerBuilder};
+use crate::reactive::{clone, create_memo, ColumnBuilder, FillBuilder, Prop, SpacerBuilder};
 use crate::styled::theme::{SCROLL_THUMB, SURFACE_RAISED};
 
 const RADIUS: u8 = 3;
@@ -12,19 +12,19 @@ const MINIMUM_THUMB: f32 = 0.08;
 
 #[component]
 pub fn scrollbar(position: Prop<ScrollPosition>) -> NodeId {
-    let position = position.memo();
+    let position = create_memo(move || position.get());
 
-    let before_percent = position.map(before_percent);
-    let thumb_percent = position.map(thumb_percent);
-    let after_percent = position.map(after_percent);
-    let thumb_color = position.map(thumb_color);
+    let before = create_memo(clone!(position -> move || before_percent(position.get())));
+    let thumb = create_memo(clone!(position -> move || thumb_percent(position.get())));
+    let after = create_memo(clone!(position -> move || after_percent(position.get())));
+    let color = create_memo(move || thumb_color(position.get()));
 
     view! {
         <fill color={SURFACE_RAISED} radius={RADIUS}>
             <column spacing={0.0}>
-                @percent(before_percent) <spacer />
-                @percent(thumb_percent) <fill color={thumb_color} radius={RADIUS}></fill>
-                @percent(after_percent) <spacer />
+                @percent(before) <spacer />
+                @percent(thumb) <fill color={color} radius={RADIUS}></fill>
+                @percent(after) <spacer />
             </column>
         </fill>
     }

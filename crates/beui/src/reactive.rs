@@ -13,9 +13,9 @@ use crate::unstyled;
 
 pub use beui_macros::{component, view};
 pub use reactive::{
-    batch, create_effect, create_memo, create_selector, create_signal, on_cleanup, owner_scope,
-    provide_context, settle, untrack, use_context, Effect, Memo, ReadSignal, Scope, ScopeContext,
-    Selector, WriteSignal,
+    batch, clone, create_effect, create_memo, create_selector, create_signal, on_cleanup,
+    owner_scope, provide_context, settle, untrack, use_context, Effect, Memo, ReadSignal, Scope,
+    ScopeContext, Selector, WriteSignal,
 };
 
 thread_local! {
@@ -177,9 +177,8 @@ fn set_detail(shadow: NodeId, detail: String) {
 
 pub fn component_detail(detail: impl IntoProp<String>) {
     let shadow = current_component();
-    detail
-        .into_prop()
-        .apply(move |detail| set_detail(shadow, detail));
+    let detail = detail.into_prop();
+    create_effect(move || set_detail(shadow, detail.get()));
 }
 
 pub fn set_component_state<T: 'static>(state: T) {
@@ -433,19 +432,13 @@ pub enum Prop<T> {
 }
 
 impl<T: 'static> Prop<T> {
-    pub fn get(self) -> T {
+    pub fn get(&self) -> T
+    where
+        T: Clone,
+    {
         match self {
-            Prop::Static(value) => value,
+            Prop::Static(value) => value.clone(),
             Prop::Dynamic(read) => read(),
-        }
-    }
-
-    pub fn apply(self, mut set: impl FnMut(T) + 'static) {
-        match self {
-            Prop::Static(value) => set(value),
-            Prop::Dynamic(read) => {
-                create_effect(move || set(read()));
-            }
         }
     }
 
@@ -453,38 +446,7 @@ impl<T: 'static> Prop<T> {
     where
         T: Clone,
     {
-        untrack(|| match self {
-            Prop::Static(value) => value.clone(),
-            Prop::Dynamic(read) => read(),
-        })
-    }
-
-    pub fn reader(self) -> Box<dyn Fn() -> T>
-    where
-        T: Clone,
-    {
-        match self {
-            Prop::Static(value) => Box::new(move || value.clone()),
-            Prop::Dynamic(read) => read,
-        }
-    }
-
-    pub fn memo(self) -> Memo<T>
-    where
-        T: Clone + PartialEq,
-    {
-        let read = self.reader();
-        create_memo(read)
-    }
-
-    pub fn signal(self) -> (ReadSignal<T>, WriteSignal<T>)
-    where
-        T: Clone + PartialEq,
-    {
-        let (read, write) = create_signal(self.peek());
-        let sink = write.clone();
-        self.apply(move |value| sink.set(value));
-        (read, write)
+        untrack(|| self.get())
     }
 
     pub fn map<U: 'static>(self, f: impl Fn(T) -> U + 'static) -> Prop<U> {
@@ -611,12 +573,11 @@ pub fn list(
     children: Children,
 ) -> NodeId {
     let list = with_document(|document| document.create_list(direction.peek(), 0.0));
-    direction.apply(move |direction| {
-        with_document(|document| document.set_list_direction(list, direction));
+    create_effect(move || {
+        with_document(|document| document.set_list_direction(list, direction.get()))
     });
-    align.apply(move |align| with_document(|document| document.set_list_align(list, align)));
-    spacing
-        .apply(move |spacing| with_document(|document| document.set_list_spacing(list, spacing)));
+    create_effect(move || with_document(|document| document.set_list_align(list, align.get())));
+    create_effect(move || with_document(|document| document.set_list_spacing(list, spacing.get())));
     children.mount(list);
     list
 }
@@ -653,7 +614,8 @@ pub fn show(condition: Prop<bool>, then: Option<Render>) -> NodeId {
     let mut then = then;
     let visibility = with_document(|document| document.create_visibility(false));
     let built: Rc<Cell<Option<NodeId>>> = Rc::new(Cell::new(None));
-    condition.apply(move |visible| {
+    create_effect(move || {
+        let visible = condition.get();
         if visible && built.get().is_none() {
             let build = then.take().expect("show requires a `then` callback");
             let child = in_new_scope(|| build.call(()));
@@ -673,7 +635,8 @@ where
     let view = view.expect("dynamic requires a `view` callback");
     let parent = view! { <column spacing={0.0} /> };
     let built: Rc<Cell<Option<NodeId>>> = Rc::new(Cell::new(None));
-    value.apply(move |value| {
+    create_effect(move || {
+        let value = value.get();
         let child = in_new_scope(|| view.call(value));
         let previous = built.replace(Some(child));
         with_document(|document| {
@@ -703,7 +666,8 @@ where
     let view = view.expect("for_each requires a `view` callback");
     let parent = view! { <column spacing={spacing} /> };
     let existing: Rc<RefCell<HashMap<K, NodeId>>> = Rc::new(RefCell::new(HashMap::new()));
-    items.apply(move |items| {
+    create_effect(move || {
+        let items = items.get();
         let mut existing = existing.borrow_mut();
         let mut next = Vec::with_capacity(items.len());
         for item in &items {

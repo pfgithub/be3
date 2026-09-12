@@ -4,9 +4,9 @@ use crate::document::Document;
 use crate::input::{Key, KeyPress};
 use crate::node::NodeId;
 use crate::reactive::{
-    create_effect, create_signal, intrinsic, set_component_state, Callback, Child, ColumnBuilder,
-    Memo, NodeRef, Prop, ReadSignal, Render, RenderFn, ScrollBuilder, Selector, VisibilityBuilder,
-    WriteSignal,
+    clone, create_effect, create_selector, create_signal, intrinsic, set_component_state, Callback,
+    Child, ColumnBuilder, Memo, NodeRef, Prop, ReadSignal, Render, RenderFn, ScrollBuilder,
+    Selector, VisibilityBuilder, WriteSignal,
 };
 use crate::unstyled;
 use crate::unstyled::button::ButtonHandle;
@@ -86,11 +86,11 @@ pub fn select(
     let popup = popup.unwrap_or_else(|| Render::new(|content| content));
 
     let (highlighted, set_highlighted) = create_signal(initial);
-    let highlight = highlighted.selector();
+    let highlight = create_selector(clone!(highlighted -> move || highlighted.get()));
     let (selected, set_selected) = create_signal(initial);
     let (is_open, set_open) = create_signal(false);
     let (focus, set_focus) = create_signal(Focus::Away);
-    let focused = focus.selector();
+    let focused = create_selector(clone!(focus -> move || focus.get()));
     let (search_text, set_search_text) = create_signal(String::new());
 
     let state: Handle = Rc::new(State {
@@ -149,10 +149,7 @@ pub fn select(
         })
         .collect();
 
-    selected_prop.apply({
-        let state = state.clone();
-        move |selected| apply_requested_selection(&state, selected)
-    });
+    create_effect(clone!(state -> move || apply_requested_selection(&state, selected_prop.get())));
 
     let reveal = reveal_reader(&state);
     let (open_state, key_state, filter_state, submit_state, navigate_state, dismiss_state) = (

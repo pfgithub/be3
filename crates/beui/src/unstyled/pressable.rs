@@ -4,8 +4,8 @@ use crate::input::CursorIcon;
 
 use crate::node::NodeId;
 use crate::reactive::{
-    self, create_signal, untrack, Callback, Child, ClickCallback, ClickCatcherBuilder,
-    FocusableBuilder, Prop,
+    self, clone, create_memo, create_signal, untrack, Callback, Child, ClickCallback,
+    ClickCatcherBuilder, FocusableBuilder, Prop,
 };
 
 #[component]
@@ -17,16 +17,13 @@ pub fn pressable(
     on_hover_change: Callback<bool>,
     on_active_change: Callback<bool>,
 ) -> NodeId {
-    let enabled = enabled.memo();
+    let enabled = create_memo(move || enabled.get());
     let (key_active, set_key_active) = create_signal(false);
-    let click = {
-        let enabled = enabled.clone();
-        move || {
-            if untrack(|| enabled.get()) {
-                on_click.call();
-            }
+    let click = clone!(enabled -> move || {
+        if untrack(|| enabled.get()) {
+            on_click.call();
         }
-    };
+    });
     let key_click = click.clone();
 
     view! {

@@ -6,7 +6,7 @@ use beui_macros::{component, view};
 
 use crate::reactive::Memo;
 use crate::reactive::{
-    create_memo, CenteredRowBuilder, FillBuilder, OutlineBuilder, PaddingBuilder, Prop,
+    clone, create_memo, CenteredRowBuilder, FillBuilder, OutlineBuilder, PaddingBuilder, Prop,
     SizedBuilder, SpacerBuilder, TextBuilder, VisibilityBuilder,
 };
 use crate::styled::theme::{
@@ -31,7 +31,8 @@ pub(super) fn choice_option(kind: Kind, handle: ChoiceOptionHandle) -> NodeId {
         focused,
         ..
     } = handle;
-    let label_color = selected.map(|selected| if selected { TEXT } else { TEXT_MUTED });
+    let label_color =
+        create_memo(clone!(selected -> move || if selected.get() { TEXT } else { TEXT_MUTED }));
     let checked = selected.clone();
     let fill_color = create_memo(move || background(selected.get(), hovered.get()));
     view! {

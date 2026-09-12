@@ -27,7 +27,7 @@ pub fn accordion(
     on_toggle: Callback<bool>,
     children: Child,
 ) -> NodeId {
-    let title_text = title.memo();
+    let title_text = create_memo(move || title.get());
     component_detail(title_text.clone());
 
     view! {

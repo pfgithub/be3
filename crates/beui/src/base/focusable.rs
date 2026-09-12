@@ -10,7 +10,7 @@ use crate::painter::Painter;
 
 use crate::document::Document;
 use crate::node::{Element, InteractInput, NodeId};
-use crate::reactive::{with_document, Callback, Child, ClickCallback, Prop};
+use crate::reactive::{create_effect, with_document, Callback, Child, ClickCallback, Prop};
 
 use beui_macros::component;
 
@@ -391,10 +391,11 @@ pub fn focusable(
         }
         focusable
     });
-    tab_stop.apply(move |tab_stop| {
-        with_document(|document| document.set_focusable_tab_stop(focusable, tab_stop));
+    create_effect(move || {
+        with_document(|document| document.set_focusable_tab_stop(focusable, tab_stop.get()))
     });
-    focused.apply(move |wanted| {
+    create_effect(move || {
+        let wanted = focused.get();
         with_document(|document| match wanted {
             true => document.focus_focusable(focusable),
             false if document.focused_node() == Some(focusable) => document.update_focus(None),

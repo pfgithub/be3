@@ -5,7 +5,7 @@ use crate::input::{CursorIcon, KeyPress};
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
-    self, create_signal, set_component_state, untrack, Callback, Child, ClickCallback,
+    self, create_memo, create_signal, set_component_state, untrack, Callback, Child, ClickCallback,
     ClickCatcherBuilder, FocusableBuilder, Prop, ReadSignal, Render,
 };
 
@@ -37,7 +37,7 @@ pub fn button(
     let (active, set_active) = create_signal(false);
     let (focused, set_focused) = create_signal(false);
     let (key_active, set_key_active) = create_signal(false);
-    let disabled = disabled.memo();
+    let disabled = create_memo(move || disabled.get());
 
     let content_node = match content {
         Some(build) => Some(build.call(ButtonHandle {

@@ -7,8 +7,9 @@ use crate::document::Document;
 use crate::input::{Key, KeyPress};
 use crate::node::NodeId;
 use crate::reactive::{
-    component_detail, create_effect, create_signal, intrinsic, set_component_name,
-    set_component_state, Callback, ListBuilder, Memo, Prop, ReadSignal, RenderFn, WriteSignal,
+    clone, component_detail, create_effect, create_memo, create_selector, create_signal, intrinsic,
+    set_component_name, set_component_state, Callback, ListBuilder, Memo, Prop, ReadSignal,
+    RenderFn, WriteSignal,
 };
 use crate::unstyled;
 use crate::unstyled::ButtonHandle;
@@ -67,10 +68,10 @@ pub fn choice(
     let selected_prop = selected;
     let option = option.expect("choice requires an `option` builder");
     let (selected, set_selected) = create_signal(None);
-    let selection = selected.selector();
-    let tab_stop_owner = selected.map(|selected| selected.unwrap_or(0)).selector();
+    let selection = create_selector(clone!(selected -> move || selected.get()));
+    let tab_stop_owner = create_selector(clone!(selected -> move || selected.get().unwrap_or(0)));
     let (focus, set_focus) = create_signal(None);
-    let focused = focus.selector();
+    let focused = create_selector(clone!(focus -> move || focus.get()));
 
     let state: Handle = Rc::new(State {
         options: labels
@@ -88,13 +89,12 @@ pub fn choice(
         on_change,
     });
     set_component_state(state.clone());
-    component_detail({
-        let state = state.clone();
-        selected.map(move |selected| match selected {
+    component_detail(create_memo(clone!(state selected -> move || {
+        match selected.get() {
             Some(index) => state.options[index].label.clone(),
             None => String::new(),
-        })
-    });
+        }
+    })));
 
     let buttons: Vec<_> = labels
         .iter()
@@ -141,10 +141,7 @@ pub fn choice(
         });
     }
 
-    selected_prop.apply({
-        let state = state.clone();
-        move |value| sync_selected(&state, value)
-    });
+    create_effect(clone!(state -> move || sync_selected(&state, selected_prop.get())));
 
     let direction = if kind == ChoiceKind::Tabs {
         Direction::Horizontal

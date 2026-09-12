@@ -7,7 +7,7 @@ use crate::painter::Painter;
 
 use crate::document::Document;
 use crate::node::{Element, InteractInput, NodeId};
-use crate::reactive::{with_document, Child, Prop};
+use crate::reactive::{create_effect, with_document, Child, Prop};
 
 use beui_macros::component;
 
@@ -124,7 +124,7 @@ pub fn fill(color: Prop<Color32>, radius: Prop<u8>, children: Option<Child>) -> 
         }
         fill
     });
-    color.apply(move |color| with_document(|document| document.set_fill_color(fill, color)));
-    radius.apply(move |radius| with_document(|document| document.set_fill_radius(fill, radius)));
+    create_effect(move || with_document(|document| document.set_fill_color(fill, color.get())));
+    create_effect(move || with_document(|document| document.set_fill_radius(fill, radius.get())));
     fill
 }

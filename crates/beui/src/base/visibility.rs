@@ -6,7 +6,7 @@ use crate::painter::Painter;
 
 use crate::document::Document;
 use crate::node::{Element, InteractInput, NodeId};
-use crate::reactive::{with_document, Child, Prop};
+use crate::reactive::{create_effect, with_document, Child, Prop};
 
 use beui_macros::component;
 
@@ -116,6 +116,6 @@ pub fn visibility(visible: Prop<bool>, children: Child) -> NodeId {
         document.set_visibility_child(node, children);
         node
     });
-    visible.apply(move |value| with_document(|document| document.set_visible(node, value)));
+    create_effect(move || with_document(|document| document.set_visible(node, visible.get())));
     node
 }

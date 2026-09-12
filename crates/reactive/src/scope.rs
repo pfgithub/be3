@@ -29,6 +29,10 @@ impl Owner {
         self.cleanups.borrow_mut().push(Box::new(cleanup));
     }
 
+    pub(crate) fn is_inert(&self) -> bool {
+        self.cleanups.borrow().is_empty() && self.contexts.borrow().is_empty()
+    }
+
     pub(crate) fn dispose(&self) {
         if self.disposed.replace(true) {
             return;

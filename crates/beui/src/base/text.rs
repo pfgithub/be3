@@ -11,7 +11,7 @@ use crate::painter::Painter;
 
 use crate::document::Document;
 use crate::node::{Element, InteractInput, NodeId};
-use crate::reactive::{with_document, NodeRef, Prop};
+use crate::reactive::{create_effect, with_document, NodeRef, Prop};
 
 use beui_macros::component;
 
@@ -380,28 +380,32 @@ pub fn text(
     let node = with_document(|document| {
         document.create_text(String::new(), DEFAULT_FONT_SIZE, Color32::WHITE)
     });
-    align.apply(move |value| {
-        with_document(|document| document.set_text_horizontal_align(node, value));
+    create_effect(move || {
+        with_document(|document| document.set_text_horizontal_align(node, align.get()))
     });
-    vertical_align.apply(move |value| {
-        with_document(|document| document.set_text_vertical_align(node, value));
+    create_effect(move || {
+        with_document(|document| document.set_text_vertical_align(node, vertical_align.get()))
     });
-    wrap.apply(move |value| with_document(|document| document.set_text_wrap(node, value)));
-    monospace
-        .apply(move |value| with_document(|document| document.set_text_monospace(node, value)));
-    icon.apply(move |value| with_document(|document| document.set_text_icon(node, value)));
-    clip.apply(move |value| with_document(|document| document.set_text_clip(node, value)));
-    string.apply(move |value| with_document(|document| document.set_text(node, value)));
-    font_size
-        .apply(move |value| with_document(|document| document.set_text_font_size(node, value)));
-    color.apply(move |value| with_document(|document| document.set_text_color(node, value)));
-    selection_color.apply(move |value| {
-        with_document(|document| document.set_text_selection_color(node, value));
+    create_effect(move || with_document(|document| document.set_text_wrap(node, wrap.get())));
+    create_effect(move || {
+        with_document(|document| document.set_text_monospace(node, monospace.get()))
     });
-    caret_color
-        .apply(move |value| with_document(|document| document.set_text_caret_color(node, value)));
-    caret.apply(move |value| with_document(|document| document.set_text_caret(node, value)));
-    selection
-        .apply(move |value| with_document(|document| document.set_text_selection(node, value)));
+    create_effect(move || with_document(|document| document.set_text_icon(node, icon.get())));
+    create_effect(move || with_document(|document| document.set_text_clip(node, clip.get())));
+    create_effect(move || with_document(|document| document.set_text(node, string.get())));
+    create_effect(move || {
+        with_document(|document| document.set_text_font_size(node, font_size.get()))
+    });
+    create_effect(move || with_document(|document| document.set_text_color(node, color.get())));
+    create_effect(move || {
+        with_document(|document| document.set_text_selection_color(node, selection_color.get()))
+    });
+    create_effect(move || {
+        with_document(|document| document.set_text_caret_color(node, caret_color.get()))
+    });
+    create_effect(move || with_document(|document| document.set_text_caret(node, caret.get())));
+    create_effect(move || {
+        with_document(|document| document.set_text_selection(node, selection.get()))
+    });
     node
 }

@@ -3,8 +3,8 @@ use beui_macros::{component, view};
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
-    component_detail, set_component_state, untrack, Callback, Child, ColumnBuilder, Prop,
-    ReadSignal, Render, VisibilityBuilder,
+    clone, component_detail, create_effect, create_memo, create_signal, set_component_state,
+    untrack, Callback, Child, ColumnBuilder, Prop, ReadSignal, Render, VisibilityBuilder,
 };
 use crate::unstyled;
 use crate::unstyled::button::ButtonHandle;
@@ -28,9 +28,12 @@ pub fn disclosure(
     open: Prop<bool>,
     on_toggle: Callback<bool>,
 ) -> NodeId {
-    let (open_read, set_open) = open.signal();
+    let (open_read, set_open) = create_signal(open.peek());
+    create_effect(clone!(set_open -> move || set_open.set(open.get())));
 
-    component_detail(open_read.map(|open| if open { "open" } else { "closed" }.to_owned()));
+    component_detail(create_memo(clone!(open_read -> move || {
+        if open_read.get() { "open" } else { "closed" }.to_owned()
+    })));
 
     set_component_state(State {
         open: open_read.clone(),
