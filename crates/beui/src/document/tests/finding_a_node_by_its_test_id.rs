@@ -7,7 +7,7 @@ fn finding_a_node_by_its_test_id() {
     let counter = clicks.clone();
     let (document, [_button]) = toolbar_of(|| {
         [view! {
-            <labelled_button
+            <LabelledButton
                 label="Click me"
                 @test_id={"toolbar.button"}
                 on_click={move || counter.set(counter.get() + 1)}

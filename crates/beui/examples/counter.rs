@@ -1,6 +1,5 @@
 use beui::reactive::{
-    build, component, create_memo, create_signal, view, ButtonBuilder, ColumnBuilder,
-    ForEachBuilder, RowBuilder, ShowBuilder, TextBuilder,
+    build, component, create_memo, create_signal, view, Button, Column, ForEach, Row, Show, Text,
 };
 use beui::{App, Color32, Context, Document, NodeId, Rect};
 
@@ -10,7 +9,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 #[component]
 fn history_entry(value: i64) -> NodeId {
-    view! { <text string={value.to_string()} /> }
+    view! { <Text string={value.to_string()} /> }
 }
 
 #[component]
@@ -64,25 +63,25 @@ fn app() -> NodeId {
     let count_text = create_memo(move || count.get().to_string());
 
     view! {
-        <column spacing=8.0>
-            <row spacing=8.0>
-                <button disabled={is_zero} on_click={decrement_click}>
-                    <text string="-" />
-                </button>
-                <text string={count_text} />
-                <button on_click={increment_click}>
-                    <text string="+" />
-                </button>
-                <show condition={is_nonzero}>
-                    <button on_click={reset_click}>
-                        <text string="reset" />
-                    </button>
-                </show>
-            </row>
-            <for_each spacing=4.0 items={history} key={|(id, _): (u64, i64)| id}>
-                {|(_, value): (u64, i64)| view! { <history_entry value /> }}
-            </for_each>
-        </column>
+        <Column spacing=8.0>
+            <Row spacing=8.0>
+                <Button disabled={is_zero} on_click={decrement_click}>
+                    <Text string="-" />
+                </Button>
+                <Text string={count_text} />
+                <Button on_click={increment_click}>
+                    <Text string="+" />
+                </Button>
+                <Show condition={is_nonzero}>
+                    <Button on_click={reset_click}>
+                        <Text string="reset" />
+                    </Button>
+                </Show>
+            </Row>
+            <ForEach spacing=4.0 items={history} key={|(id, _): (u64, i64)| id}>
+                {|(_, value): (u64, i64)| view! { <HistoryEntry value /> }}
+            </ForEach>
+        </Column>
     }
 }
 
@@ -93,7 +92,7 @@ struct CounterApp {
 impl CounterApp {
     fn new() -> Self {
         Self {
-            document: build(|| view! { <app /> }),
+            document: build(|| view! { <App /> }),
         }
     }
 }

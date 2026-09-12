@@ -11,23 +11,23 @@ mod stack;
 mod text_input;
 mod toggle;
 
-pub use button::{button_active, button_focused, ButtonBuilder, ButtonHandle};
-pub use choice::{choice_selected, ChoiceBuilder, ChoiceKind, ChoiceOptionHandle};
-pub use container::{container_size, narrower_than, ContainerBuilder, ContainerSize};
-pub use context_menu::{context_menu_menu, context_menu_overlay, ContextMenuBuilder};
-pub use disclosure::{disclosure_open, DisclosureBuilder, DisclosureHandle};
+pub use button::{button_active, button_focused, Button, ButtonHandle};
+pub use choice::{choice_selected, Choice, ChoiceKind, ChoiceOptionHandle};
+pub use container::{container_size, narrower_than, Container, ContainerSize};
+pub use context_menu::{context_menu_menu, context_menu_overlay, ContextMenu};
+pub use disclosure::{disclosure_open, Disclosure, DisclosureHandle};
 pub use menu::{
     menu_list_len, menu_list_root_focusable, menu_list_row_button, menu_list_row_submenu_content,
     MenuItem, MenuRowHandle,
 };
-pub use pressable::PressableBuilder;
+pub use pressable::Pressable;
 pub use select::{
     select_highlighted, select_open, select_option_button, select_search, select_selected,
-    select_trigger, SelectBuilder, SelectOptionHandle, SelectTriggerHandle,
+    select_trigger, Select, SelectOptionHandle, SelectTriggerHandle,
 };
-pub use slider::{slider_value, SliderBuilder, SliderHandle};
-pub use stack::StackBuilder;
+pub use slider::{slider_value, Slider, SliderHandle};
+pub use stack::Stack;
 pub use text_input::{
-    text_input_focused, text_input_text, text_input_value, TextInputBuilder, TextInputHandle,
+    text_input_focused, text_input_text, text_input_value, TextInput, TextInputHandle,
 };
-pub use toggle::{toggle_checked, ToggleBuilder, ToggleHandle};
+pub use toggle::{toggle_checked, Toggle, ToggleHandle};

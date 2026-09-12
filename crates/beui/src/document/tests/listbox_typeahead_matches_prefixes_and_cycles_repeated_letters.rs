@@ -1,15 +1,15 @@
 use super::*;
 use crate::reactive::view;
-use crate::styled::ListboxBuilder;
+use crate::styled::Listbox;
 
 #[test]
 fn listbox_typeahead_matches_prefixes_and_cycles_repeated_letters() {
     let (document, [listbox, after]) = toolbar_of(|| {
         [
             view! {
-                <listbox labels={vec!["Apple".to_string(), "Banana".to_string(), "Blueberry".to_string(), "Cherry".to_string()]} selected=Some(0) />
+                <Listbox labels={vec!["Apple".to_string(), "Banana".to_string(), "Blueberry".to_string(), "Cherry".to_string()]} selected=Some(0) />
             },
-            view! { <labelled_button label="After" /> },
+            view! { <LabelledButton label="After" /> },
         ]
     });
     let after_focus = unstyled::button_focused(&document, after);

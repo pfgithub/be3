@@ -3,10 +3,7 @@ use beui_macros::{component, view};
 use crate::base::TextAlign;
 use crate::color::Color32;
 use crate::node::NodeId;
-use crate::reactive::{
-    create_memo, Callback, Child, FillBuilder, OutlineBuilder, PaddingBuilder, Prop, SizedBuilder,
-    TextBuilder,
-};
+use crate::reactive::{create_memo, Callback, Child, Fill, Outline, Padding, Prop, Sized, Text};
 use crate::styled::theme::{
     ACCENT_SOFT, BORDER, BORDER_WIDTH, FONT_BODY, RADIUS, SURFACE_RAISED, TEXT, TEXT_MUTED,
 };
@@ -25,14 +22,14 @@ pub fn context_menu(
     on_select: Callback<Vec<usize>>,
 ) -> NodeId {
     view! {
-        <unstyled::context_menu
+        <unstyled::ContextMenu
             items
-            row={|handle| view! { <menu_row handle /> }}
-            panel={|content| view! { <menu_panel>{content}</menu_panel> }}
+            row={|handle| view! { <MenuRow handle /> }}
+            panel={|content| view! { <MenuPanel>{content}</MenuPanel> }}
             on_select={move |path| on_select.call(path)}
         >
             {children}
-        </unstyled::context_menu>
+        </unstyled::ContextMenu>
     }
 }
 
@@ -46,29 +43,29 @@ fn menu_row(handle: MenuRowHandle) -> NodeId {
     let color = if item.disabled { TEXT_MUTED } else { TEXT };
     let fill_color = create_memo(move || row_background(focused.get(), hovered.get()));
     view! {
-        <fill color={fill_color} radius=RADIUS>
-            <padding horizontal=PADDING_HORIZONTAL vertical=PADDING_VERTICAL>
-                <text
+        <Fill color={fill_color} radius=RADIUS>
+            <Padding horizontal=PADDING_HORIZONTAL vertical=PADDING_VERTICAL>
+                <Text
                     string={item.label}
                     font_size=FONT_BODY
                     color
                     align=TextAlign::Start
                 />
-            </padding>
-        </fill>
+            </Padding>
+        </Fill>
     }
 }
 
 #[component]
 fn menu_panel(children: Child) -> NodeId {
     view! {
-        <sized width=MENU_WIDTH>
-            <outline color=BORDER width=BORDER_WIDTH radius=RADIUS offset=0.0 visible=true>
-                <fill color=SURFACE_RAISED radius=RADIUS>
-                    <padding horizontal=MENU_PADDING vertical=MENU_PADDING>{children}</padding>
-                </fill>
-            </outline>
-        </sized>
+        <Sized width=MENU_WIDTH>
+            <Outline color=BORDER width=BORDER_WIDTH radius=RADIUS offset=0.0 visible=true>
+                <Fill color=SURFACE_RAISED radius=RADIUS>
+                    <Padding horizontal=MENU_PADDING vertical=MENU_PADDING>{children}</Padding>
+                </Fill>
+            </Outline>
+        </Sized>
     }
 }
 

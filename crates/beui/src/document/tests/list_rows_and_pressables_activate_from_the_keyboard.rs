@@ -1,6 +1,6 @@
 use super::*;
-use crate::reactive::{view, TextBuilder};
-use crate::styled::ListRowBuilder;
+use crate::reactive::{view, Text};
+use crate::styled::ListRow;
 
 #[test]
 fn list_rows_and_pressables_activate_from_the_keyboard() {
@@ -9,14 +9,14 @@ fn list_rows_and_pressables_activate_from_the_keyboard() {
     let (document, [_row, _pressable]) = toolbar_of(|| {
         [
             view! {
-                <list_row on_click={move || rows.set(rows.get() + 1)}>
-                    <text string="Row" font_size=14.0 color=Color32::WHITE />
-                </list_row>
+                <ListRow on_click={move || rows.set(rows.get() + 1)}>
+                    <Text string="Row" font_size=14.0 color=Color32::WHITE />
+                </ListRow>
             },
             view! {
-                <unstyled::pressable on_click={move || presses.set(presses.get() + 1)}>
-                    <text string="Press" font_size=14.0 color=Color32::WHITE />
-                </unstyled::pressable>
+                <unstyled::Pressable on_click={move || presses.set(presses.get() + 1)}>
+                    <Text string="Press" font_size=14.0 color=Color32::WHITE />
+                </unstyled::Pressable>
             },
         ]
     });

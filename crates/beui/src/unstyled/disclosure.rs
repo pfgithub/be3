@@ -4,7 +4,7 @@ use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
     clone, component_detail, create_effect, create_memo, create_signal, set_component_state,
-    untrack, Callback, Child, ColumnBuilder, Prop, ReadSignal, Render, VisibilityBuilder,
+    untrack, Callback, Child, Column, Prop, ReadSignal, Render, Visibility,
 };
 use crate::unstyled;
 use crate::unstyled::button::ButtonHandle;
@@ -43,8 +43,8 @@ pub fn disclosure(
     let open_for_click = open_read.clone();
 
     view! {
-        <column spacing>
-            <unstyled::button
+        <Column spacing>
+            <unstyled::Button
                 on_click={move || {
                     let next = !untrack(|| open_for_click.get());
                     set_open.set(next);
@@ -59,8 +59,8 @@ pub fn disclosure(
                     })
                 }}
             />
-            <visibility visible={open_read}>{children}</visibility>
-        </column>
+            <Visibility visible={open_read}>{children}</Visibility>
+        </Column>
     }
 }
 

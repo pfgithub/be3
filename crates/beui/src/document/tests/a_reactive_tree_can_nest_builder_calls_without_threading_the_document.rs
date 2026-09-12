@@ -1,7 +1,5 @@
 use super::*;
-use crate::reactive::{
-    build, create_memo, create_signal, view, ButtonBuilder, ColumnBuilder, RowBuilder, TextBuilder,
-};
+use crate::reactive::{build, create_memo, create_signal, view, Button, Column, Row, Text};
 
 #[test]
 fn a_reactive_tree_can_nest_builder_calls_without_threading_the_document() {
@@ -13,24 +11,24 @@ fn a_reactive_tree_can_nest_builder_calls_without_threading_the_document() {
     let document = build(move || {
         let (count, set_count) = create_signal(0i64);
         let value_node = view! {
-            <text string={create_memo(move || count.get().to_string())} />
+            <Text string={create_memo(move || count.get().to_string())} />
         };
         let increment_node = view! {
-            <button on_click={move || {
+            <Button on_click={move || {
                 set_count.update(|count| *count += 1)
             }}>
-                <text string="+" />
-            </button>
+                <Text string="+" />
+            </Button>
         };
         sink_value.set(Some(value_node));
         sink_increment.set(Some(increment_node));
         view! {
-            <column spacing=8.0>
-                <row spacing=8.0>
+            <Column spacing=8.0>
+                <Row spacing=8.0>
                     {increment_node}
                     {value_node}
-                </row>
-            </column>
+                </Row>
+            </Column>
         }
     });
 

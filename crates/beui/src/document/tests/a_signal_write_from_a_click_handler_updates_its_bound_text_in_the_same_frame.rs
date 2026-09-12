@@ -1,5 +1,5 @@
 use super::*;
-use crate::reactive::{create_memo, create_signal, view, ButtonBuilder, TextBuilder};
+use crate::reactive::{create_memo, create_signal, view, Button, Text};
 
 #[test]
 fn a_signal_write_from_a_click_handler_updates_its_bound_text_in_the_same_frame() {
@@ -7,11 +7,11 @@ fn a_signal_write_from_a_click_handler_updates_its_bound_text_in_the_same_frame(
         let (count, set_count) = create_signal(0i64);
         [
             view! {
-                <button on_click={move || set_count.update(|count| *count += 1)}>
-                    <text string="+" />
-                </button>
+                <Button on_click={move || set_count.update(|count| *count += 1)}>
+                    <Text string="+" />
+                </Button>
             },
-            view! { <text string={create_memo(move || count.get().to_string())} /> },
+            view! { <Text string={create_memo(move || count.get().to_string())} /> },
         ]
     });
 

@@ -6,7 +6,7 @@ use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
     self, clone, component_detail, create_effect, create_memo, create_signal, set_component_state,
-    untrack, Callback, ClickCatcherBuilder, FocusableBuilder, Prop, ReadSignal, Render,
+    untrack, Callback, ClickCatcher, Focusable, Prop, ReadSignal, Render,
 };
 
 pub struct ToggleHandle {
@@ -55,12 +55,12 @@ pub fn toggle(
     set_component_state(checked_read.clone());
 
     view! {
-        <focusable
+        <Focusable
             on_focus_change={move |focused: bool| set_focused.set(focused)}
             on_activate_change={move |pressed: bool| set_key_active.set(pressed)}
             on_activate={key_toggle}
         >
-            <click_catcher
+            <ClickCatcher
                 cursor=CursorIcon::PointingHand
                 key_active
                 on_click={toggle_checked}
@@ -68,7 +68,7 @@ pub fn toggle(
                 on_active_change={move |active: bool| set_active.set(active)}
                 children={content_node.map(reactive::intrinsic)}
             />
-        </focusable>
+        </Focusable>
     }
 }
 

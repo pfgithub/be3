@@ -1,6 +1,6 @@
 use super::*;
-use crate::reactive::{build, view, ReadSignal, SizedBuilder, SpacerBuilder};
-use crate::unstyled::ContainerBuilder;
+use crate::reactive::{build, view, ReadSignal, Sized, Spacer};
+use crate::unstyled::Container;
 
 const PANEL_WIDTH: f32 = 200.0;
 const ITEM_HEIGHT: f32 = 20.0;
@@ -14,18 +14,18 @@ fn a_closure_child_receives_the_handle_its_slot_hands_over() {
         let (measured, item) = (measured.clone(), item.clone());
         move || {
             view! {
-                <sized width=PANEL_WIDTH>
-                    <container>
+                <Sized width=PANEL_WIDTH>
+                    <Container>
                         {move |size: ReadSignal<Vec2>| {
                             *measured.borrow_mut() = Some(size);
                             view! {
-                                <sized @node_ref=&item height=ITEM_HEIGHT>
-                                    <spacer />
-                                </sized>
+                                <Sized @node_ref=&item height=ITEM_HEIGHT>
+                                    <Spacer />
+                                </Sized>
                             }
                         }}
-                    </container>
-                </sized>
+                    </Container>
+                </Sized>
             }
         }
     });

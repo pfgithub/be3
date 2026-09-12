@@ -7,7 +7,7 @@ fn picking_a_node_leaves_the_document_alone() {
     let counter = clicks.clone();
     let (document, [_button]) = toolbar_of(|| {
         [view! {
-            <labelled_button
+            <LabelledButton
                 label="Click me"
                 on_click={move || counter.set(counter.get() + 1)}
             />

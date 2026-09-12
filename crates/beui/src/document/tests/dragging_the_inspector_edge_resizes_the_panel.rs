@@ -1,5 +1,5 @@
 use super::*;
-use crate::reactive::{build, view, NodeRef, TextBuilder};
+use crate::reactive::{build, view, NodeRef, Text};
 
 #[test]
 fn dragging_the_inspector_edge_resizes_the_panel() {
@@ -8,7 +8,7 @@ fn dragging_the_inspector_edge_resizes_the_panel() {
         let text = text.clone();
         move || {
             view! {
-                <text
+                <Text
                     @node_ref=&text
                     string="Hello"
                     font_size=14.0

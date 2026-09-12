@@ -1,5 +1,5 @@
 use super::*;
-use crate::reactive::{component, on_cleanup, view, TextBuilder};
+use crate::reactive::{component, on_cleanup, view, Text};
 
 #[test]
 fn removing_a_node_runs_the_cleanups_its_components_registered() {
@@ -11,7 +11,7 @@ fn removing_a_node_runs_the_cleanups_its_components_registered() {
             on_cleanup(move || outer_sink.borrow_mut().push("outer"));
             component("inner", move || {
                 on_cleanup(move || inner_sink.borrow_mut().push("inner"));
-                view! { <text string="hi" /> }
+                view! { <Text string="hi" /> }
             })
         })]
     });

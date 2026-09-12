@@ -272,6 +272,7 @@ pub fn component(attr: TokenStream, item: TokenStream) -> TokenStream {
         block,
     } = parse_macro_input!(item as ItemFn);
     let name = sig.ident.to_string();
+    let component_ident = format_ident!("{}", pascal_case(&name), span = sig.ident.span());
     let builder_ident = format_ident!("{}Builder", pascal_case(&name));
     let output = sig.output.clone();
 
@@ -552,6 +553,7 @@ pub fn component(attr: TokenStream, item: TokenStream) -> TokenStream {
     });
 
     let generics = &sig.generics;
+    let (_, type_generics, _) = sig.generics.split_for_impl();
     let where_clause = &sig.generics.where_clause;
     let finish = if base {
         quote! { (move || #block)() }
@@ -577,6 +579,11 @@ pub fn component(attr: TokenStream, item: TokenStream) -> TokenStream {
                     with_node_ref: None,
                 }
             }
+        }
+
+        #[allow(non_snake_case)]
+        #vis fn #component_ident #generics () -> #builder_ident #type_generics #where_clause {
+            ::core::default::Default::default()
         }
 
         impl #generics #builder_ident #generics #where_clause {
@@ -893,15 +900,10 @@ fn expand_child_items(children: &[ViewChild]) -> Vec<proc_macro2::TokenStream> {
 fn expand_view_node(node: &ViewNode) -> proc_macro2::TokenStream {
     let mut segments = node.tag_path.clone();
     let last = segments.pop().expect("tag path always has one segment");
-    let builder_name = format_ident!(
-        "{}Builder",
-        pascal_case(&last.to_string()),
-        span = last.span()
-    );
-    let builder_path = if segments.is_empty() {
-        quote! { #builder_name }
+    let component_path = if segments.is_empty() {
+        quote! { #last }
     } else {
-        quote! { #(#segments::)* #builder_name }
+        quote! { #(#segments::)* #last }
     };
     let setters = node
         .props
@@ -915,7 +917,7 @@ fn expand_view_node(node: &ViewNode) -> proc_macro2::TokenStream {
         .collect::<Vec<_>>();
 
     match &node.children {
-        None => quote! { #builder_path::default() #(#setters)* .build() },
+        None => quote! { #component_path() #(#setters)* .build() },
         Some(children) => {
             let tag = last.span();
             if let [ViewChild {
@@ -924,14 +926,14 @@ fn expand_view_node(node: &ViewNode) -> proc_macro2::TokenStream {
             {
                 let children_render = format_ident!("children_render", span = tag);
                 return quote! {
-                    #builder_path::default() #(#setters)* .#children_render(#closure) .build()
+                    #component_path() #(#setters)* .#children_render(#closure) .build()
                 };
             }
             let items = expand_child_items(children);
             let block = quote_spanned! { tag => move || [#(#items),*] };
             let children_block = format_ident!("children_block", span = tag);
             quote! {
-                #builder_path::default() #(#setters)* .#children_block(#block) .build()
+                #component_path() #(#setters)* .#children_block(#block) .build()
             }
         }
     }

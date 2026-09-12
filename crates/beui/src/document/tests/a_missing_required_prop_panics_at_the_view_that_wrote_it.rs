@@ -15,7 +15,7 @@ fn a_missing_required_prop_panics_at_the_view_that_wrote_it() {
 
     let expected = line!() + 2;
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        build(|| view! { <button_face /> })
+        build(|| view! { <ButtonFace /> })
     }));
 
     std::panic::set_hook(previous);

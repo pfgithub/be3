@@ -3,11 +3,11 @@ use beui_macros::{component, view};
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
-    clone, create_effect, create_memo, create_signal, set_component_state, Callback, ColumnBuilder,
-    Prop, ReadSignal, ShowBuilder,
+    clone, create_effect, create_memo, create_signal, set_component_state, Callback, Column, Prop,
+    ReadSignal, Show,
 };
 use crate::styled::theme::NARROW_WIDTH;
-use crate::styled::{SelectBuilder, TabsBuilder};
+use crate::styled::{Select, Tabs};
 use crate::unstyled::narrower_than;
 
 #[component]
@@ -31,22 +31,22 @@ pub fn responsive_tabs(
     let tab_set = set_selected.clone();
 
     view! {
-        <column spacing=0.0>
-            <show condition={wide} then={move || view! {
-                <tabs labels={tab_labels} selected={tab_selected} on_change={move |index| {
+        <Column spacing=0.0>
+            <Show condition={wide} then={move || view! {
+                <Tabs labels={tab_labels} selected={tab_selected} on_change={move |index| {
                     tab_set.set(index);
                     tab_change.call(index);
                 }} />
             }} />
-            <show condition={narrow} then={move || view! {
-                <select options={labels} selected={highlighted} on_change={move |index: Option<usize>| {
+            <Show condition={narrow} then={move || view! {
+                <Select options={labels} selected={highlighted} on_change={move |index: Option<usize>| {
                     if let Some(index) = index {
                         set_selected.set(index);
                         on_change.call(index);
                     }
                 }} />
             }} />
-        </column>
+        </Column>
     }
 }
 

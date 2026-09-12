@@ -1,15 +1,15 @@
 use beui_macros::{component, view};
 
-use crate::base::overlay::{OverlayAnchor, OverlayBuilder, Placement};
+use crate::base::overlay::{Overlay, OverlayAnchor, Placement};
 use crate::document::Document;
 use crate::geometry::Pos2;
 use crate::input::{CursorIcon, PointerPress};
 use crate::node::NodeId;
 use crate::reactive::{
-    create_memo, create_signal, set_component_state, Callback, Child, ClickCatcherBuilder,
-    ColumnBuilder, DynamicBuilder, NodeRef, Prop, RenderFn,
+    create_memo, create_signal, set_component_state, Callback, Child, ClickCatcher, Column,
+    Dynamic, NodeRef, Prop, RenderFn,
 };
-use crate::unstyled::menu::{MenuItem, MenuListBuilder, MenuRowHandle};
+use crate::unstyled::menu::{MenuItem, MenuList, MenuRowHandle};
 
 struct State {
     overlay: NodeRef,
@@ -24,7 +24,7 @@ pub fn context_menu(
     panel: Option<RenderFn<Child>>,
     on_select: Callback<Vec<usize>>,
 ) -> NodeId {
-    let row = row.unwrap_or_else(|| RenderFn::new(|_| view! { <column spacing=0.0 /> }));
+    let row = row.unwrap_or_else(|| RenderFn::new(|_| view! { <Column spacing=0.0 /> }));
     let panel = panel.unwrap_or_else(|| RenderFn::new(|content| content));
     let (open, set_open) = create_signal(false);
     let (position, set_position) = create_signal(Pos2::ZERO);
@@ -38,29 +38,29 @@ pub fn context_menu(
     let dismiss = set_open.clone();
     let (active, close) = (open.clone(), set_open.clone());
     view! {
-        <click_catcher
+        <ClickCatcher
             cursor=CursorIcon::Default
             on_secondary_press={move |press: PointerPress| {
                 set_position.set(press.pos);
                 set_open.set(true);
             }}
         >
-            <column spacing=0.0>
+            <Column spacing=0.0>
                 {children}
-                <overlay
+                <Overlay
                     @node_ref=&overlay
                     anchor
                     placement=Placement::BelowStart
                     open
                     on_dismiss={move || dismiss.set(false)}
                 >
-                    <dynamic value={items}>
+                    <Dynamic value={items}>
                         {move |items: Vec<MenuItem>| {
                             let (row, panel, close) = (row.clone(), panel.clone(), close.clone());
                             let content = content.clone();
                             let on_select = on_select.clone();
                             panel.call(view! {
-                                <menu_list
+                                <MenuList
                                     @node_ref=&content
                                     items
                                     row
@@ -73,10 +73,10 @@ pub fn context_menu(
                                 />
                             })
                         }}
-                    </dynamic>
-                </overlay>
-            </column>
-        </click_catcher>
+                    </Dynamic>
+                </Overlay>
+            </Column>
+        </ClickCatcher>
     }
 }
 

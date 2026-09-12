@@ -1,5 +1,5 @@
 use super::*;
-use crate::reactive::{build, ItemSize, ScrollBuilder};
+use crate::reactive::{build, ItemSize, Scroll};
 
 #[test]
 fn the_scroll_position_is_reported_to_its_listener() {
@@ -11,17 +11,17 @@ fn the_scroll_position_is_reported_to_its_listener() {
             .into_iter()
             .map(|row| {
                 intrinsic(view! {
-                    <text string={row} font_size=14.0 color=Color32::WHITE />
+                    <Text string={row} font_size=14.0 color=Color32::WHITE />
                 })
             })
             .collect();
         view! {
-            <column spacing=0.0>
-                <scroll @sizing=ItemSize::Percent(100.0)
+            <Column spacing=0.0>
+                <Scroll @sizing=ItemSize::Percent(100.0)
                     on_change={move |position| sink.set(Some(position))}
                     children={items}
                 />
-            </column>
+            </Column>
         }
     });
     let mut harness = Harness::new(document);

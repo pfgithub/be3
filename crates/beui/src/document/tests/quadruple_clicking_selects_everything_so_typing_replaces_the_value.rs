@@ -1,10 +1,10 @@
 use super::*;
 use crate::reactive::view;
-use crate::styled::TextInputBuilder;
+use crate::styled::TextInput;
 
 #[test]
 fn quadruple_clicking_selects_everything_so_typing_replaces_the_value() {
-    let (document, [input]) = toolbar_of(|| [view! { <text_input value="hello world" /> }]);
+    let (document, [input]) = toolbar_of(|| [view! { <TextInput value="hello world" /> }]);
     let mut harness = Harness::new(document);
     harness.frame(Vec::new());
 

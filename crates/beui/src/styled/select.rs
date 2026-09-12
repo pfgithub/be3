@@ -4,10 +4,7 @@ use crate::base::TextAlign;
 use crate::color::Color32;
 use crate::document::Document;
 use crate::node::NodeId;
-use crate::reactive::{
-    create_memo, Callback, Child, FillBuilder, OutlineBuilder, PaddingBuilder, Prop, SizedBuilder,
-    TextBuilder,
-};
+use crate::reactive::{create_memo, Callback, Child, Fill, Outline, Padding, Prop, Sized, Text};
 use crate::styled::theme::{
     ACCENT, ACCENT_SOFT, BORDER, BORDER_WIDTH, FONT_BODY, RADIUS, SURFACE, SURFACE_RAISED, TEXT,
     TEXT_MUTED,
@@ -32,7 +29,7 @@ pub fn select(
 ) -> NodeId {
     let trigger_options = options.clone();
     view! {
-        <unstyled::select
+        <unstyled::Select
             options
             selected
             on_change={move |selected| on_change.call(selected)}
@@ -43,12 +40,12 @@ pub fn select(
             search_selection_color=ACCENT_SOFT
             search_caret_color=ACCENT
             search_padding_horizontal=PADDING_HORIZONTAL
-            search_content={|handle| view! { <search_field handle /> }}
-            trigger={move |handle| view! { <select_trigger options={trigger_options} handle /> }}
-            option={|handle| view! { <select_option handle /> }}
+            search_content={|handle| view! { <SearchField handle /> }}
+            trigger={move |handle| view! { <SelectTrigger options={trigger_options} handle /> }}
+            option={|handle| view! { <SelectOption handle /> }}
         >
-            {|content| view! { <select_popup>{content}</select_popup> }}
-        </unstyled::select>
+            {|content| view! { <SelectPopup>{content}</SelectPopup> }}
+        </unstyled::Select>
     }
 }
 
@@ -66,23 +63,23 @@ fn select_trigger(options: Vec<String>, handle: SelectTriggerHandle) -> NodeId {
         move || border_color(focused.get(), hovered.get())
     });
     view! {
-        <outline color=ACCENT width=FOCUS_RING_WIDTH radius=RADIUS offset=FOCUS_RING_OFFSET visible={focused}>
-            <sized width=TRIGGER_WIDTH height=HEIGHT>
-                <outline color={border} width=BORDER_WIDTH radius=RADIUS offset=0.0 visible=true>
-                    <fill color=SURFACE_RAISED radius=RADIUS>
-                        <padding horizontal=PADDING_HORIZONTAL vertical=0.0>
-                            <text
+        <Outline color=ACCENT width=FOCUS_RING_WIDTH radius=RADIUS offset=FOCUS_RING_OFFSET visible={focused}>
+            <Sized width=TRIGGER_WIDTH height=HEIGHT>
+                <Outline color={border} width=BORDER_WIDTH radius=RADIUS offset=0.0 visible=true>
+                    <Fill color=SURFACE_RAISED radius=RADIUS>
+                        <Padding horizontal=PADDING_HORIZONTAL vertical=0.0>
+                            <Text
                                 string={label_text}
                                 font_size=FONT_BODY
                                 color=TEXT
                                 align=TextAlign::Start
                                 clip=true
                             />
-                        </padding>
-                    </fill>
-                </outline>
-            </sized>
-        </outline>
+                        </Padding>
+                    </Fill>
+                </Outline>
+            </Sized>
+        </Outline>
     }
 }
 
@@ -95,11 +92,11 @@ fn search_field(handle: TextInputHandle) -> NodeId {
     } = handle;
     let border = create_memo(move || border_color(focused.get(), hovered.get()));
     view! {
-        <sized height=HEIGHT>
-            <outline color={border} width=BORDER_WIDTH radius=RADIUS offset=0.0 visible=true>
-                <fill color=SURFACE radius=RADIUS>{field}</fill>
-            </outline>
-        </sized>
+        <Sized height=HEIGHT>
+            <Outline color={border} width=BORDER_WIDTH radius=RADIUS offset=0.0 visible=true>
+                <Fill color=SURFACE radius=RADIUS>{field}</Fill>
+            </Outline>
+        </Sized>
     }
 }
 
@@ -113,29 +110,29 @@ fn select_option(handle: SelectOptionHandle) -> NodeId {
     } = handle;
     let fill_color = create_memo(move || option_background(highlighted.get(), hovered.get()));
     view! {
-        <fill color={fill_color} radius=RADIUS>
-            <padding horizontal=PADDING_HORIZONTAL vertical=OPTION_PADDING_VERTICAL>
-                <text
+        <Fill color={fill_color} radius=RADIUS>
+            <Padding horizontal=PADDING_HORIZONTAL vertical=OPTION_PADDING_VERTICAL>
+                <Text
                     string={label}
                     font_size=FONT_BODY
                     color=TEXT
                     align=TextAlign::Start
                 />
-            </padding>
-        </fill>
+            </Padding>
+        </Fill>
     }
 }
 
 #[component]
 fn select_popup(children: Child) -> NodeId {
     view! {
-        <sized width=POPUP_WIDTH>
-            <outline color=BORDER width=BORDER_WIDTH radius=RADIUS offset=0.0 visible=true>
-                <fill color=SURFACE_RAISED radius=RADIUS>
-                    <padding horizontal=POPUP_PADDING vertical=POPUP_PADDING>{children}</padding>
-                </fill>
-            </outline>
-        </sized>
+        <Sized width=POPUP_WIDTH>
+            <Outline color=BORDER width=BORDER_WIDTH radius=RADIUS offset=0.0 visible=true>
+                <Fill color=SURFACE_RAISED radius=RADIUS>
+                    <Padding horizontal=POPUP_PADDING vertical=POPUP_PADDING>{children}</Padding>
+                </Fill>
+            </Outline>
+        </Sized>
     }
 }
 

@@ -1,9 +1,8 @@
 use super::*;
-use crate::reactive::{view, TextBuilder};
+use crate::reactive::{view, Text};
 use crate::styled::{
-    AccordionBuilder, ButtonBuilder, CheckboxBuilder, ListRowBuilder, ListboxBuilder,
-    RadioGroupBuilder, SliderBuilder, SwitchBuilder, TabsBuilder, TextInputBuilder,
-    ToggleButtonBuilder,
+    Accordion, Button, Checkbox, ListRow, Listbox, RadioGroup, Slider, Switch, Tabs, TextInput,
+    ToggleButton,
 };
 
 #[test]
@@ -11,37 +10,37 @@ fn every_styled_interactive_control_paints_a_keyboard_focus_ring() {
     let controls: &[fn() -> NodeId] = &[
         || {
             view! {
-                <button label="Button" variant=styled::ButtonVariant::Primary />
+                <Button label="Button" variant=styled::ButtonVariant::Primary />
             }
         },
-        || view! { <checkbox label="Check" checked=false /> },
-        || view! { <switch on=false /> },
-        || view! { <slider value=0.5 /> },
-        || view! { <text_input value="Text" /> },
-        || view! { <tabs labels={vec!["One".to_string(), "Two".to_string()]} selected=0 /> },
+        || view! { <Checkbox label="Check" checked=false /> },
+        || view! { <Switch on=false /> },
+        || view! { <Slider value=0.5 /> },
+        || view! { <TextInput value="Text" /> },
+        || view! { <Tabs labels={vec!["One".to_string(), "Two".to_string()]} selected=0 /> },
         || {
             view! {
-                <radio_group labels={vec!["One".to_string(), "Two".to_string()]} selected=Some(0) />
-            }
-        },
-        || {
-            view! {
-                <listbox labels={vec!["One".to_string(), "Two".to_string()]} selected=Some(0) />
-            }
-        },
-        || view! { <toggle_button label="Toggle" pressed=false /> },
-        || {
-            view! {
-                <accordion title="Header" open=false>
-                    <text string="Content" font_size=14.0 color=Color32::WHITE />
-                </accordion>
+                <RadioGroup labels={vec!["One".to_string(), "Two".to_string()]} selected=Some(0) />
             }
         },
         || {
             view! {
-                <list_row>
-                    <text string="Row" font_size=14.0 color=Color32::WHITE />
-                </list_row>
+                <Listbox labels={vec!["One".to_string(), "Two".to_string()]} selected=Some(0) />
+            }
+        },
+        || view! { <ToggleButton label="Toggle" pressed=false /> },
+        || {
+            view! {
+                <Accordion title="Header" open=false>
+                    <Text string="Content" font_size=14.0 color=Color32::WHITE />
+                </Accordion>
+            }
+        },
+        || {
+            view! {
+                <ListRow>
+                    <Text string="Row" font_size=14.0 color=Color32::WHITE />
+                </ListRow>
             }
         },
     ];

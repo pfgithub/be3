@@ -1,6 +1,6 @@
 use super::*;
-use crate::reactive::{view, NodeRef, TextBuilder};
-use crate::styled::AccordionBuilder;
+use crate::reactive::{view, NodeRef, Text};
+use crate::styled::Accordion;
 
 #[test]
 fn clicking_an_accordion_header_hides_its_content() {
@@ -9,14 +9,14 @@ fn clicking_an_accordion_header_hides_its_content() {
         let body = body.clone();
         move || {
             [view! {
-                <accordion title="About" open=true>
-                    <text
+                <Accordion title="About" open=true>
+                    <Text
                         @node_ref=&body
                         string="beui keeps a retained tree of nodes."
                         font_size=14.0
                         color=Color32::WHITE
                     />
-                </accordion>
+                </Accordion>
             }]
         }
     });

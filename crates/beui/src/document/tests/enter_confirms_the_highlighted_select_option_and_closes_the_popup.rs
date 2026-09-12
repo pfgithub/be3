@@ -1,6 +1,6 @@
 use super::*;
 use crate::reactive::view;
-use crate::styled::SelectBuilder;
+use crate::styled::Select;
 
 #[test]
 fn enter_confirms_the_highlighted_select_option_and_closes_the_popup() {
@@ -12,7 +12,7 @@ fn enter_confirms_the_highlighted_select_option_and_closes_the_popup() {
     let sink = changes.clone();
     let (document, [select]) = toolbar_of(|| {
         [
-            view! { <select options selected=None on_change={move |selected| {
+            view! { <Select options selected=None on_change={move |selected| {
                 sink.borrow_mut().push(selected);
             }} /> },
         ]

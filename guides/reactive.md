@@ -162,8 +162,8 @@ supplies the document ambiently and returns the finished `Document`.
 
 ```rust
 use beui::reactive::{
-    build, component, create_memo, create_signal, view, ButtonBuilder, ColumnBuilder, RowBuilder,
-    TextBuilder,
+    build, component, create_memo, create_signal, view, Button, Column, Row,
+    Text,
 };
 
 #[component]
@@ -172,25 +172,25 @@ fn app() -> beui::NodeId {
     let decrement = set_count.clone();
     let count_text = create_memo(move || count.get().to_string());
     view! {
-        <column spacing=0.0>
-            <row spacing=8.0>
-                <button on_click={move || decrement.update(|count| *count -= 1)}>
-                    <text string="-" />
-                </button>
-                <text string={count_text} /> // updates itself when `count` changes
-                <button on_click={move || set_count.update(|count| *count += 1)}>
-                    <text string="+" />
-                </button>
-            </row>
-        </column>
+        <Column spacing=0.0>
+            <Row spacing=8.0>
+                <Button on_click={move || decrement.update(|count| *count -= 1)}>
+                    <Text string="-" />
+                </Button>
+                <Text string={count_text} /> // updates itself when `count` changes
+                <Button on_click={move || set_count.update(|count| *count += 1)}>
+                    <Text string="+" />
+                </Button>
+            </Row>
+        </Column>
     }
 }
 
-let document = build(|| view! { <app /> });
+let document = build(|| view! { <App /> });
 ```
 
-`#[component]` turns a function into a `<tag>` usable from `view!`, by
-generating a `NameBuilder` that `view!` fills in. A prop typed `Prop<T>` accepts
+`#[component]` turns a function into a `<Name>` usable from `view!`, generating
+a `Name()` constructor that returns the builder `view!` fills in. A prop typed `Prop<T>` accepts
 either a plain `T` or a signal or memo of `T`; the reactive forms create an
 effect that keeps that property in sync. `#[component(base)]` is for the base
 elements, which do the same but without a shadow node of their own. Every tag
@@ -206,15 +206,15 @@ enough to read on their own may drop the braces: literals, paths, a call on a
 path, a unary expression, and a reference to a path.
 
 ```rust
-<fill color=SURFACE radius=0>
-<caption content=count_text align=TextAlign::End />
-<list direction=Direction::Horizontal />
-<sized @node_ref=&panel width=TRIGGER_WIDTH height=HEIGHT>
-<fill color=Color32::from_gray(40) radius=4>
+<Fill color=SURFACE radius=0>
+<Caption content=count_text align=TextAlign::End />
+<List direction=Direction::Horizontal />
+<Sized @node_ref=&panel width=TRIGGER_WIDTH height=HEIGHT>
+<Fill color=Color32::from_gray(40) radius=4>
 ```
 
 An attribute written as a bare name takes the value of the binding with that
-name, so `<list direction spacing children />` is `direction={direction}
+name, so `<List direction spacing children />` is `direction={direction}
 spacing={spacing} children={children}`. There is no boolean shorthand: `visible`
 means `visible={visible}`, never `visible={true}`.
 
@@ -243,7 +243,7 @@ actually changes.
 
 ```rust
 let fill = create_memo(move || if hovered.get() { HOVER } else { REST });
-view! { <fill color={fill} radius=RADIUS>{child}</fill> }
+view! { <Fill color={fill} radius=RADIUS>{child}</Fill> }
 ```
 
 `Prop<T>` reads with `get()`, which subscribes the computation around it, and
@@ -280,10 +280,10 @@ the `NodeId` it has always been.
 
 ```rust
 let toolbar = view! {
-    <button label="Open" on_click={open} />
-    <button label="Save" on_click={save} />
+    <Button label="Open" on_click={open} />
+    <Button label="Save" on_click={save} />
 };
-view! { <row spacing=8.0 children={toolbar} /> }
+view! { <Row spacing=8.0 children={toolbar} /> }
 ```
 
 Roots take the same `@` sizing prefixes and `{expr}` form that children between
@@ -307,9 +307,9 @@ a component has at most one, and a component with both keeps `children`.
 #[component]
 fn checkbox(label: Prop<String>, checked: Prop<bool>) -> NodeId {
     view! {
-        <toggle checked>
-            {move |handle| view! { <checkbox_face handle label /> }}
-        </toggle>
+        <Toggle checked>
+            {move |handle| view! { <CheckboxFace handle label /> }}
+        </Toggle>
     }
 }
 ```
@@ -321,7 +321,7 @@ takes tags instead: `view!` wraps them in the closure itself, so they stay
 unbuilt until the component asks for them.
 
 ```rust
-<show condition={tab.memo(0)}><list_controls rows=list_rows /></show>
+<Show condition={tab.memo(0)}><ListControls rows=list_rows /></Show>
 ```
 
 Either way the block is exactly one child, because a `Render` returns one
@@ -370,7 +370,7 @@ naming the row that should have focus and give each row `focused={selection
 that gained it.
 
 ```rust
-<unstyled::button
+<unstyled::Button
     focused={focus.memo(Focus::Row(index))}
     on_focus_change={move |has_focus: bool| {
         if !has_focus && state.focus.get_untracked() == Focus::Row(index) {
@@ -387,7 +387,7 @@ need the value itself rather than a boolean, like a menu whose items can be
 swapped out.
 
 ```rust
-<dynamic value={items}>{move |items: Vec<MenuItem>| view! { <menu_list items /> }}</dynamic>
+<Dynamic value={items}>{move |items: Vec<MenuItem>| view! { <MenuList items /> }}</Dynamic>
 ```
 
 `@sizing` on a child inside `view!`, or on a root of a multi-root one, gives it
@@ -399,9 +399,9 @@ that reads `narrower_than` and returns `ItemSize::Fixed` in a column where it
 returned `ItemSize::Percent` in a row, for instance.
 
 ```rust
-<separator @sizing=ItemSize::Fixed(SEPARATOR_HEIGHT) />
-<caption @sizing=ItemSize::Percent(100.0) content=count_text align=TextAlign::End />
-<card @sizing={rows_size}>
+<Separator @sizing=ItemSize::Fixed(SEPARATOR_HEIGHT) />
+<Caption @sizing=ItemSize::Percent(100.0) content=count_text align=TextAlign::End />
+<Card @sizing={rows_size}>
 ```
 
 An attribute has nothing to attach to on an `{expr}` child, which is always

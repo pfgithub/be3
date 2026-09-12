@@ -1,6 +1,6 @@
 use super::*;
 use crate::reactive::{view, NodeRef};
-use crate::styled::ContextMenuBuilder;
+use crate::styled::ContextMenu;
 
 #[test]
 fn hovering_a_menu_item_with_children_opens_its_submenu_without_a_click() {
@@ -14,7 +14,7 @@ fn hovering_a_menu_item_with_children_opens_its_submenu_without_a_click() {
     )];
     let (document, [menu]) = toolbar_of({
         let region = region.clone();
-        move || [view! { <context_menu items><menu_region @node_ref=&region /></context_menu> }]
+        move || [view! { <ContextMenu items><MenuRegion @node_ref=&region /></ContextMenu> }]
     });
     let region = region.get();
     let mut harness = Harness::new(document);

@@ -586,15 +586,15 @@ pub trait UnitHandle<H> {}
 
 impl<F> UnitHandle<()> for F {}
 
-pub use crate::base::click_catcher::ClickCatcherBuilder;
-pub use crate::base::fill::FillBuilder;
-pub use crate::base::focusable::FocusableBuilder;
-pub use crate::base::outline::OutlineBuilder;
-pub use crate::base::padding::PaddingBuilder;
-pub use crate::base::scroll::{ScrollBuilder, VirtualListBuilder};
-pub use crate::base::sized::SizedBuilder;
-pub use crate::base::text::TextBuilder;
-pub use crate::base::visibility::VisibilityBuilder;
+pub use crate::base::click_catcher::ClickCatcher;
+pub use crate::base::fill::Fill;
+pub use crate::base::focusable::Focusable;
+pub use crate::base::outline::Outline;
+pub use crate::base::padding::Padding;
+pub use crate::base::scroll::{Scroll, VirtualList};
+pub use crate::base::sized::Sized;
+pub use crate::base::text::Text;
+pub use crate::base::visibility::Visibility;
 
 #[component(base)]
 pub fn list(
@@ -615,18 +615,18 @@ pub fn list(
 
 #[component(base)]
 pub fn row(spacing: Prop<f32>, children: Children) -> NodeId {
-    view! { <list direction=Direction::Horizontal spacing children /> }
+    view! { <List direction=Direction::Horizontal spacing children /> }
 }
 
 #[component(base)]
 pub fn column(spacing: Prop<f32>, children: Children) -> NodeId {
-    view! { <list direction=Direction::Vertical spacing children /> }
+    view! { <List direction=Direction::Vertical spacing children /> }
 }
 
 #[component(base)]
 pub fn centered_row(spacing: Prop<f32>, children: Children) -> NodeId {
     view! {
-        <list
+        <List
             direction=Direction::Horizontal
             align=Align::Center
             spacing
@@ -664,7 +664,7 @@ where
     T: Clone + Default + 'static,
 {
     let view = view.expect("dynamic requires a `view` callback");
-    let parent = view! { <column spacing=0.0 /> };
+    let parent = view! { <Column spacing=0.0 /> };
     let built: Rc<Cell<Option<NodeId>>> = Rc::new(Cell::new(None));
     create_effect(move || {
         let value = value.get();
@@ -695,7 +695,7 @@ where
 {
     let key = key.expect("for_each requires a `key` callback");
     let view = view.expect("for_each requires a `view` callback");
-    let parent = view! { <column spacing /> };
+    let parent = view! { <Column spacing /> };
     let existing: Rc<RefCell<HashMap<K, NodeId>>> = Rc::new(RefCell::new(HashMap::new()));
     create_effect(move || {
         let items = items.get();
@@ -728,7 +728,7 @@ where
 #[component]
 pub fn button(children: Children, disabled: Prop<bool>, on_click: ClickCallback) -> NodeId {
     view! {
-        <unstyled::button
+        <unstyled::Button
             disabled
             on_click={move || on_click.call()}
             children

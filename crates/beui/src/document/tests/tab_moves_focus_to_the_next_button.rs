@@ -5,8 +5,8 @@ use crate::reactive::view;
 fn tab_moves_focus_to_the_next_button() {
     let (document, [first, second]) = toolbar_of(|| {
         [
-            view! { <labelled_button label="First" /> },
-            view! { <labelled_button label="Second" /> },
+            view! { <LabelledButton label="First" /> },
+            view! { <LabelledButton label="Second" /> },
         ]
     });
     let first_focused = unstyled::button_focused(&document, first);

@@ -1,11 +1,11 @@
 use super::*;
 use crate::reactive::view;
-use crate::styled::TextInputBuilder;
+use crate::styled::TextInput;
 
 #[test]
 fn an_empty_field_shows_its_placeholder_until_something_is_typed() {
     let (document, [input]) =
-        toolbar_of(|| [view! { <text_input value=String::new() placeholder="Search" /> }]);
+        toolbar_of(|| [view! { <TextInput value=String::new() placeholder="Search" /> }]);
     let mut harness = Harness::new(document);
     harness.frame(Vec::new());
     let inner = harness.document().shadow_root(input);

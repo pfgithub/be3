@@ -6,7 +6,7 @@ use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
     self, create_memo, create_signal, set_component_state, untrack, Callback, Child, ClickCallback,
-    ClickCatcherBuilder, FocusableBuilder, Prop, ReadSignal, Render,
+    ClickCatcher, Focusable, Prop, ReadSignal, Render,
 };
 
 pub struct ButtonHandle {
@@ -66,7 +66,7 @@ pub fn button(
     });
 
     view! {
-        <focusable
+        <Focusable
             tab_stop
             focused={focus_request}
             on_key={move |press| on_key.call(press)}
@@ -78,7 +78,7 @@ pub fn button(
             on_activate_change={move |pressed: bool| set_key_active.set(pressed)}
             on_activate={key_click}
         >
-            <click_catcher
+            <ClickCatcher
                 cursor=CursorIcon::PointingHand
                 key_active
                 on_click={click}
@@ -86,7 +86,7 @@ pub fn button(
                 on_active_change={move |active: bool| set_active.set(active)}
                 children={content_node.map(reactive::intrinsic)}
             />
-        </focusable>
+        </Focusable>
     }
 }
 

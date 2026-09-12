@@ -1,6 +1,6 @@
 use super::*;
 use crate::reactive::view;
-use crate::styled::CheckboxBuilder;
+use crate::styled::Checkbox;
 
 #[test]
 fn clicking_a_checkbox_toggles_it() {
@@ -8,7 +8,7 @@ fn clicking_a_checkbox_toggles_it() {
     let sink = changes.clone();
     let (document, [checkbox]) = toolbar_of(|| {
         [view! {
-            <checkbox label="Show timings" checked=false on_change={move |checked| {
+            <Checkbox label="Show timings" checked=false on_change={move |checked| {
                 sink.borrow_mut().push(checked);
             }} />
         }]

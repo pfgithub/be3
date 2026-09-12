@@ -1,5 +1,5 @@
 use super::*;
-use crate::reactive::{view, NodeRef, VisibilityBuilder};
+use crate::reactive::{view, NodeRef, Visibility};
 
 #[test]
 fn focus_loss_and_hidden_content_cancel_keyboard_activation() {
@@ -11,15 +11,15 @@ fn focus_loss_and_hidden_content_cancel_keyboard_activation() {
         move || {
             [
                 view! {
-                    <visibility visible=true>
-                        <labelled_button
+                    <Visibility visible=true>
+                        <LabelledButton
                             @node_ref=&button
                             label="Click"
                             on_click={move || counter.set(counter.get() + 1)}
                         />
-                    </visibility>
+                    </Visibility>
                 },
-                view! { <labelled_button label="After" /> },
+                view! { <LabelledButton label="After" /> },
             ]
         }
     });

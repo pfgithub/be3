@@ -1,5 +1,5 @@
 use super::*;
-use crate::reactive::{build, view, FillBuilder, NodeRef};
+use crate::reactive::{build, view, Fill, NodeRef};
 
 #[test]
 fn a_click_handler_can_mutate_the_tree_in_the_current_frame() {
@@ -8,11 +8,11 @@ fn a_click_handler_can_mutate_the_tree_in_the_current_frame() {
         let button = button.clone();
         move || {
             view! {
-                <labelled_button
+                <LabelledButton
                     @node_ref=&button
                     label="replace"
                     on_click={|| with_document(|document| {
-                        let replacement = view! { <fill color=Color32::BLACK radius=0 /> };
+                        let replacement = view! { <Fill color=Color32::BLACK radius=0 /> };
                         document.set_root(replacement);
                     })}
                 />

@@ -1,5 +1,5 @@
 use super::*;
-use crate::reactive::{build, intrinsic, view, NodeRef, PaddingBuilder, ScrollBuilder};
+use crate::reactive::{build, intrinsic, view, NodeRef, Padding, Scroll};
 
 #[test]
 fn resizing_rows_preserves_the_scroll_anchor() {
@@ -15,18 +15,18 @@ fn resizing_rows_preserves_the_scroll_anchor() {
                 .enumerate()
                 .map(|(index, row)| {
                     intrinsic(view! {
-                        <padding
+                        <Padding
                             @node_ref={row}
                             horizontal=0.0
                             vertical={10.0 + (index % 3) as f32}
                         >
-                            <spacer />
-                        </padding>
+                            <Spacer />
+                        </Padding>
                     })
                 })
                 .collect();
             view! {
-                <scroll
+                <Scroll
                     @node_ref=&scroll
                     on_change={move |position| sink.set(Some(position))}
                     children={items}

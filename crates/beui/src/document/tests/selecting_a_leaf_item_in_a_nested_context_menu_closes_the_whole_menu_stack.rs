@@ -1,6 +1,6 @@
 use super::*;
 use crate::reactive::{view, NodeRef};
-use crate::styled::ContextMenuBuilder;
+use crate::styled::ContextMenu;
 
 #[test]
 fn selecting_a_leaf_item_in_a_nested_context_menu_closes_the_whole_menu_stack() {
@@ -17,9 +17,9 @@ fn selecting_a_leaf_item_in_a_nested_context_menu_closes_the_whole_menu_stack() 
     let (document, [menu]) = toolbar_of({
         let region = region.clone();
         move || {
-            [view! { <context_menu items on_select={move |path| {
+            [view! { <ContextMenu items on_select={move |path| {
                 sink.borrow_mut().push(path);
-            }}><menu_region @node_ref=&region /></context_menu> }]
+            }}><MenuRegion @node_ref=&region /></ContextMenu> }]
         }
     });
     let region = region.get();

@@ -1,7 +1,7 @@
 use super::*;
 use crate::reactive::create_memo;
-use crate::styled::StackBuilder;
-use crate::unstyled::{narrower_than, ContainerBuilder};
+use crate::styled::Stack;
+use crate::unstyled::{narrower_than, Container};
 
 const BREAKPOINT: f32 = 500.0;
 const STACKED_LIST_HEIGHT: f32 = 100.0;
@@ -15,7 +15,7 @@ fn a_virtual_list_in_a_stacked_stack_only_builds_the_items_in_view() {
         let scroll = scroll.clone();
         move || {
             view! {
-                <container>
+                <Container>
                     {move |_| {
                     let (sink, scroll) = (sink.clone(), scroll.clone());
                     let narrow = narrower_than(BREAKPOINT);
@@ -25,11 +25,11 @@ fn a_virtual_list_in_a_stacked_stack_only_builds_the_items_in_view() {
                         ItemSize::Percent(100.0)
                     });
                     view! {
-                        <stack spacing=0.0 breakpoint=BREAKPOINT>
-                            <spacer @sizing=ItemSize::Percent(50.0) />
-                            <column @sizing=ItemSize::Percent(50.0) spacing=0.0>
-                                <column @sizing={size} spacing=0.0>
-                                    <virtual_list @sizing=ItemSize::Percent(100.0)
+                        <Stack spacing=0.0 breakpoint=BREAKPOINT>
+                            <Spacer @sizing=ItemSize::Percent(50.0) />
+                            <Column @sizing=ItemSize::Percent(50.0) spacing=0.0>
+                                <Column @sizing={size} spacing=0.0>
+                                    <VirtualList @sizing=ItemSize::Percent(100.0)
                                         @node_ref=&scroll
                                         count=VIRTUAL_ITEM_COUNT
                                         item_height=VIRTUAL_ITEM_HEIGHT
@@ -37,18 +37,18 @@ fn a_virtual_list_in_a_stacked_stack_only_builds_the_items_in_view() {
                                         {move |index: usize| {
                                             sink.borrow_mut().push(index);
                                             view! {
-                                                <padding horizontal=0.0 vertical={VIRTUAL_ITEM_HEIGHT / 2.0}>
-                                                    <spacer />
-                                                </padding>
+                                                <Padding horizontal=0.0 vertical={VIRTUAL_ITEM_HEIGHT / 2.0}>
+                                                    <Spacer />
+                                                </Padding>
                                             }
                                         }}
-                                    </virtual_list>
-                                </column>
-                            </column>
-                        </stack>
+                                    </VirtualList>
+                                </Column>
+                            </Column>
+                        </Stack>
                     }
                     }}
-                </container>
+                </Container>
             }
         }
     });

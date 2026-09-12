@@ -1,12 +1,12 @@
 use super::*;
 use crate::reactive::view;
-use crate::styled::CheckboxBuilder;
+use crate::styled::Checkbox;
 
 #[test]
 fn tapping_a_checkbox_with_touch_toggles_it() {
     let (document, [checkbox]) = toolbar_of(|| {
         [view! {
-            <checkbox label="Touch option" checked=false />
+            <Checkbox label="Touch option" checked=false />
         }]
     });
     let mut harness = Harness::new(document);

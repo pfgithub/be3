@@ -1,12 +1,12 @@
 use super::*;
-use crate::reactive::{build, view, FillBuilder, NodeRef};
+use crate::reactive::{build, view, Fill, NodeRef};
 
 #[test]
 fn unchanged_input_reuses_layout_and_paint() {
     let fill = NodeRef::new();
     let mut document = build({
         let fill = fill.clone();
-        move || view! { <fill @node_ref=&fill color=Color32::WHITE radius=0 /> }
+        move || view! { <Fill @node_ref=&fill color=Color32::WHITE radius=0 /> }
     });
     let fill = fill.get();
     let (layouts, paints) = counted(&mut document, fill);

@@ -4,7 +4,7 @@ use crate::color::Color32;
 
 use crate::document::Document;
 use crate::node::NodeId;
-use crate::reactive::{create_memo, Callback, FillBuilder, OutlineBuilder, Prop, SizedBuilder};
+use crate::reactive::{create_memo, Callback, Fill, Outline, Prop, Sized};
 use crate::styled::theme::{
     ACCENT, ACCENT_SOFT, BORDER, BORDER_WIDTH, FONT_BODY, RADIUS, SURFACE_RAISED, TEXT, TEXT_MUTED,
 };
@@ -24,7 +24,7 @@ pub fn text_input(
     on_submit: Callback<String>,
 ) -> NodeId {
     view! {
-        <unstyled::text_input
+        <unstyled::TextInput
             value
             placeholder
             font_size=FONT_BODY
@@ -36,8 +36,8 @@ pub fn text_input(
             on_change={move |value| on_change.call(value)}
             on_submit={move |value| on_submit.call(value)}
         >
-            {move |handle| view! { <text_input_frame handle /> }}
-        </unstyled::text_input>
+            {move |handle| view! { <TextInputFrame handle /> }}
+        </unstyled::TextInput>
     }
 }
 
@@ -53,13 +53,13 @@ fn text_input_frame(handle: TextInputHandle) -> NodeId {
         move || border_color(focused.get(), hovered.get())
     });
     view! {
-        <outline color=ACCENT width=FOCUS_RING_WIDTH radius=RADIUS offset=FOCUS_RING_OFFSET visible={focused}>
-            <sized height=HEIGHT>
-                <outline color={border} width=BORDER_WIDTH radius=RADIUS offset=0.0 visible=true>
-                    <fill color=SURFACE_RAISED radius=RADIUS>{field}</fill>
-                </outline>
-            </sized>
-        </outline>
+        <Outline color=ACCENT width=FOCUS_RING_WIDTH radius=RADIUS offset=FOCUS_RING_OFFSET visible={focused}>
+            <Sized height=HEIGHT>
+                <Outline color={border} width=BORDER_WIDTH radius=RADIUS offset=0.0 visible=true>
+                    <Fill color=SURFACE_RAISED radius=RADIUS>{field}</Fill>
+                </Outline>
+            </Sized>
+        </Outline>
     }
 }
 

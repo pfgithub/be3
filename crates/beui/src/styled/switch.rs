@@ -5,12 +5,12 @@ use crate::color::Color32;
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
-    component_detail, create_memo, Callback, CenteredRowBuilder, FillBuilder, ItemSize,
-    OutlineBuilder, PaddingBuilder, Prop, SizedBuilder, SpacerBuilder,
+    component_detail, create_memo, Callback, CenteredRow, Fill, ItemSize, Outline, Padding, Prop,
+    Sized, Spacer,
 };
 use crate::styled::theme::{ACCENT, ACCENT_HOVER, BORDER, KNOB, RADIUS, SURFACE_RAISED};
 use crate::unstyled;
-use crate::unstyled::{ToggleBuilder, ToggleHandle};
+use crate::unstyled::{Toggle, ToggleHandle};
 
 const WIDTH: f32 = 42.0;
 const HEIGHT: f32 = 24.0;
@@ -24,13 +24,13 @@ const FOCUS_RING_OFFSET: f32 = 4.0;
 #[component]
 pub fn switch(on: Prop<bool>, on_change: Callback<bool>) -> NodeId {
     view! {
-        <toggle checked={on} on_change={move |on| on_change.call(on)}>
+        <Toggle checked={on} on_change={move |on| on_change.call(on)}>
             {move |handle: ToggleHandle| {
                 let checked = handle.checked.clone();
                 component_detail(create_memo(move || detail(checked.get()).to_owned()));
-                view! { <switch_track handle /> }
+                view! { <SwitchTrack handle /> }
             }}
-        </toggle>
+        </Toggle>
     }
 }
 
@@ -53,21 +53,21 @@ fn switch_track(handle: ToggleHandle) -> NodeId {
     let track_color = create_memo(move || track_fill(checked.get(), hovered.get()));
 
     view! {
-        <outline color=ACCENT width=FOCUS_RING_WIDTH radius=RADIUS offset=FOCUS_RING_OFFSET visible={focused}>
-            <sized width=WIDTH height=HEIGHT>
-                <fill color={track_color} radius=TRACK_RADIUS>
-                    <padding horizontal=PADDING vertical=PADDING>
-                        <centered_row spacing=0.0>
-                            <spacer @sizing={before_percent} />
-                            <sized width=KNOB_SIZE height=KNOB_SIZE>
-                                <fill color=KNOB radius=KNOB_RADIUS></fill>
-                            </sized>
-                            <spacer @sizing={after_percent} />
-                        </centered_row>
-                    </padding>
-                </fill>
-            </sized>
-        </outline>
+        <Outline color=ACCENT width=FOCUS_RING_WIDTH radius=RADIUS offset=FOCUS_RING_OFFSET visible={focused}>
+            <Sized width=WIDTH height=HEIGHT>
+                <Fill color={track_color} radius=TRACK_RADIUS>
+                    <Padding horizontal=PADDING vertical=PADDING>
+                        <CenteredRow spacing=0.0>
+                            <Spacer @sizing={before_percent} />
+                            <Sized width=KNOB_SIZE height=KNOB_SIZE>
+                                <Fill color=KNOB radius=KNOB_RADIUS></Fill>
+                            </Sized>
+                            <Spacer @sizing={after_percent} />
+                        </CenteredRow>
+                    </Padding>
+                </Fill>
+            </Sized>
+        </Outline>
     }
 }
 

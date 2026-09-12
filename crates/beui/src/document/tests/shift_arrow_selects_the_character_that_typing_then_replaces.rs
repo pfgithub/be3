@@ -1,10 +1,10 @@
 use super::*;
 use crate::reactive::view;
-use crate::styled::TextInputBuilder;
+use crate::styled::TextInput;
 
 #[test]
 fn shift_arrow_selects_the_character_that_typing_then_replaces() {
-    let (document, [input]) = toolbar_of(|| [view! { <text_input value="cat" /> }]);
+    let (document, [input]) = toolbar_of(|| [view! { <TextInput value="cat" /> }]);
     let mut harness = Harness::new(document);
 
     harness.key(Key::Tab, Modifiers::NONE);

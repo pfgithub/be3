@@ -1,6 +1,6 @@
 use super::*;
 use crate::reactive::{build, create_memo, create_signal, view, ItemSize, NodeRef};
-use crate::styled::SwitchBuilder;
+use crate::styled::Switch;
 
 #[test]
 fn flipping_a_switch_can_replace_the_items_of_a_scroll() {
@@ -25,13 +25,13 @@ fn check_compact_rows(inset: f32) {
             });
             let row_height = item_height.clone();
             view! {
-                <column spacing=0.0>
-                    <switch
+                <Column spacing=0.0>
+                    <Switch
                         @node_ref=&switch
                         on=false
                         on_change={move |on: bool| set_compact.set(on)}
                     />
-                    <virtual_list @sizing=ItemSize::Percent(100.0)
+                    <VirtualList @sizing=ItemSize::Percent(100.0)
                         @node_ref=&scroll
                         count=VIRTUAL_ITEM_COUNT
                         item_height
@@ -40,11 +40,11 @@ fn check_compact_rows(inset: f32) {
                             sink.borrow_mut().push(index);
                             let height = row_height.get() / 2.0;
                             view! {
-                                <padding horizontal=0.0 vertical={height}><spacer /></padding>
+                                <Padding horizontal=0.0 vertical={height}><Spacer /></Padding>
                             }
                         }}
-                    </virtual_list>
-                </column>
+                    </VirtualList>
+                </Column>
             }
         }
     });

@@ -1,12 +1,12 @@
-use crate::base::overlay::{OverlayBuilder, Placement};
+use crate::base::overlay::{Overlay, Placement};
 use crate::color::Color32;
 use crate::document::Document;
 use crate::input::{Key, KeyPress};
 use crate::node::NodeId;
 use crate::reactive::{
     clone, create_effect, create_selector, create_signal, intrinsic, set_component_state, Callback,
-    Child, ColumnBuilder, ItemSize, Memo, NodeRef, Prop, ReadSignal, Render, RenderFn,
-    ScrollBuilder, Selector, VisibilityBuilder, WriteSignal,
+    Child, Column, ItemSize, Memo, NodeRef, Prop, ReadSignal, Render, RenderFn, Scroll, Selector,
+    Visibility, WriteSignal,
 };
 use crate::unstyled;
 use crate::unstyled::button::ButtonHandle;
@@ -82,7 +82,7 @@ pub fn select(
 ) -> NodeId {
     let selected_prop = selected;
     let initial = selected_prop.peek().filter(|index| *index < options.len());
-    let option = option.unwrap_or_else(|| RenderFn::new(|_| view! { <column spacing=0.0 /> }));
+    let option = option.unwrap_or_else(|| RenderFn::new(|_| view! { <Column spacing=0.0 /> }));
     let popup = popup.unwrap_or_else(|| Render::new(|content| content));
 
     let (highlighted, set_highlighted) = create_signal(initial);
@@ -121,7 +121,7 @@ pub fn select(
     });
     set_component_state(state.clone());
 
-    let trigger_view = trigger.unwrap_or_else(|| Render::new(|_| view! { <column spacing=0.0 /> }));
+    let trigger_view = trigger.unwrap_or_else(|| Render::new(|_| view! { <Column spacing=0.0 /> }));
     let trigger_content = move |handle: ButtonHandle| {
         trigger_view.call(SelectTriggerHandle {
             selected,
@@ -137,7 +137,7 @@ pub fn select(
         .enumerate()
         .map(|(index, row)| {
             intrinsic(view! {
-                <select_row
+                <SelectRow
                     state={state.clone()}
                     index
                     label={row.label.clone()}
@@ -162,8 +162,8 @@ pub fn select(
     let (trigger_blur, search_blur) = (state.clone(), state.clone());
 
     view! {
-        <column spacing=0.0>
-            <unstyled::button
+        <Column spacing=0.0>
+            <unstyled::Button
                 @node_ref={&state.trigger}
                 focused={focused.memo(Focus::Trigger)}
                 on_focus_change={move |has_focus: bool| blur(&trigger_blur, has_focus, Focus::Trigger)}
@@ -171,15 +171,15 @@ pub fn select(
                 on_click={move || open(&open_state)}
                 on_key={move |press: KeyPress| trigger_key(&key_state, press)}
             />
-            <overlay
+            <Overlay
                 anchor={&state.trigger}
                 placement=Placement::BelowStart
                 open={is_open.clone()}
                 on_dismiss={move || dismiss(&dismiss_state)}
             >
                 {popup.call(view! {
-                    <column spacing=6.0>
-                        <unstyled::text_input
+                    <Column spacing=6.0>
+                        <unstyled::TextInput
                             @node_ref={&state.search}
                             value={search_text}
                             focused={focused.memo(Focus::Search)}
@@ -200,11 +200,11 @@ pub fn select(
                             }}
                             on_key_override={move |press: KeyPress| navigate(&navigate_state, press)}
                         />
-                        <scroll @sizing=ItemSize::Fixed(OPTIONS_MAX_HEIGHT) reveal children={items} />
-                    </column>
+                        <Scroll @sizing=ItemSize::Fixed(OPTIONS_MAX_HEIGHT) reveal children={items} />
+                    </Column>
                 })}
-            </overlay>
-        </column>
+            </Overlay>
+        </Column>
     }
 }
 
@@ -219,8 +219,8 @@ fn select_row(
     let (hover_state, click_state) = (state.clone(), state.clone());
     let visible = state.rows[index].visible.clone();
     view! {
-        <visibility visible>
-            <unstyled::button
+        <Visibility visible>
+            <unstyled::Button
                 @node_ref={&state.rows[index].button}
                 tab_stop=false
                 content={move |button: ButtonHandle| {
@@ -240,7 +240,7 @@ fn select_row(
                 }}
                 on_click={move || confirm(&click_state, index)}
             />
-        </visibility>
+        </Visibility>
     }
 }
 

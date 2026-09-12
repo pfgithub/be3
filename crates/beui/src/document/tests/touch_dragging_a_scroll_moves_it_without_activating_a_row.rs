@@ -1,5 +1,5 @@
 use super::*;
-use crate::reactive::{build, intrinsic, view, ItemSize, NodeRef, ScrollBuilder};
+use crate::reactive::{build, intrinsic, view, ItemSize, NodeRef, Scroll};
 
 #[test]
 fn touch_dragging_a_scroll_moves_it_without_activating_a_row() {
@@ -12,16 +12,16 @@ fn touch_dragging_a_scroll_moves_it_without_activating_a_row() {
             .map(|index| {
                 let click_sink = click_sink.clone();
                 intrinsic(view! {
-                    <labelled_button label={format!("Row {index}")} on_click={move || {
+                    <LabelledButton label={format!("Row {index}")} on_click={move || {
                         click_sink.set(click_sink.get() + 1);
                     }} />
                 })
             })
             .collect::<Vec<_>>();
         view! {
-            <column spacing=0.0>
-                <scroll @sizing=ItemSize::Percent(100.0) @node_ref=&scroll_ref children={items} />
-            </column>
+            <Column spacing=0.0>
+                <Scroll @sizing=ItemSize::Percent(100.0) @node_ref=&scroll_ref children={items} />
+            </Column>
         }
     });
     let scroll = scroll.get();

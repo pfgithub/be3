@@ -19,15 +19,15 @@ Tab and Shift+Tab traverse visible controls in tree order and wrap within the do
 ## Control props
 
 Every control is a `#[component]`, so it is written as a tag inside `view!` and
-driven by reactive props rather than by setter calls. `<radio_group>` and
-`<listbox>` take `labels` and an `Option<usize>` `selected` prop and report
+driven by reactive props rather than by setter calls. `<RadioGroup>` and
+`<Listbox>` take `labels` and an `Option<usize>` `selected` prop and report
 changes through `on_change`; `None` clears the selection, and the first option
-becomes the entry point. `<toggle_button>` takes `label` and `pressed`, and its
+becomes the entry point. `<ToggleButton>` takes `label` and `pressed`, and its
 label stays stable as the pressed state changes. The demo's Choices tab shows
 all three.
 
-`<select>` takes `options` and `selected` and opens a popup with a search box
-over the option list. `<context_menu>` wraps a `region` so a secondary click
+`<Select>` takes `options` and `selected` and opens a popup with a search box
+over the option list. `<ContextMenu>` wraps a `region` so a secondary click
 opens a menu built from the `items` prop, a `Vec<unstyled::MenuItem>`
 (`MenuItem::new` for a leaf, `MenuItem::with_children` for a submenu); its
 `on_select` callback receives the selected item's index path through any
@@ -43,16 +43,16 @@ it, is for tests and host integration: `*_selected`, `*_open`, `*_pressed`,
 ## Composing controls and embedding beui
 
 The unstyled controls hand their interaction state to whoever renders their
-content: `<unstyled::button content={...}>` calls the content builder with a
+content: `<unstyled::Button content={...}>` calls the content builder with a
 `ButtonHandle` carrying `hovered`, `active` and `focused` signals, and the
 text input and select equivalents do the same. Build reactive props out of
 those signals — including effects that react to a child's hover or focus —
 instead of querying the control's state back afterwards.
 
-`tab_stop` is a prop on `<unstyled::button>` and `<focusable>`: set it to
+`tab_stop` is a prop on `<unstyled::Button>` and `<Focusable>`: set it to
 `false` to keep a control reachable by pointer and programmatic focus while
 removing it from sequential Tab navigation, which is how single-Tab-stop groups
-work. `on_key` returns `true` only for keys it handled. `<unstyled::text_input>`
+work. `on_key` returns `true` only for keys it handled. `<unstyled::TextInput>`
 also takes `on_key_override`, which lets a compound control (such as select's
 search box) intercept arrows before the text input's own key handling runs;
 returning `false` falls through to the normal behavior. `Document::focused_node`

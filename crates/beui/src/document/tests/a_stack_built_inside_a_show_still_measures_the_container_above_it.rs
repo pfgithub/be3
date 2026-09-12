@@ -1,7 +1,7 @@
 use super::*;
-use crate::reactive::{build, create_signal, view, ButtonBuilder, ItemSize, ShowBuilder};
-use crate::styled::StackBuilder;
-use crate::unstyled::ContainerBuilder;
+use crate::reactive::{build, create_signal, view, Button, ItemSize, Show};
+use crate::styled::Stack;
+use crate::unstyled::Container;
 
 const BREAKPOINT: f32 = 500.0;
 const ITEM_HEIGHT: f32 = 20.0;
@@ -14,25 +14,25 @@ fn a_stack_built_inside_a_show_still_measures_the_container_above_it() {
         move || {
             let (visible, set_visible) = create_signal(false);
             view! {
-                <container>
+                <Container>
                     {move |_| view! {
-                        <column spacing=0.0>
-                            <button @node_ref=&toggle on_click={move || set_visible.set(true)}>
-                                <text string="toggle" />
-                            </button>
-                            <show condition={visible}>
-                                <stack spacing=0.0 breakpoint=BREAKPOINT>
-                                    <sized @sizing=ItemSize::Percent(50.0) @node_ref=&left height=ITEM_HEIGHT>
-                                        <spacer />
-                                    </sized>
-                                    <sized @sizing=ItemSize::Percent(50.0) @node_ref=&right height=ITEM_HEIGHT>
-                                        <spacer />
-                                    </sized>
-                                </stack>
-                            </show>
-                        </column>
+                        <Column spacing=0.0>
+                            <Button @node_ref=&toggle on_click={move || set_visible.set(true)}>
+                                <Text string="toggle" />
+                            </Button>
+                            <Show condition={visible}>
+                                <Stack spacing=0.0 breakpoint=BREAKPOINT>
+                                    <Sized @sizing=ItemSize::Percent(50.0) @node_ref=&left height=ITEM_HEIGHT>
+                                        <Spacer />
+                                    </Sized>
+                                    <Sized @sizing=ItemSize::Percent(50.0) @node_ref=&right height=ITEM_HEIGHT>
+                                        <Spacer />
+                                    </Sized>
+                                </Stack>
+                            </Show>
+                        </Column>
                     }}
-                </container>
+                </Container>
             }
         }
     });

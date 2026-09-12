@@ -9,19 +9,15 @@ use crate::base::{ScrollPosition, TextAlign};
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
-    clone, component, create_memo, create_signal, on_cleanup, view, CenteredRowBuilder,
-    ClickCatcherBuilder, ColumnBuilder, FillBuilder, ForEachBuilder, ItemSize, Memo, NodeRef,
-    OutlineBuilder, PaddingBuilder, ReadSignal, RowBuilder, ScrollBuilder, SpacerBuilder,
-    WriteSignal,
+    clone, component, create_memo, create_signal, on_cleanup, view, CenteredRow, ClickCatcher,
+    Column, Fill, ForEach, ItemSize, Memo, NodeRef, Outline, Padding, ReadSignal, Row, Scroll,
+    Spacer, WriteSignal,
 };
 use crate::styled::theme::{
     ACCENT, BORDER_WIDTH, CHIP_RADIUS, ON_ACCENT, RADIUS, SCROLLBAR_WIDTH, SEPARATOR_HEIGHT,
     SURFACE, SURFACE_RAISED, TEXT, TEXT_MUTED,
 };
-use crate::styled::{
-    BorderedBuilder, CaptionBuilder, CheckboxBuilder, CodeBuilder, HeadingBuilder, ListRowBuilder,
-    ScrollbarBuilder, SeparatorBuilder,
-};
+use crate::styled::{Bordered, Caption, Checkbox, Code, Heading, ListRow, Scrollbar, Separator};
 use crate::unstyled;
 
 use super::tree::{Entry, Key};
@@ -98,55 +94,55 @@ pub(crate) fn build(state: &Rc<State>) -> Panel {
         let bounds_text = create_memo(move || summary.with(|summary| summary.bounds.clone()));
         let (list_state, list_rows) = (state.clone(), rows.clone());
         view! {
-        <row spacing=0.0>
-            <separator @sizing=ItemSize::Fixed(SEPARATOR_HEIGHT) />
-            <fill @sizing=ItemSize::Percent(100.0) color=SURFACE radius=0>
-                <column spacing=0.0>
-                    <padding horizontal=HEADER_PADDING vertical=HEADER_PADDING>
-                        <centered_row spacing=HEADER_SPACING>
-                            <heading content="Inspector" />
-                            <caption @sizing=ItemSize::Percent(100.0) content={count_text} align=TextAlign::End />
-                            <pick_toggle state={state.clone()} picking />
-                        </centered_row>
-                    </padding>
-                    <separator @sizing=ItemSize::Fixed(SEPARATOR_HEIGHT) />
-                    <padding @sizing=ItemSize::Percent(100.0) horizontal=BODY_PADDING vertical=BODY_PADDING>
-                        <row spacing=BODY_SPACING>
-                            <scroll @sizing=ItemSize::Percent(100.0)
+        <Row spacing=0.0>
+            <Separator @sizing=ItemSize::Fixed(SEPARATOR_HEIGHT) />
+            <Fill @sizing=ItemSize::Percent(100.0) color=SURFACE radius=0>
+                <Column spacing=0.0>
+                    <Padding horizontal=HEADER_PADDING vertical=HEADER_PADDING>
+                        <CenteredRow spacing=HEADER_SPACING>
+                            <Heading content="Inspector" />
+                            <Caption @sizing=ItemSize::Percent(100.0) content={count_text} align=TextAlign::End />
+                            <PickToggle state={state.clone()} picking />
+                        </CenteredRow>
+                    </Padding>
+                    <Separator @sizing=ItemSize::Fixed(SEPARATOR_HEIGHT) />
+                    <Padding @sizing=ItemSize::Percent(100.0) horizontal=BODY_PADDING vertical=BODY_PADDING>
+                        <Row spacing=BODY_SPACING>
+                            <Scroll @sizing=ItemSize::Percent(100.0)
                                 focus_color=ACCENT
                                 reveal
                                 on_change={move |value| set_position.set(value)}
                             >
-                                <for_each spacing=0.0 items={keys} key={|key: Key| key}>
+                                <ForEach spacing=0.0 items={keys} key={|key: Key| key}>
                                     {move |key: Key| view! {
-                                        <tree_row
+                                        <TreeRow
                                             row_key={key}
                                             entries={entries.clone()}
                                             state={list_state.clone()}
                                             rows={list_rows.clone()}
                                         />
                                     }}
-                                </for_each>
-                            </scroll>
-                            <scrollbar @sizing=ItemSize::Fixed(SCROLLBAR_WIDTH) position />
-                        </row>
-                    </padding>
-                    <separator @sizing=ItemSize::Fixed(SEPARATOR_HEIGHT) />
-                    <padding horizontal=FOOTER_PADDING vertical=FOOTER_PADDING>
-                        <column spacing=FOOTER_SPACING>
-                            <checkbox
+                                </ForEach>
+                            </Scroll>
+                            <Scrollbar @sizing=ItemSize::Fixed(SCROLLBAR_WIDTH) position />
+                        </Row>
+                    </Padding>
+                    <Separator @sizing=ItemSize::Fixed(SEPARATOR_HEIGHT) />
+                    <Padding horizontal=FOOTER_PADDING vertical=FOOTER_PADDING>
+                        <Column spacing=FOOTER_SPACING>
+                            <Checkbox
                                 @node_ref=&touch_toggle_ref
                                 label="Emulate touch with mouse"
                                 checked={touch_emulation}
                                 on_change={move |enabled| touch_state.touch_emulation.set(enabled)}
                             />
-                            <code content={selection_text} />
-                            <code content={bounds_text} color=TEXT_MUTED />
-                        </column>
-                    </padding>
-                </column>
-            </fill>
-        </row>
+                            <Code content={selection_text} />
+                            <Code content={bounds_text} color=TEXT_MUTED />
+                        </Column>
+                    </Padding>
+                </Column>
+            </Fill>
+        </Row>
         }
     });
     document.inspectable = false;
@@ -193,22 +189,22 @@ fn pick_toggle(state: Rc<State>, picking: Memo<bool>) -> NodeId {
     let fill_color = create_memo(move || toggle_fill(picking.get()));
     let picker = state;
     view! {
-        <unstyled::pressable on_click={move || picker.toggle_picking()}>
-            <bordered corner_radius=CHIP_RADIUS>
-                <fill color={fill_color} radius=CHIP_RADIUS>
-                    <padding
+        <unstyled::Pressable on_click={move || picker.toggle_picking()}>
+            <Bordered corner_radius=CHIP_RADIUS>
+                <Fill color={fill_color} radius=CHIP_RADIUS>
+                    <Padding
                         horizontal=TOGGLE_PADDING_HORIZONTAL
                         vertical=TOGGLE_PADDING_VERTICAL
                     >
-                        <code
+                        <Code
                             content="Pick"
                             align=TextAlign::Center
                             color={label_color}
                         />
-                    </padding>
-                </fill>
-            </bordered>
-        </unstyled::pressable>
+                    </Padding>
+                </Fill>
+            </Bordered>
+        </unstyled::Pressable>
     }
 }
 
@@ -255,38 +251,38 @@ fn tree_row(row_key: Key, entries: Entries, state: Rc<State>, rows: Rows) -> Nod
 
     let (hover, selection, expansion) = (state.clone(), state.clone(), state);
     view! {
-        <click_catcher
+        <ClickCatcher
             @node_ref=&row
             cursor=CursorIcon::PointingHand
             on_click={move || selection.select(node)}
             on_hover_change={move |hovered| hover.hover(node, hovered)}
         >
-            <outline
+            <Outline
                 color=ACCENT
                 width=BORDER_WIDTH
                 radius=RADIUS
                 offset=0.0
                 visible={selected}
             >
-                <list_row>
-                    <centered_row spacing=ROW_SPACING>
-                        <spacer @sizing={indent} />
-                        <unstyled::pressable @sizing=ItemSize::Fixed(MARKER_WIDTH)
+                <ListRow>
+                    <CenteredRow spacing=ROW_SPACING>
+                        <Spacer @sizing={indent} />
+                        <unstyled::Pressable @sizing=ItemSize::Fixed(MARKER_WIDTH)
                             @node_ref=&marker
                             enabled={expandable}
                             on_click={move || {
                                 expansion.set_expanded(key, !expanded.get_untracked());
                             }}
                         >
-                            <code content={glyph} color=TEXT_MUTED align=TextAlign::Center />
-                        </unstyled::pressable>
-                        <code content={kind} />
-                        <code @sizing=ItemSize::Percent(100.0) content={detail} color=TEXT_MUTED />
-                        <code content={size} color=TEXT_MUTED align=TextAlign::End />
-                    </centered_row>
-                </list_row>
-            </outline>
-        </click_catcher>
+                            <Code content={glyph} color=TEXT_MUTED align=TextAlign::Center />
+                        </unstyled::Pressable>
+                        <Code content={kind} />
+                        <Code @sizing=ItemSize::Percent(100.0) content={detail} color=TEXT_MUTED />
+                        <Code content={size} color=TEXT_MUTED align=TextAlign::End />
+                    </CenteredRow>
+                </ListRow>
+            </Outline>
+        </ClickCatcher>
     }
 }
 

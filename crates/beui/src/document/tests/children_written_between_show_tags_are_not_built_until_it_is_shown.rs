@@ -1,14 +1,12 @@
 use super::*;
-use crate::reactive::{
-    build, create_signal, view, ButtonBuilder, ColumnBuilder, NodeRef, ShowBuilder, TextBuilder,
-};
+use crate::reactive::{build, create_signal, view, Button, Column, NodeRef, Show, Text};
 
 type Builds = Rc<Cell<usize>>;
 
 #[component]
 fn counted_panel(builds: Builds) -> NodeId {
     builds.set(builds.get() + 1);
-    view! { <text string="panel" /> }
+    view! { <Text string="panel" /> }
 }
 
 #[test]
@@ -21,17 +19,17 @@ fn children_written_between_show_tags_are_not_built_until_it_is_shown() {
         move || {
             let (visible, set_visible) = create_signal(false);
             view! {
-                <column spacing=0.0>
-                    <button
+                <Column spacing=0.0>
+                    <Button
                         @node_ref=&toggle
                         on_click={move || set_visible.update(|visible| *visible = !*visible)}
                     >
-                        <text string="toggle" />
-                    </button>
-                    <show @node_ref=&panel condition=visible>
-                        <counted_panel builds />
-                    </show>
-                </column>
+                        <Text string="toggle" />
+                    </Button>
+                    <Show @node_ref=&panel condition=visible>
+                        <CountedPanel builds />
+                    </Show>
+                </Column>
             }
         }
     });

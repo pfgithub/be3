@@ -1,6 +1,6 @@
 use super::*;
 use crate::reactive::view;
-use crate::styled::SelectBuilder;
+use crate::styled::Select;
 
 #[test]
 fn arrow_keys_in_a_select_search_box_move_the_highlighted_option_without_editing_the_search_text() {
@@ -8,7 +8,7 @@ fn arrow_keys_in_a_select_search_box_move_the_highlighted_option_without_editing
         .iter()
         .map(|label| (*label).to_owned())
         .collect();
-    let (document, [select]) = toolbar_of(|| [view! { <select options selected=None /> }]);
+    let (document, [select]) = toolbar_of(|| [view! { <Select options selected=None /> }]);
     let mut harness = Harness::new(document);
     harness.frame(Vec::new());
 

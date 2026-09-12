@@ -2,11 +2,9 @@ use beui_macros::{component, view};
 
 use crate::base::TextAlign;
 use crate::node::NodeId;
-use crate::reactive::{
-    component_detail, create_memo, FillBuilder, PaddingBuilder, Prop, TextBuilder,
-};
+use crate::reactive::{component_detail, create_memo, Fill, Padding, Prop, Text};
 use crate::styled::theme::{CHIP_RADIUS, FONT_SMALL, SURFACE_RAISED, TEXT};
-use crate::styled::BorderedBuilder;
+use crate::styled::Bordered;
 
 const PADDING_HORIZONTAL: f32 = 8.0;
 const PADDING_VERTICAL: f32 = 3.0;
@@ -17,12 +15,12 @@ pub fn chip(label: Prop<String>) -> NodeId {
     component_detail(label_text.clone());
 
     view! {
-        <bordered corner_radius=CHIP_RADIUS>
-            <fill color=SURFACE_RAISED radius=CHIP_RADIUS>
-                <padding horizontal=PADDING_HORIZONTAL vertical=PADDING_VERTICAL>
-                    <text string={label_text} font_size=FONT_SMALL color=TEXT align=TextAlign::Center />
-                </padding>
-            </fill>
-        </bordered>
+        <Bordered corner_radius=CHIP_RADIUS>
+            <Fill color=SURFACE_RAISED radius=CHIP_RADIUS>
+                <Padding horizontal=PADDING_HORIZONTAL vertical=PADDING_VERTICAL>
+                    <Text string={label_text} font_size=FONT_SMALL color=TEXT align=TextAlign::Center />
+                </Padding>
+            </Fill>
+        </Bordered>
     }
 }

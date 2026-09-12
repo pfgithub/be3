@@ -1,6 +1,6 @@
 use super::*;
 use crate::reactive::{view, NodeRef};
-use crate::styled::ContextMenuBuilder;
+use crate::styled::ContextMenu;
 
 #[test]
 fn arrow_keys_move_a_visible_highlight_through_an_open_context_menu() {
@@ -11,7 +11,7 @@ fn arrow_keys_move_a_visible_highlight_through_an_open_context_menu() {
     ];
     let (document, [_menu]) = toolbar_of({
         let region = region.clone();
-        move || [view! { <context_menu items><menu_region @node_ref=&region /></context_menu> }]
+        move || [view! { <ContextMenu items><MenuRegion @node_ref=&region /></ContextMenu> }]
     });
     let region = region.get();
     let mut harness = Harness::new(document);

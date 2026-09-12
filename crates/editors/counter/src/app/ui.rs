@@ -2,11 +2,11 @@ use beui::reactive::ItemSize;
 use std::rc::Rc;
 
 use block_editor_plugin::beui::reactive::{
-    build, clone, create_memo, create_signal, view, with_reactive_scope, CenteredRowBuilder,
-    ColumnBuilder, FillBuilder, PaddingBuilder, WriteSignal,
+    build, clone, create_memo, create_signal, view, with_reactive_scope, CenteredRow, Column, Fill,
+    Padding, WriteSignal,
 };
 use block_editor_plugin::beui::styled::theme::BACKGROUND;
-use block_editor_plugin::beui::styled::{ButtonBuilder, ButtonVariant, DisplayBuilder};
+use block_editor_plugin::beui::styled::{Button, ButtonVariant, Display};
 use block_editor_plugin::beui::{Color32, Context, Document, Rect};
 
 const PADDING: f32 = 20.0;
@@ -48,36 +48,36 @@ impl CounterUi {
             let increment = step(&counter, &sink, Counter::increment);
 
             view! {
-                <fill color=BACKGROUND radius=0>
-                    <padding horizontal=PADDING vertical=PADDING>
-                        <column spacing=16.0>
-                            <display
+                <Fill color=BACKGROUND radius=0>
+                    <Padding horizontal=PADDING vertical=PADDING>
+                        <Column spacing=16.0>
+                            <Display
                                 content={create_memo(clone!(count -> move || count.get().to_string()))}
                                 @test_id={"counter.value"}
                             />
-                            <centered_row spacing=10.0>
-                                <button @sizing=ItemSize::Fixed(BUTTON_WIDTH)
+                            <CenteredRow spacing=10.0>
+                                <Button @sizing=ItemSize::Fixed(BUTTON_WIDTH)
                                     label="-"
                                     variant=ButtonVariant::Primary
                                     @test_id={"counter.decrement"}
                                     on_click={decrement}
                                 />
-                                <button @sizing=ItemSize::Fixed(BUTTON_WIDTH)
+                                <Button @sizing=ItemSize::Fixed(BUTTON_WIDTH)
                                     label="+"
                                     variant=ButtonVariant::Primary
                                     @test_id={"counter.increment"}
                                     on_click={increment}
                                 />
-                                <button
+                                <Button
                                     label="Reset"
                                     variant=ButtonVariant::Secondary
                                     @test_id={"counter.reset"}
                                     on_click={reset}
                                 />
-                            </centered_row>
-                        </column>
-                    </padding>
-                </fill>
+                            </CenteredRow>
+                        </Column>
+                    </Padding>
+                </Fill>
             }
         });
 

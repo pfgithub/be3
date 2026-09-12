@@ -6,8 +6,8 @@ use beui_macros::{component, view};
 
 use crate::reactive::Memo;
 use crate::reactive::{
-    clone, create_memo, CenteredRowBuilder, FillBuilder, ItemSize, OutlineBuilder, PaddingBuilder,
-    Prop, SizedBuilder, SpacerBuilder, TextBuilder, VisibilityBuilder,
+    clone, create_memo, CenteredRow, Fill, ItemSize, Outline, Padding, Prop, Sized, Spacer, Text,
+    Visibility,
 };
 use crate::styled::theme::{
     ACCENT, ACCENT_SOFT, BORDER, FONT_BODY, RADIUS, SURFACE_RAISED, TEXT, TEXT_MUTED,
@@ -36,18 +36,18 @@ pub(super) fn choice_option(kind: Kind, handle: ChoiceOptionHandle) -> NodeId {
     let checked = selected.clone();
     let fill_color = create_memo(move || background(selected.get(), hovered.get()));
     view! {
-        <outline color=ACCENT width=2.0 radius=RADIUS offset=1.0 visible={focused}>
-            <fill color={fill_color} radius=RADIUS>
-                <padding horizontal=14.0 vertical=6.0>
-                    <choice_label
+        <Outline color=ACCENT width=2.0 radius=RADIUS offset=1.0 visible={focused}>
+            <Fill color={fill_color} radius=RADIUS>
+                <Padding horizontal=14.0 vertical=6.0>
+                    <ChoiceLabel
                         kind
                         label
                         color={label_color}
                         checked
                     />
-                </padding>
-            </fill>
-        </outline>
+                </Padding>
+            </Fill>
+        </Outline>
     }
 }
 
@@ -59,32 +59,32 @@ fn choice_label(kind: Kind, label: String, color: Prop<Color32>, checked: Memo<b
         TextAlign::Start
     };
     if kind != Kind::Radio {
-        return view! { <text string={label} font_size=FONT_BODY color align /> };
+        return view! { <Text string={label} font_size=FONT_BODY color align /> };
     }
     view! {
-        <centered_row spacing=MARK_SPACING>
-            <radio_mark checked />
-            <text @sizing=ItemSize::Percent(100.0) string={label} font_size=FONT_BODY color align />
-        </centered_row>
+        <CenteredRow spacing=MARK_SPACING>
+            <RadioMark checked />
+            <Text @sizing=ItemSize::Percent(100.0) string={label} font_size=FONT_BODY color align />
+        </CenteredRow>
     }
 }
 
 #[component]
 fn radio_mark(checked: Memo<bool>) -> NodeId {
     view! {
-        <sized width=MARK_BOX height=MARK_BOX>
-            <outline color=BORDER width=2.0 radius=MARK_RADIUS offset=0.0 visible=true>
-                <centered_row spacing=0.0>
-                    <spacer @sizing=ItemSize::Percent(100.0) />
-                    <visibility visible={checked}>
-                        <sized width=MARK_DOT height=MARK_DOT>
-                            <fill color=ACCENT radius=MARK_RADIUS />
-                        </sized>
-                    </visibility>
-                    <spacer @sizing=ItemSize::Percent(100.0) />
-                </centered_row>
-            </outline>
-        </sized>
+        <Sized width=MARK_BOX height=MARK_BOX>
+            <Outline color=BORDER width=2.0 radius=MARK_RADIUS offset=0.0 visible=true>
+                <CenteredRow spacing=0.0>
+                    <Spacer @sizing=ItemSize::Percent(100.0) />
+                    <Visibility visible={checked}>
+                        <Sized width=MARK_DOT height=MARK_DOT>
+                            <Fill color=ACCENT radius=MARK_RADIUS />
+                        </Sized>
+                    </Visibility>
+                    <Spacer @sizing=ItemSize::Percent(100.0) />
+                </CenteredRow>
+            </Outline>
+        </Sized>
     }
 }
 

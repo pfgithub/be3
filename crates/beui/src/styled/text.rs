@@ -4,7 +4,7 @@ use beui_macros::{component, view};
 
 use crate::base::TextAlign;
 use crate::node::NodeId;
-use crate::reactive::{clone, component_detail, create_memo, Prop, TextBuilder};
+use crate::reactive::{clone, component_detail, create_memo, Prop, Text};
 use crate::styled::theme::{
     FONT_BODY, FONT_DISPLAY, FONT_HEADING, FONT_SMALL, FONT_TITLE, ICON_SIZE, TEXT, TEXT_MUTED,
 };
@@ -16,7 +16,7 @@ pub fn code(
     #[prop(default = TEXT)] color: Prop<Color32>,
 ) -> NodeId {
     view! {
-        <text
+        <Text
             string={content}
             font_size=FONT_SMALL
             color
@@ -28,13 +28,13 @@ pub fn code(
 
 #[component]
 pub fn icon(glyph: String, #[prop(default = TEXT)] color: Prop<Color32>) -> NodeId {
-    view! { <icon_sized glyph font_size=ICON_SIZE color /> }
+    view! { <IconSized glyph font_size=ICON_SIZE color /> }
 }
 
 #[component]
 pub fn icon_sized(glyph: String, font_size: Prop<f32>, color: Prop<Color32>) -> NodeId {
     view! {
-        <text string={glyph} font_size color align=TextAlign::Center icon=true />
+        <Text string={glyph} font_size color align=TextAlign::Center icon=true />
     }
 }
 
@@ -50,7 +50,7 @@ fn line(
         clone!(text -> move || format!("{:?}", text.get())),
     ));
     view! {
-        <text string={text} font_size color align />
+        <Text string={text} font_size color align />
     }
 }
 
@@ -60,7 +60,7 @@ pub fn display(
     #[prop(default = TextAlign::Start)] align: Prop<TextAlign>,
     #[prop(default = TEXT)] color: Prop<Color32>,
 ) -> NodeId {
-    view! { <line content font_size=FONT_DISPLAY color align /> }
+    view! { <Line content font_size=FONT_DISPLAY color align /> }
 }
 
 #[component]
@@ -69,7 +69,7 @@ pub fn title(
     #[prop(default = TextAlign::Start)] align: Prop<TextAlign>,
     #[prop(default = TEXT)] color: Prop<Color32>,
 ) -> NodeId {
-    view! { <line content font_size=FONT_TITLE color align /> }
+    view! { <Line content font_size=FONT_TITLE color align /> }
 }
 
 #[component]
@@ -78,7 +78,7 @@ pub fn heading(
     #[prop(default = TextAlign::Start)] align: Prop<TextAlign>,
     #[prop(default = TEXT)] color: Prop<Color32>,
 ) -> NodeId {
-    view! { <line content font_size=FONT_HEADING color align /> }
+    view! { <Line content font_size=FONT_HEADING color align /> }
 }
 
 #[component]
@@ -87,7 +87,7 @@ pub fn body(
     #[prop(default = TextAlign::Start)] align: Prop<TextAlign>,
     #[prop(default = TEXT)] color: Prop<Color32>,
 ) -> NodeId {
-    view! { <line content font_size=FONT_BODY color align /> }
+    view! { <Line content font_size=FONT_BODY color align /> }
 }
 
 #[component]
@@ -96,7 +96,7 @@ pub fn caption(
     #[prop(default = TextAlign::Start)] align: Prop<TextAlign>,
     #[prop(default = TEXT_MUTED)] color: Prop<Color32>,
 ) -> NodeId {
-    view! { <line content font_size=FONT_SMALL color align /> }
+    view! { <Line content font_size=FONT_SMALL color align /> }
 }
 
 #[component]
@@ -109,6 +109,6 @@ pub fn paragraph(
         clone!(text -> move || format!("{:?}", text.get())),
     ));
     view! {
-        <text string={text} font_size=FONT_BODY color wrap=true />
+        <Text string={text} font_size=FONT_BODY color wrap=true />
     }
 }

@@ -13,5 +13,5 @@ pub fn stack(
     children: Children,
 ) -> NodeId {
     let narrow = narrower_than(breakpoint);
-    view! { <unstyled::stack spacing narrow children /> }
+    view! { <unstyled::Stack spacing narrow children /> }
 }

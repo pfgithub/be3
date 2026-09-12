@@ -19,8 +19,8 @@ use beui_macros::{component, view};
 
 use crate::reactive::{
     clone, component_detail, copy_text, create_effect, create_memo, create_signal,
-    set_component_state, Callback, Child, ClickCatcherBuilder, FocusableBuilder, Memo, NodeRef,
-    PaddingBuilder, Prop, ReadSignal, Render, TextBuilder, WriteSignal,
+    set_component_state, Callback, Child, ClickCatcher, Focusable, Memo, NodeRef, Padding, Prop,
+    ReadSignal, Render, Text, WriteSignal,
 };
 
 const FONT_SIZE: f32 = 14.0;
@@ -105,7 +105,7 @@ pub fn text_input(
     }));
 
     view! {
-        <focusable
+        <Focusable
             focused={focus_request}
             on_focus_change={{
                 let editor = editor.clone();
@@ -131,7 +131,7 @@ pub fn text_input(
                 }
             }}
         >
-            <click_catcher
+            <ClickCatcher
                 cursor=CursorIcon::Text
                 on_press={{
                     let editor = editor.clone();
@@ -148,8 +148,8 @@ pub fn text_input(
             >
                 {{
                     let field = view! {
-                        <padding horizontal={padding_horizontal} vertical={padding_vertical}>
-                            <text
+                        <Padding horizontal={padding_horizontal} vertical={padding_vertical}>
+                            <Text
                                 @node_ref=&text
                                 string
                                 font_size
@@ -161,15 +161,15 @@ pub fn text_input(
                                 align=TextAlign::Start
                                 clip=true
                             />
-                        </padding>
+                        </Padding>
                     };
                     match content {
                         Some(build) => build.call(TextInputHandle { field, hovered, focused }),
                         None => field,
                     }
                 }}
-            </click_catcher>
-        </focusable>
+            </ClickCatcher>
+        </Focusable>
     }
 }
 

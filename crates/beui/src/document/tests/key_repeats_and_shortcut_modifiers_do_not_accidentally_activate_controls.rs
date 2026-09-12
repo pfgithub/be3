@@ -7,7 +7,7 @@ fn key_repeats_and_shortcut_modifiers_do_not_accidentally_activate_controls() {
     let counter = clicks.clone();
     let (document, [_button]) = toolbar_of(|| {
         [view! {
-            <labelled_button
+            <LabelledButton
                 label="Click"
                 on_click={move || counter.set(counter.get() + 1)}
             />

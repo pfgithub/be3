@@ -1,6 +1,6 @@
 use super::*;
 use crate::reactive::view;
-use crate::styled::TabsBuilder;
+use crate::styled::Tabs;
 
 #[test]
 fn clicking_a_tab_selects_the_panel_it_names() {
@@ -8,7 +8,7 @@ fn clicking_a_tab_selects_the_panel_it_names() {
     let sink = reported.clone();
     let (document, [tabs]) = toolbar_of(|| {
         [view! {
-            <tabs labels={vec!["List".to_string(), "Load".to_string()]} selected=0 on_change={move |selected| {
+            <Tabs labels={vec!["List".to_string(), "Load".to_string()]} selected=0 on_change={move |selected| {
                 sink.set(selected);
             }} />
         }]

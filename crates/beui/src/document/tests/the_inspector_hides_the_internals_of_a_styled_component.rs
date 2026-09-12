@@ -1,14 +1,14 @@
 use super::*;
-use crate::reactive::{view, TextBuilder};
-use crate::styled::ListRowBuilder;
+use crate::reactive::{view, Text};
+use crate::styled::ListRow;
 
 #[test]
 fn the_inspector_hides_the_internals_of_a_styled_component() {
     let (document, [_row]) = toolbar_of(|| {
         [view! {
-            <list_row>
-                <text string="Hello" font_size=14.0 color=Color32::WHITE />
-            </list_row>
+            <ListRow>
+                <Text string="Hello" font_size=14.0 color=Color32::WHITE />
+            </ListRow>
         }]
     });
     let mut harness = Harness::new(document);

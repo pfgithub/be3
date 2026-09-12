@@ -2,7 +2,7 @@ use beui_macros::{component, view};
 
 use crate::base::{Direction, ItemSize};
 use crate::node::NodeId;
-use crate::reactive::{clone, component_detail, create_memo, Children, ListBuilder, Prop};
+use crate::reactive::{clone, component_detail, create_memo, Children, List, Prop};
 
 #[component]
 pub fn stack(spacing: Prop<f32>, narrow: Prop<bool>, children: Children) -> NodeId {
@@ -35,5 +35,5 @@ pub fn stack(spacing: Prop<f32>, narrow: Prop<bool>, children: Children) -> Node
         })
         .collect();
 
-    view! { <list direction spacing children /> }
+    view! { <List direction spacing children /> }
 }

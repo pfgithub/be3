@@ -1,4 +1,4 @@
-use crate::base::overlay::{OverlayBuilder, Placement};
+use crate::base::overlay::{Overlay, Placement};
 use crate::document::Document;
 use crate::input::{Key, KeyPress};
 use crate::node::NodeId;
@@ -6,8 +6,8 @@ use beui_macros::{component, view};
 
 use crate::reactive::{
     clone, create_effect, create_memo, create_selector, create_signal, intrinsic,
-    set_component_state, Callback, Child, ColumnBuilder, FocusableBuilder, NodeRef, Prop,
-    ReadSignal, RenderFn, Selector, ShowBuilder, WriteSignal,
+    set_component_state, Callback, Child, Column, Focusable, NodeRef, Prop, ReadSignal, RenderFn,
+    Selector, Show, WriteSignal,
 };
 use crate::unstyled;
 use crate::unstyled::button::ButtonHandle;
@@ -139,7 +139,7 @@ pub(crate) fn menu_list(
         .enumerate()
         .map(|(index, item)| {
             intrinsic(view! {
-                <menu_row
+                <MenuRow
                     state={state.clone()}
                     index
                     item={item.clone()}
@@ -154,8 +154,8 @@ pub(crate) fn menu_list(
 
     let (key_state, blur_focus) = (state.clone(), focus);
     view! {
-        <column spacing=0.0>
-            <focusable
+        <Column spacing=0.0>
+            <Focusable
                 @node_ref={&state.root}
                 tab_stop={root_tab_stop}
                 focused={focused.memo(Focus::Root)}
@@ -166,8 +166,8 @@ pub(crate) fn menu_list(
                 }}
                 on_key={move |press: KeyPress| root_key(&key_state, press)}
             />
-            <column spacing=2.0 children={lines} />
-        </column>
+            <Column spacing=2.0 children={lines} />
+        </Column>
     }
 }
 
@@ -205,8 +205,8 @@ fn menu_row(
         (state.clone(), state.clone(), state.clone(), state);
 
     view! {
-        <column spacing=0.0>
-            <unstyled::button
+        <Column spacing=0.0>
+            <unstyled::Button
                 @node_ref=&button
                 tab_stop={focused.memo(Focus::Row(index))}
                 focused={focused.memo(Focus::Row(index))}
@@ -226,7 +226,7 @@ fn menu_row(
                 }}
                 on_key={move |press: KeyPress| key(&key_state, index, parent.clone(), press)}
             />
-            <show condition={has_children}>
+            <Show condition={has_children}>
                 {move || {
                 let select_state = submenu_state.clone();
                 let leave_state = submenu_state.clone();
@@ -244,14 +244,14 @@ fn menu_row(
                     leave_state.set_focus.set(Focus::Row(index));
                 })));
                 view! {
-                    <overlay
+                    <Overlay
                         anchor=&button
                         placement=Placement::RightStart
                         open={submenu.open.clone()}
                         on_dismiss={move || dismiss.set(false)}
                     >
                         {panel.call(view! {
-                            <menu_list
+                            <MenuList
                                 @node_ref={&submenu.content}
                                 items={children}
                                 row
@@ -265,11 +265,11 @@ fn menu_row(
                                 }}
                             />
                         })}
-                    </overlay>
+                    </Overlay>
                 }
                 }}
-            </show>
-        </column>
+            </Show>
+        </Column>
     }
 }
 

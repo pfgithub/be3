@@ -1,6 +1,6 @@
 use super::*;
-use crate::reactive::{create_memo, create_signal, view, NodeRef, ShowBuilder};
-use crate::styled::SwitchBuilder;
+use crate::reactive::{create_memo, create_signal, view, NodeRef, Show};
+use crate::styled::Switch;
 
 #[test]
 fn clicking_a_switch_moves_its_knob_and_survives_a_tab_round_trip() {
@@ -12,9 +12,9 @@ fn clicking_a_switch_moves_its_knob_and_survives_a_tab_round_trip() {
         move || {
             let condition = create_memo(move || tab.get() == 0);
             [view! {
-                <show condition>
-                    <switch @node_ref=&switch_ref on=false />
-                </show>
+                <Show condition>
+                    <Switch @node_ref=&switch_ref on=false />
+                </Show>
             }]
         }
     });

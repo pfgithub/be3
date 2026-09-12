@@ -4,9 +4,7 @@ use crate::color::Color32;
 
 use crate::base::TextAlign;
 use crate::node::NodeId;
-use crate::reactive::{
-    create_memo, ClickCallback, FillBuilder, OutlineBuilder, PaddingBuilder, Prop, TextBuilder,
-};
+use crate::reactive::{create_memo, ClickCallback, Fill, Outline, Padding, Prop, Text};
 use crate::styled::theme::{
     ACCENT, ACCENT_ACTIVE, ACCENT_HOVER, BORDER, BORDER_WIDTH, FONT_BODY, ON_ACCENT, RADIUS,
     SURFACE, SURFACE_RAISED, TEXT,
@@ -52,11 +50,11 @@ pub fn button(
     on_click: ClickCallback,
 ) -> NodeId {
     view! {
-        <unstyled::button
+        <unstyled::Button
             disabled
             on_click={move || on_click.call()}
             content={move |handle| view! {
-                <button_face handle variant label />
+                <ButtonFace handle variant label />
             }}
         />
     }
@@ -75,14 +73,14 @@ fn button_face(
     } = handle;
     let fill_color = create_memo(move || variant.fill(hovered.get(), active.get()));
     view! {
-        <outline color=ACCENT width=FOCUS_RING_WIDTH radius={RADIUS + 4} offset=FOCUS_RING_OFFSET visible={focused}>
-            <outline color=BORDER width=BORDER_WIDTH radius=RADIUS offset=0.0 visible={variant == ButtonVariant::Secondary}>
-                <fill color={fill_color} radius=RADIUS>
-                    <padding horizontal=PADDING_HORIZONTAL vertical=PADDING_VERTICAL>
-                        <text string={label} font_size=FONT_BODY color={variant.label()} align=TextAlign::Center />
-                    </padding>
-                </fill>
-            </outline>
-        </outline>
+        <Outline color=ACCENT width=FOCUS_RING_WIDTH radius={RADIUS + 4} offset=FOCUS_RING_OFFSET visible={focused}>
+            <Outline color=BORDER width=BORDER_WIDTH radius=RADIUS offset=0.0 visible={variant == ButtonVariant::Secondary}>
+                <Fill color={fill_color} radius=RADIUS>
+                    <Padding horizontal=PADDING_HORIZONTAL vertical=PADDING_VERTICAL>
+                        <Text string={label} font_size=FONT_BODY color={variant.label()} align=TextAlign::Center />
+                    </Padding>
+                </Fill>
+            </Outline>
+        </Outline>
     }
 }

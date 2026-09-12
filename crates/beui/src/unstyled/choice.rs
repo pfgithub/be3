@@ -8,8 +8,8 @@ use crate::input::{Key, KeyPress};
 use crate::node::NodeId;
 use crate::reactive::{
     clone, component_detail, create_effect, create_memo, create_selector, create_signal, intrinsic,
-    set_component_name, set_component_state, Callback, ListBuilder, Memo, Prop, ReadSignal,
-    RenderFn, WriteSignal,
+    set_component_name, set_component_state, Callback, List, Memo, Prop, ReadSignal, RenderFn,
+    WriteSignal,
 };
 use crate::unstyled;
 use crate::unstyled::ButtonHandle;
@@ -106,7 +106,7 @@ pub fn choice(
             let (blur, click, key_press, text) =
                 (state.clone(), state.clone(), state.clone(), state.clone());
             intrinsic(view! {
-                <unstyled::button
+                <unstyled::Button
                     tab_stop={tab_stop_owner.memo(index)}
                     focused={focused.memo(Some(index))}
                     on_focus_change={move |has_focus: bool| track_focus(&blur, index, has_focus)}
@@ -148,7 +148,7 @@ pub fn choice(
     } else {
         Direction::Vertical
     };
-    view! { <list direction spacing=6.0 children={buttons} /> }
+    view! { <List direction spacing=6.0 children={buttons} /> }
 }
 
 pub fn choice_selected(document: &Document, choice: NodeId) -> Option<usize> {

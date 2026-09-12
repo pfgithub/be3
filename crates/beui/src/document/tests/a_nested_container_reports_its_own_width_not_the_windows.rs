@@ -1,7 +1,7 @@
 use super::*;
 use crate::reactive::{build, view, ItemSize, Memo, ReadSignal};
-use crate::styled::StackBuilder;
-use crate::unstyled::{narrower_than, ContainerBuilder};
+use crate::styled::Stack;
+use crate::unstyled::{narrower_than, Container};
 
 const INNER_WIDTH: f32 = 200.0;
 const BREAKPOINT: f32 = 300.0;
@@ -19,41 +19,41 @@ fn a_nested_container_reports_its_own_width_not_the_windows() {
             let inner_sizes = sizes.clone();
             let inner_collapsed = collapsed.clone();
             view! {
-                <container>
+                <Container>
                     {move |size| {
                         sizes.borrow_mut().push(size);
                         collapsed.borrow_mut().push(narrower_than(BREAKPOINT));
                         view! {
-                            <column spacing=0.0>
-                                <stack spacing=0.0 breakpoint=BREAKPOINT>
-                                    <sized @sizing=ItemSize::Percent(100.0) @node_ref=&outer_item height=ITEM_HEIGHT>
-                                        <spacer />
-                                    </sized>
-                                </stack>
-                                <sized width=INNER_WIDTH>
-                                    <container>
+                            <Column spacing=0.0>
+                                <Stack spacing=0.0 breakpoint=BREAKPOINT>
+                                    <Sized @sizing=ItemSize::Percent(100.0) @node_ref=&outer_item height=ITEM_HEIGHT>
+                                        <Spacer />
+                                    </Sized>
+                                </Stack>
+                                <Sized width=INNER_WIDTH>
+                                    <Container>
                                         {move |size| {
                                             inner_sizes.borrow_mut().push(size);
                                             inner_collapsed
                                                 .borrow_mut()
                                                 .push(narrower_than(BREAKPOINT));
                                             view! {
-                                                <stack spacing=0.0 breakpoint=BREAKPOINT>
-                                                    <sized @sizing=ItemSize::Percent(100.0)
+                                                <Stack spacing=0.0 breakpoint=BREAKPOINT>
+                                                    <Sized @sizing=ItemSize::Percent(100.0)
                                                         @node_ref=&inner_item
                                                         height=ITEM_HEIGHT
                                                     >
-                                                        <spacer />
-                                                    </sized>
-                                                </stack>
+                                                        <Spacer />
+                                                    </Sized>
+                                                </Stack>
                                             }
                                         }}
-                                    </container>
-                                </sized>
-                            </column>
+                                    </Container>
+                                </Sized>
+                            </Column>
                         }
                     }}
-                </container>
+                </Container>
             }
         }
     });

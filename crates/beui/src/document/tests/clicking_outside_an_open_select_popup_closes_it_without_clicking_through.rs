@@ -1,6 +1,6 @@
 use super::*;
-use crate::reactive::{build, view, NodeRef, RowBuilder};
-use crate::styled::SelectBuilder;
+use crate::reactive::{build, view, NodeRef, Row};
+use crate::styled::Select;
 
 #[test]
 fn clicking_outside_an_open_select_popup_closes_it_without_clicking_through() {
@@ -15,15 +15,15 @@ fn clicking_outside_an_open_select_popup_closes_it_without_clicking_through() {
         let (select, other) = (select.clone(), other.clone());
         move || {
             view! {
-                <row spacing=20.0>
-                    <select @node_ref=&select options selected=Some(0) />
-                    <unstyled::button
+                <Row spacing=20.0>
+                    <Select @node_ref=&select options selected=Some(0) />
+                    <unstyled::Button
                         @node_ref=&other
                         on_click={move || counter.set(counter.get() + 1)}
                     >
-                        <button_face label="Other" />
-                    </unstyled::button>
-                </row>
+                        <ButtonFace label="Other" />
+                    </unstyled::Button>
+                </Row>
             }
         }
     });

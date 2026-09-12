@@ -1,7 +1,7 @@
 use super::*;
 use crate::reactive::{build, view, ItemSize};
-use crate::styled::StackBuilder;
-use crate::unstyled::ContainerBuilder;
+use crate::styled::Stack;
+use crate::unstyled::Container;
 
 const BREAKPOINT: f32 = 500.0;
 const ITEM_HEIGHT: f32 = 20.0;
@@ -13,18 +13,18 @@ fn a_stack_becomes_a_column_when_its_container_gets_narrow() {
         let (left, right) = (left.clone(), right.clone());
         move || {
             view! {
-                <container>
+                <Container>
                     {move |_| view! {
-                        <stack spacing=0.0 breakpoint=BREAKPOINT>
-                            <sized @sizing=ItemSize::Percent(50.0) @node_ref=&left height=ITEM_HEIGHT>
-                                <spacer />
-                            </sized>
-                            <sized @sizing=ItemSize::Percent(50.0) @node_ref=&right height=ITEM_HEIGHT>
-                                <spacer />
-                            </sized>
-                        </stack>
+                        <Stack spacing=0.0 breakpoint=BREAKPOINT>
+                            <Sized @sizing=ItemSize::Percent(50.0) @node_ref=&left height=ITEM_HEIGHT>
+                                <Spacer />
+                            </Sized>
+                            <Sized @sizing=ItemSize::Percent(50.0) @node_ref=&right height=ITEM_HEIGHT>
+                                <Spacer />
+                            </Sized>
+                        </Stack>
                     }}
-                </container>
+                </Container>
             }
         }
     });

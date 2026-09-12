@@ -1,5 +1,5 @@
 use super::*;
-use crate::reactive::{build, view, NodeRef, TextBuilder};
+use crate::reactive::{build, view, NodeRef, Text};
 
 #[test]
 fn caret_repaints_on_a_deadline_without_repeating_layout() {
@@ -8,7 +8,7 @@ fn caret_repaints_on_a_deadline_without_repeating_layout() {
         let text = text.clone();
         move || {
             view! {
-                <text
+                <Text
                     @node_ref=&text
                     string="hello"
                     font_size=14.0

@@ -1,7 +1,6 @@
 use super::*;
 use crate::reactive::{
-    build, create_effect, create_signal, view, with_document, ClickCatcherBuilder, FillBuilder,
-    NodeRef,
+    build, create_effect, create_signal, view, with_document, ClickCatcher, Fill, NodeRef,
 };
 
 #[test]
@@ -12,12 +11,12 @@ fn hover_only_repaints_when_its_handler_changes_a_node() {
         let fill = fill.clone();
         move || {
             view! {
-                <click_catcher
+                <ClickCatcher
                     cursor=crate::CursorIcon::PointingHand
                     on_hover_change={move |hovered| set_hover_paints.set(hovered)}
                 >
-                    <fill @node_ref=&fill color=Color32::WHITE radius=0 />
-                </click_catcher>
+                    <Fill @node_ref=&fill color=Color32::WHITE radius=0 />
+                </ClickCatcher>
             }
         }
     });

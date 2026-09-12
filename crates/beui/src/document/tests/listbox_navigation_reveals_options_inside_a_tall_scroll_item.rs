@@ -1,6 +1,6 @@
 use super::*;
-use crate::reactive::{build, view, NodeRef, ScrollBuilder};
-use crate::styled::ListboxBuilder;
+use crate::reactive::{build, view, NodeRef, Scroll};
+use crate::styled::Listbox;
 
 #[test]
 fn listbox_navigation_reveals_options_inside_a_tall_scroll_item() {
@@ -9,13 +9,13 @@ fn listbox_navigation_reveals_options_inside_a_tall_scroll_item() {
         let (scroll, listbox) = (scroll.clone(), listbox.clone());
         move || {
             view! {
-                <scroll @node_ref=&scroll>
-                    <listbox
+                <Scroll @node_ref=&scroll>
+                    <Listbox
                         @node_ref=&listbox
                         labels={vec!["One".to_string(), "Two".to_string(), "Three".to_string(), "Four".to_string(), "Five".to_string(), "Six".to_string()]}
                         selected=Some(0)
                     />
-                </scroll>
+                </Scroll>
             }
         }
     });

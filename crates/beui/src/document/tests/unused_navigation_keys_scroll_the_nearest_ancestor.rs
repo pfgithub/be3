@@ -1,6 +1,6 @@
 use super::*;
-use crate::reactive::{build, intrinsic, view, NodeRef, ScrollBuilder, TextBuilder};
-use crate::styled::{SliderBuilder, TabsBuilder};
+use crate::reactive::{build, intrinsic, view, NodeRef, Scroll, Text};
+use crate::styled::{Slider, Tabs};
 
 #[test]
 fn unused_navigation_keys_scroll_the_nearest_ancestor() {
@@ -10,20 +10,20 @@ fn unused_navigation_keys_scroll_the_nearest_ancestor() {
         move || {
             let mut items = vec![
                 intrinsic(view! {
-                    <tabs
+                    <Tabs
                         @node_ref=&tabs
                         labels={vec!["One".to_string(), "Two".to_string()]}
                         selected=0
                     />
                 }),
-                intrinsic(view! { <slider @node_ref=&slider value=0.5 /> }),
+                intrinsic(view! { <Slider @node_ref=&slider value=0.5 /> }),
             ];
             items.extend((0..20).map(|_| {
                 intrinsic(view! {
-                    <text string="Content" font_size=14.0 color=Color32::WHITE />
+                    <Text string="Content" font_size=14.0 color=Color32::WHITE />
                 })
             }));
-            view! { <scroll @node_ref=&scroll children={items} /> }
+            view! { <Scroll @node_ref=&scroll children={items} /> }
         }
     });
     let (scroll, tabs, slider) = (scroll.get(), tabs.get(), slider.get());

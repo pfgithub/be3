@@ -1,7 +1,7 @@
 use super::*;
 use crate::reactive::{build, view};
-use crate::styled::ResponsiveTabsBuilder;
-use crate::unstyled::ContainerBuilder;
+use crate::styled::ResponsiveTabs;
+use crate::unstyled::Container;
 
 const BREAKPOINT: f32 = 500.0;
 
@@ -12,16 +12,16 @@ fn tabs_collapse_into_a_select_when_their_container_is_narrow() {
         let tabs = tabs.clone();
         move || {
             view! {
-                <container>
+                <Container>
                     {move |_| view! {
-                        <responsive_tabs
+                        <ResponsiveTabs
                             @node_ref=&tabs
                             labels={vec!["List".to_string(), "Load".to_string(), "Name".to_string()]}
                             selected=1
                             breakpoint=BREAKPOINT
                         />
                     }}
-                </container>
+                </Container>
             }
         }
     });

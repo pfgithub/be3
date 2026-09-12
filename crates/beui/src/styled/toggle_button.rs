@@ -4,14 +4,13 @@ use crate::color::Color32;
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
-    component_detail, create_memo, Callback, FillBuilder, OutlineBuilder, PaddingBuilder, Prop,
-    TextBuilder,
+    component_detail, create_memo, Callback, Fill, Outline, Padding, Prop, Text,
 };
 use crate::styled::theme::{
     ACCENT, ACCENT_SOFT, BORDER, FONT_BODY, RADIUS, SURFACE, SURFACE_RAISED, TEXT,
 };
 use crate::unstyled;
-use crate::unstyled::{ToggleBuilder, ToggleHandle};
+use crate::unstyled::{Toggle, ToggleHandle};
 
 #[component]
 pub fn toggle_button(
@@ -23,9 +22,9 @@ pub fn toggle_button(
     component_detail(label_text.clone());
 
     view! {
-        <toggle checked={pressed} on_change={move |pressed| on_change.call(pressed)}>
-            {move |handle| view! { <toggle_button_face handle label={label_text} /> }}
-        </toggle>
+        <Toggle checked={pressed} on_change={move |pressed| on_change.call(pressed)}>
+            {move |handle| view! { <ToggleButtonFace handle label={label_text} /> }}
+        </Toggle>
     }
 }
 
@@ -44,15 +43,15 @@ fn toggle_button_face(handle: ToggleHandle, label: Prop<String>) -> NodeId {
     let border_color = create_memo(move || if checked.get() { ACCENT } else { BORDER });
 
     view! {
-        <outline color=ACCENT width=2.0 radius=RADIUS offset=3.0 visible={focused}>
-            <outline color={border_color} width=1.0 radius=RADIUS offset=0.0 visible=true>
-                <fill color={fill_color} radius=RADIUS>
-                    <padding horizontal=14.0 vertical=8.0>
-                        <text string={label} font_size=FONT_BODY color=TEXT />
-                    </padding>
-                </fill>
-            </outline>
-        </outline>
+        <Outline color=ACCENT width=2.0 radius=RADIUS offset=3.0 visible={focused}>
+            <Outline color={border_color} width=1.0 radius=RADIUS offset=0.0 visible=true>
+                <Fill color={fill_color} radius=RADIUS>
+                    <Padding horizontal=14.0 vertical=8.0>
+                        <Text string={label} font_size=FONT_BODY color=TEXT />
+                    </Padding>
+                </Fill>
+            </Outline>
+        </Outline>
     }
 }
 

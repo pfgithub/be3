@@ -1,6 +1,6 @@
 use super::*;
 use crate::reactive::view;
-use crate::styled::SelectBuilder;
+use crate::styled::Select;
 
 #[test]
 fn typing_in_a_select_search_box_filters_options_case_insensitively() {
@@ -8,7 +8,7 @@ fn typing_in_a_select_search_box_filters_options_case_insensitively() {
         .iter()
         .map(|label| (*label).to_owned())
         .collect();
-    let (document, [select]) = toolbar_of(|| [view! { <select options selected=None /> }]);
+    let (document, [select]) = toolbar_of(|| [view! { <Select options selected=None /> }]);
     let mut harness = Harness::new(document);
     harness.frame(Vec::new());
 

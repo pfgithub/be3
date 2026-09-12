@@ -6,8 +6,8 @@ use crate::base::TextAlign;
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
-    component_detail, create_memo, Callback, CenteredRowBuilder, Child, FillBuilder, ItemSize,
-    Memo, OutlineBuilder, PaddingBuilder, Prop, SizedBuilder, TextBuilder,
+    component_detail, create_memo, Callback, CenteredRow, Child, Fill, ItemSize, Memo, Outline,
+    Padding, Prop, Sized, Text,
 };
 use crate::styled::theme::{
     ACCENT, FONT_HEADING, FONT_SMALL, RADIUS, SURFACE_RAISED, TEXT, TEXT_MUTED,
@@ -31,14 +31,14 @@ pub fn accordion(
     component_detail(title_text.clone());
 
     view! {
-        <unstyled::disclosure
+        <unstyled::Disclosure
             spacing=SPACING
             on_toggle={move |open| on_toggle.call(open)}
-            header={move |handle| view! { <accordion_header handle title={title_text} /> }}
+            header={move |handle| view! { <AccordionHeader handle title={title_text} /> }}
             open
         >
             {children}
-        </unstyled::disclosure>
+        </unstyled::Disclosure>
     }
 }
 
@@ -53,29 +53,29 @@ fn accordion_header(handle: DisclosureHandle, title: Memo<String>) -> NodeId {
     let header_color = create_memo(move || header_fill(hovered.get()));
     let marker_glyph = create_memo(move || glyph(open.get()).to_owned());
     view! {
-        <outline color=ACCENT width=2.0 radius=RADIUS offset=2.0 visible={focused}>
-            <fill color={header_color} radius=RADIUS>
-                <padding horizontal=PADDING_HORIZONTAL vertical=PADDING_VERTICAL>
-                    <centered_row spacing=SPACING>
-                        <sized width=MARKER_WIDTH>
-                            <text
+        <Outline color=ACCENT width=2.0 radius=RADIUS offset=2.0 visible={focused}>
+            <Fill color={header_color} radius=RADIUS>
+                <Padding horizontal=PADDING_HORIZONTAL vertical=PADDING_VERTICAL>
+                    <CenteredRow spacing=SPACING>
+                        <Sized width=MARKER_WIDTH>
+                            <Text
                                 string={marker_glyph}
                                 font_size=FONT_SMALL
                                 color=TEXT_MUTED
                                 monospace=true
                                 align=TextAlign::Center
                             />
-                        </sized>
-                        <text @sizing=ItemSize::Percent(100.0)
+                        </Sized>
+                        <Text @sizing=ItemSize::Percent(100.0)
                             string={title}
                             font_size=FONT_HEADING
                             color=TEXT
                             align=TextAlign::Start
                         />
-                    </centered_row>
-                </padding>
-            </fill>
-        </outline>
+                    </CenteredRow>
+                </Padding>
+            </Fill>
+        </Outline>
     }
 }
 

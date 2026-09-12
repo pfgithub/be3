@@ -108,8 +108,8 @@ use crate::input::{TouchId, TouchPhase};
 use crate::base::list::{Direction, ItemSize};
 use crate::inspector::Inspector;
 use crate::reactive::{
-    build, intrinsic, with_document, ClickCallback, ColumnBuilder, FillBuilder, NodeRef,
-    PaddingBuilder, SizedBuilder, SpacerBuilder, TextBuilder, VirtualListBuilder,
+    build, intrinsic, with_document, ClickCallback, Column, Fill, NodeRef, Padding, Sized, Spacer,
+    Text, VirtualList,
 };
 use crate::styled;
 use crate::unstyled;
@@ -313,29 +313,29 @@ pub(crate) fn with_installed<R>(document: &mut Document, f: impl FnOnce(&mut Doc
 #[component(base)]
 pub(crate) fn menu_region() -> NodeId {
     view! {
-        <sized width=120.0 height=60.0>
-            <fill color=Color32::from_gray(80) radius=4 />
-        </sized>
+        <Sized width=120.0 height=60.0>
+            <Fill color=Color32::from_gray(80) radius=4 />
+        </Sized>
     }
 }
 
 #[component(base)]
 pub(crate) fn button_face(label: String) -> NodeId {
     view! {
-        <fill color=Color32::from_gray(60) radius=4>
-            <padding horizontal=20.0 vertical=12.0>
-                <text string={label} font_size=14.0 color=Color32::WHITE />
-            </padding>
-        </fill>
+        <Fill color=Color32::from_gray(60) radius=4>
+            <Padding horizontal=20.0 vertical=12.0>
+                <Text string={label} font_size=14.0 color=Color32::WHITE />
+            </Padding>
+        </Fill>
     }
 }
 
 #[component(base)]
 pub(crate) fn labelled_button(label: String, on_click: ClickCallback) -> NodeId {
     view! {
-        <unstyled::button on_click={move || on_click.call()}>
-            <button_face label />
-        </unstyled::button>
+        <unstyled::Button on_click={move || on_click.call()}>
+            <ButtonFace label />
+        </unstyled::Button>
     }
 }
 
@@ -346,8 +346,8 @@ pub(crate) fn virtual_list(built: &Rc<RefCell<Vec<usize>>>) -> (Document, NodeId
         let scroll = scroll.clone();
         move || {
             view! {
-                <column spacing=0.0>
-                    <virtual_list @sizing=ItemSize::Percent(100.0)
+                <Column spacing=0.0>
+                    <VirtualList @sizing=ItemSize::Percent(100.0)
                         @node_ref=&scroll
                         count=VIRTUAL_ITEM_COUNT
                         item_height=VIRTUAL_ITEM_HEIGHT
@@ -355,13 +355,13 @@ pub(crate) fn virtual_list(built: &Rc<RefCell<Vec<usize>>>) -> (Document, NodeId
                         {move |index: usize| {
                             sink.borrow_mut().push(index);
                             view! {
-                                <padding horizontal=0.0 vertical={VIRTUAL_ITEM_HEIGHT / 2.0}>
-                                    <spacer />
-                                </padding>
+                                <Padding horizontal=0.0 vertical={VIRTUAL_ITEM_HEIGHT / 2.0}>
+                                    <Spacer />
+                                </Padding>
                             }
                         }}
-                    </virtual_list>
-                </column>
+                    </VirtualList>
+                </Column>
             }
         }
     });
@@ -380,16 +380,16 @@ pub(crate) fn hello_column() -> HelloColumn {
         let (padding, text) = (padding.clone(), text.clone());
         move || {
             view! {
-                <column spacing=0.0>
-                    <padding @node_ref=&padding horizontal=4.0 vertical=4.0>
-                        <text
+                <Column spacing=0.0>
+                    <Padding @node_ref=&padding horizontal=4.0 vertical=4.0>
+                        <Text
                             @node_ref=&text
                             string="Hello"
                             font_size=14.0
                             color=Color32::WHITE
                         />
-                    </padding>
-                </column>
+                    </Padding>
+                </Column>
             }
         }
     });
@@ -412,7 +412,7 @@ pub(crate) fn toolbar_of<const N: usize>(
     let document = build(move || {
         let nodes = controls();
         sink.set(Some(nodes));
-        view! { <column spacing=8.0 children={nodes.map(intrinsic)} /> }
+        view! { <Column spacing=8.0 children={nodes.map(intrinsic)} /> }
     });
     let nodes = built.get().expect("the toolbar was built");
     (document, nodes)

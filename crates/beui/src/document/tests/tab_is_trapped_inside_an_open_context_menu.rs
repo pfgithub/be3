@@ -1,6 +1,6 @@
 use super::*;
 use crate::reactive::{view, NodeRef};
-use crate::styled::ContextMenuBuilder;
+use crate::styled::ContextMenu;
 
 #[test]
 fn tab_is_trapped_inside_an_open_context_menu() {
@@ -13,13 +13,13 @@ fn tab_is_trapped_inside_an_open_context_menu() {
         let region = region.clone();
         move || {
             [
-                view! { <labelled_button label="Before" /> },
+                view! { <LabelledButton label="Before" /> },
                 view! {
-                    <context_menu items>
-                        <menu_region @node_ref=&region />
-                    </context_menu>
+                    <ContextMenu items>
+                        <MenuRegion @node_ref=&region />
+                    </ContextMenu>
                 },
-                view! { <labelled_button label="After" /> },
+                view! { <LabelledButton label="After" /> },
             ]
         }
     });

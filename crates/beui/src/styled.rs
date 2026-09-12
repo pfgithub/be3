@@ -19,33 +19,30 @@ mod text;
 mod text_input;
 pub mod theme;
 
-pub use accordion::{accordion_open, AccordionBuilder};
-pub use border::{BorderedBuilder, SeparatorBuilder};
-pub use button::{ButtonBuilder, ButtonVariant};
-pub use card::CardBuilder;
-pub use checkbox::{checkbox_checked, CheckboxBuilder};
-pub use chip::ChipBuilder;
-pub use context_menu::ContextMenuBuilder;
-pub use list_row::ListRowBuilder;
-pub use progress::ProgressBuilder;
-pub use responsive_tabs::{responsive_tabs_selected, ResponsiveTabsBuilder};
-pub use scrollbar::ScrollbarBuilder;
-pub use select::{select_open, select_selected, SelectBuilder};
-pub use shortcut::ShortcutBuilder;
-pub use slider::{slider_value, SliderBuilder};
-pub use stack::StackBuilder;
-pub use switch::{switch_on, SwitchBuilder};
-pub use tabs::{tabs_selected, TabsBuilder};
-pub use text::{
-    BodyBuilder, CaptionBuilder, CodeBuilder, DisplayBuilder, HeadingBuilder, IconBuilder,
-    IconSizedBuilder, ParagraphBuilder, TitleBuilder,
-};
-pub use text_input::{text_input_value, TextInputBuilder};
+pub use accordion::{accordion_open, Accordion};
+pub use border::{Bordered, Separator};
+pub use button::{Button, ButtonVariant};
+pub use card::Card;
+pub use checkbox::{checkbox_checked, Checkbox};
+pub use chip::Chip;
+pub use context_menu::ContextMenu;
+pub use list_row::ListRow;
+pub use progress::Progress;
+pub use responsive_tabs::{responsive_tabs_selected, ResponsiveTabs};
+pub use scrollbar::Scrollbar;
+pub use select::{select_open, select_selected, Select};
+pub use shortcut::Shortcut;
+pub use slider::{slider_value, Slider};
+pub use stack::Stack;
+pub use switch::{switch_on, Switch};
+pub use tabs::{tabs_selected, Tabs};
+pub use text::{Body, Caption, Code, Display, Heading, Icon, IconSized, Paragraph, Title};
+pub use text_input::{text_input_value, TextInput};
 
 mod choice;
 mod listbox;
 mod radio_group;
 mod toggle_button;
-pub use listbox::{listbox_selected, ListboxBuilder};
-pub use radio_group::{radio_group_selected, RadioGroupBuilder};
-pub use toggle_button::{toggle_button_pressed, ToggleButtonBuilder};
+pub use listbox::{listbox_selected, Listbox};
+pub use radio_group::{radio_group_selected, RadioGroup};
+pub use toggle_button::{toggle_button_pressed, ToggleButton};

@@ -3,8 +3,8 @@ use beui_macros::{component, view};
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{Callback, Prop};
-use crate::styled::choice::{self, ChoiceOptionBuilder, Kind};
-use crate::unstyled::ChoiceBuilder;
+use crate::styled::choice::{self, ChoiceOption, Kind};
+use crate::unstyled::Choice;
 
 #[component]
 pub fn radio_group(
@@ -13,14 +13,14 @@ pub fn radio_group(
     on_change: Callback<Option<usize>>,
 ) -> NodeId {
     view! {
-        <choice
+        <Choice
             labels
             selected
             kind=Kind::Radio
             on_change={move |selected| on_change.call(selected)}
         >
-            {|handle| view! { <choice_option kind=Kind::Radio handle /> }}
-        </choice>
+            {|handle| view! { <ChoiceOption kind=Kind::Radio handle /> }}
+        </Choice>
     }
 }
 

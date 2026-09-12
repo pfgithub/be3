@@ -5,8 +5,8 @@ use crate::color::Color32;
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
-    clone, component_detail, create_memo, Callback, CenteredRowBuilder, FillBuilder, ItemSize,
-    OutlineBuilder, Prop, SizedBuilder,
+    clone, component_detail, create_memo, Callback, CenteredRow, Fill, ItemSize, Outline, Prop,
+    Sized,
 };
 use crate::styled::theme::{ACCENT, ACCENT_HOVER, KNOB, RADIUS, TRACK};
 use crate::unstyled;
@@ -23,13 +23,13 @@ const FOCUS_RING_OFFSET: f32 = 3.0;
 #[component]
 pub fn slider(value: Prop<f32>, on_change: Callback<f32>) -> NodeId {
     view! {
-        <unstyled::slider value on_change={move |value| on_change.call(value)}>
+        <unstyled::Slider value on_change={move |value| on_change.call(value)}>
             {move |handle: SliderHandle| {
                 let value = handle.value.clone();
                 component_detail(create_memo(move || detail(value.get())));
-                view! { <slider_track handle /> }
+                view! { <SliderTrack handle /> }
             }}
-        </unstyled::slider>
+        </unstyled::Slider>
     }
 }
 
@@ -45,15 +45,15 @@ fn slider_track(handle: SliderHandle) -> NodeId {
     let knob_color = create_memo(move || knob_fill_color(dragging.get()));
 
     view! {
-        <outline color=ACCENT width=FOCUS_RING_WIDTH radius=RADIUS offset=FOCUS_RING_OFFSET visible={focused}>
-            <sized height=HEIGHT>
-                <centered_row spacing=0.0>
-                    <sized @sizing={filled_percent} height=TRACK_HEIGHT><fill color=ACCENT radius=TRACK_RADIUS></fill></sized>
-                    <sized width=KNOB_SIZE height=KNOB_SIZE><fill color={knob_color} radius=KNOB_RADIUS></fill></sized>
-                    <sized @sizing={rest_percent} height=TRACK_HEIGHT><fill color=TRACK radius=TRACK_RADIUS></fill></sized>
-                </centered_row>
-            </sized>
-        </outline>
+        <Outline color=ACCENT width=FOCUS_RING_WIDTH radius=RADIUS offset=FOCUS_RING_OFFSET visible={focused}>
+            <Sized height=HEIGHT>
+                <CenteredRow spacing=0.0>
+                    <Sized @sizing={filled_percent} height=TRACK_HEIGHT><Fill color=ACCENT radius=TRACK_RADIUS></Fill></Sized>
+                    <Sized width=KNOB_SIZE height=KNOB_SIZE><Fill color={knob_color} radius=KNOB_RADIUS></Fill></Sized>
+                    <Sized @sizing={rest_percent} height=TRACK_HEIGHT><Fill color=TRACK radius=TRACK_RADIUS></Fill></Sized>
+                </CenteredRow>
+            </Sized>
+        </Outline>
     }
 }
 

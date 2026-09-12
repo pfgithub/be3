@@ -1,10 +1,10 @@
 use super::*;
 use crate::reactive::view;
-use crate::styled::TextInputBuilder;
+use crate::styled::TextInput;
 
 #[test]
 fn backspace_deletes_the_character_before_the_caret() {
-    let (document, [input]) = toolbar_of(|| [view! { <text_input value="beui" /> }]);
+    let (document, [input]) = toolbar_of(|| [view! { <TextInput value="beui" /> }]);
     let mut harness = Harness::new(document);
 
     harness.key(Key::Tab, Modifiers::NONE);

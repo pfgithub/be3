@@ -4,8 +4,8 @@ use crate::input::CursorIcon;
 
 use crate::node::NodeId;
 use crate::reactive::{
-    self, clone, create_memo, create_signal, untrack, Callback, Child, ClickCallback,
-    ClickCatcherBuilder, FocusableBuilder, Prop,
+    self, clone, create_memo, create_signal, untrack, Callback, Child, ClickCallback, ClickCatcher,
+    Focusable, Prop,
 };
 
 #[component]
@@ -27,13 +27,13 @@ pub fn pressable(
     let key_click = click.clone();
 
     view! {
-        <focusable
+        <Focusable
             tab_stop={enabled}
             on_focus_change={move |focused| on_focus_change.call(focused)}
             on_activate_change={move |pressed| set_key_active.set(pressed)}
             on_activate={key_click}
         >
-            <click_catcher
+            <ClickCatcher
                 cursor=CursorIcon::PointingHand
                 key_active
                 on_click={click}
@@ -41,6 +41,6 @@ pub fn pressable(
                 on_active_change={move |active| on_active_change.call(active)}
                 children={children.map(reactive::intrinsic)}
             />
-        </focusable>
+        </Focusable>
     }
 }

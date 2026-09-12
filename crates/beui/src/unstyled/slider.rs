@@ -6,7 +6,7 @@ use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
     self, clone, component_detail, create_effect, create_memo, create_signal, set_component_state,
-    untrack, Callback, ClickCatcherBuilder, FocusableBuilder, Prop, ReadSignal, Render,
+    untrack, Callback, ClickCatcher, Focusable, Prop, ReadSignal, Render,
 };
 
 const STEP: f32 = 0.05;
@@ -61,7 +61,7 @@ pub fn slider(
     set_component_state(value_read.clone());
 
     view! {
-        <focusable
+        <Focusable
             on_focus_change={move |focused: bool| {
                 set_focused.set(focused);
                 on_focus_change.call(focused);
@@ -87,7 +87,7 @@ pub fn slider(
                 true
             }}
         >
-            <click_catcher
+            <ClickCatcher
                 cursor=CursorIcon::PointingHand
                 on_drag={move |press: PointerPress| set_value(press.fraction.x)}
                 on_active_change={move |dragging: bool| {
@@ -96,7 +96,7 @@ pub fn slider(
                 }}
                 children={content_node.map(reactive::intrinsic)}
             />
-        </focusable>
+        </Focusable>
     }
 }
 

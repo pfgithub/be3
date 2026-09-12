@@ -1,6 +1,6 @@
 use super::*;
 use crate::reactive::{view, NodeRef};
-use crate::styled::AccordionBuilder;
+use crate::styled::Accordion;
 
 #[test]
 fn accordion_headers_are_keyboard_operable_and_skip_collapsed_content() {
@@ -10,11 +10,11 @@ fn accordion_headers_are_keyboard_operable_and_skip_collapsed_content() {
         move || {
             [
                 view! {
-                    <accordion title="Options" open=false>
-                        <labelled_button @node_ref=&child label="Child" />
-                    </accordion>
+                    <Accordion title="Options" open=false>
+                        <LabelledButton @node_ref=&child label="Child" />
+                    </Accordion>
                 },
-                view! { <labelled_button label="After" /> },
+                view! { <LabelledButton label="After" /> },
             ]
         }
     });

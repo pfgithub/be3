@@ -1,5 +1,5 @@
 use super::*;
-use crate::reactive::{build, view, FillBuilder, NodeRef, TextBuilder};
+use crate::reactive::{build, view, Fill, NodeRef, Text};
 
 #[test]
 fn resizing_scaling_and_replacing_the_root_invalidate_the_cache() {
@@ -8,7 +8,7 @@ fn resizing_scaling_and_replacing_the_root_invalidate_the_cache() {
         let text = text.clone();
         move || {
             view! {
-                <text
+                <Text
                     @node_ref=&text
                     string="hello"
                     font_size=14.0
@@ -33,7 +33,7 @@ fn resizing_scaling_and_replacing_the_root_invalidate_the_cache() {
     assert!(output.shapes().is_empty());
     assert!(harness.document.node_rect(text).is_none());
     let fill = with_installed(harness.document_mut(), |_| {
-        view! { <fill color=Color32::BLACK radius=0 /> }
+        view! { <Fill color=Color32::BLACK radius=0 /> }
     });
     harness.document.set_root(fill);
     assert!(harness.frame(vec![]).changed);

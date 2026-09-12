@@ -12,7 +12,7 @@ fn key_handlers_can_move_focus_and_change_their_tab_stop() {
             let target = second.clone();
             [
                 view! {
-                    <unstyled::button
+                    <unstyled::Button
                         tab_stop={create_memo(move || !skipped.get())}
                         on_key={move |press: KeyPress| {
                             if press.key != Key::ArrowRight || !press.pressed {
@@ -23,10 +23,10 @@ fn key_handlers_can_move_focus_and_change_their_tab_stop() {
                             true
                         }}
                     >
-                        <button_face label="First" />
-                    </unstyled::button>
+                        <ButtonFace label="First" />
+                    </unstyled::Button>
                 },
-                view! { <labelled_button @node_ref=&second label="Second" /> },
+                view! { <LabelledButton @node_ref=&second label="Second" /> },
             ]
         }
     });

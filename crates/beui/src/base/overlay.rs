@@ -12,7 +12,7 @@ use beui_macros::{component, view};
 use crate::document::Document;
 use crate::node::{ClickHandler, Element, InteractInput, NodeId};
 use crate::reactive::{
-    create_effect, with_document, with_reactive_scope, Child, ClickCallback, ClickCatcherBuilder,
+    create_effect, with_document, with_reactive_scope, Child, ClickCallback, ClickCatcher,
     IntoProp, NodeRef, Prop,
 };
 
@@ -215,13 +215,13 @@ impl Document {
         let press_cell = overlay_cell.clone();
         let scrim = with_reactive_scope(self, || {
             view! {
-                <click_catcher
+                <ClickCatcher
                     cursor=CursorIcon::Default
                     on_press={move |press: PointerPress| {
                         let id = press_cell.get().expect("overlay not yet initialized");
                         with_document(|document| document.dismiss_overlay_if_outside(id, press.pos));
                     }}
-                ></click_catcher>
+                ></ClickCatcher>
             }
         });
         let id = self
