@@ -177,11 +177,8 @@ pub(crate) fn toggle_text(picking: bool) -> Color32 {
 
 #[component]
 fn pick_toggle(state: Rc<State>, picking: Memo<bool>) -> NodeId {
-    let label_color = create_memo({
-        let picking = picking.clone();
-        move || toggle_text(picking.get())
-    });
-    let fill_color = create_memo(move || toggle_fill(picking.get()));
+    let label_color = picking.map(toggle_text);
+    let fill_color = picking.map(toggle_fill);
     let picker = state;
     view! {
         <unstyled::pressable on_click={move || picker.toggle_picking()}>

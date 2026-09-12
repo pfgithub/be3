@@ -1,8 +1,10 @@
 use std::cell::RefCell;
+use std::hash::Hash;
 use std::rc::Rc;
 
 use crate::computation::Computation;
 use crate::runtime::untrack;
+use crate::selector::{create_selector, Selector};
 use crate::signal::{Source, Value};
 
 pub struct Memo<T> {
@@ -76,5 +78,20 @@ impl<T> Memo<T> {
 
     pub fn with_untracked<R>(&self, f: impl FnOnce(&T) -> R) -> R {
         untrack(|| self.with(f))
+    }
+}
+
+impl<T: Clone + 'static> Memo<T> {
+    pub fn map<U: PartialEq + 'static>(&self, mut f: impl FnMut(T) -> U + 'static) -> Memo<U> {
+        let source = self.clone();
+        create_memo(move || f(source.get()))
+    }
+
+    pub fn selector(&self) -> Selector<T>
+    where
+        T: Eq + Hash,
+    {
+        let source = self.clone();
+        create_selector(move || source.get())
     }
 }

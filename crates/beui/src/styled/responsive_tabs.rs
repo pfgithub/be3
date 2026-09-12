@@ -3,7 +3,7 @@ use beui_macros::{component, view};
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
-    create_memo, set_component_state, Callback, ColumnBuilder, Prop, ReadSignal, ShowBuilder,
+    set_component_state, Callback, ColumnBuilder, Prop, ReadSignal, ShowBuilder,
 };
 use crate::styled::theme::NARROW_WIDTH;
 use crate::styled::{SelectBuilder, TabsBuilder};
@@ -20,14 +20,8 @@ pub fn responsive_tabs(
     set_component_state(selected_read.clone());
 
     let narrow = narrower_than(breakpoint);
-    let wide = create_memo({
-        let narrow = narrow.clone();
-        move || !narrow.get()
-    });
-    let highlighted = create_memo({
-        let selected_read = selected_read.clone();
-        move || Some(selected_read.get())
-    });
+    let wide = narrow.map(|narrow| !narrow);
+    let highlighted = selected_read.map(Some);
 
     let tab_labels = labels.clone();
     let tab_selected = selected_read.clone();

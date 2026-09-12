@@ -29,10 +29,7 @@ pub fn slider(
     let (dragging, set_dragging) = create_signal(false);
     let (focused, set_focused) = create_signal(false);
 
-    component_detail({
-        let value = value_read.clone();
-        move || detail(value.get())
-    });
+    component_detail(value_read.map(detail));
 
     let content_node = content.map(|build| {
         build.call(SliderHandle {

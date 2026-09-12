@@ -20,10 +20,7 @@ pub fn toggle_button(
     on_change: Callback<bool>,
 ) -> NodeId {
     let label_text = label.memo();
-    component_detail({
-        let label_text = label_text.clone();
-        move || label_text.get()
-    });
+    component_detail(label_text.clone());
 
     view! {
         <toggle

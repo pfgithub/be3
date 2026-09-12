@@ -50,6 +50,10 @@ computations, but equal memo outputs suppress downstream execution. Reading a
 memo inside a batch returns its current value. Dependency chains and diamonds
 refresh before effects observe them, preventing intermediate derived values.
 
+`signal.map(f)` is `create_memo(move || f(signal.get()))` without the clone the
+closure would need: it takes `&self`, so the signal stays usable afterwards.
+Memos have it too, so derivations chain.
+
 Dependencies are discovered on each execution. Conditional branches unsubscribe
 from inputs they no longer read. `untrack(|| ...)` disables subscription for its
 closure while preserving the current cleanup scope. Memo computations must be
@@ -68,7 +72,7 @@ that gained it.
 
 ```rust
 let (selected, set_selected) = create_signal(Some(0usize));
-let selection = create_selector(move || selected.get());
+let selection = selected.selector();
 
 for index in 0..rows {
     let selection = selection.clone();
@@ -76,7 +80,8 @@ for index in 0..rows {
 }
 ```
 
-`is_selected(&key)` subscribes the current computation to that key alone, never
+`selector()` on a signal or memo is the short form of `create_selector(move ||
+source.get())`. `is_selected(&key)` subscribes the current computation to that key alone, never
 to the source, so a computation reading it reruns only when its own answer
 flips. `memo(key)` wraps one key in a `Memo<bool>` for props and handles that
 want a value rather than a call. Keys need `Clone + Eq + Hash`, and the source's
@@ -213,6 +218,9 @@ fn checkbox(label: Prop<String>, checked: Prop<bool>) -> NodeId {
 
 A render prop runs with the component that *wrote* it installed, not the one
 that calls it, so `component_detail` inside one labels the outer component.
+`component_detail` takes the same thing a `Prop<String>` does — a plain string
+or a signal or memo of one — so the label a component shows in the inspector is
+written the way its other properties are: `component_detail(checked.map(label))`.
 `Func<V, R>` is the same idea for a plain callback that returns a value, like
 `for_each`'s `key`. A prop of any of these three types also accepts an already
 built `Render`/`RenderFn`/`Func`, which is how a component forwards one it was

@@ -1,8 +1,11 @@
 use std::cell::{Cell, RefCell};
+use std::hash::Hash;
 use std::rc::{Rc, Weak};
 
 use crate::computation::{Computation, State};
+use crate::memo::{create_memo, Memo};
 use crate::runtime::{batch, RUNTIME};
+use crate::selector::{create_selector, Selector};
 
 #[derive(Default)]
 pub(crate) struct Source {
@@ -103,6 +106,21 @@ impl<T> ReadSignal<T> {
 
     pub fn with_untracked<R>(&self, f: impl FnOnce(&T) -> R) -> R {
         f(&self.inner.value.borrow())
+    }
+}
+
+impl<T: Clone + 'static> ReadSignal<T> {
+    pub fn map<U: PartialEq + 'static>(&self, mut f: impl FnMut(T) -> U + 'static) -> Memo<U> {
+        let source = self.clone();
+        create_memo(move || f(source.get()))
+    }
+
+    pub fn selector(&self) -> Selector<T>
+    where
+        T: Eq + Hash,
+    {
+        let source = self.clone();
+        create_selector(move || source.get())
     }
 }
 

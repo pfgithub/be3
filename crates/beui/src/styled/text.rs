@@ -46,10 +46,7 @@ fn line(
     #[prop(default = TextAlign::Start)] align: Prop<TextAlign>,
 ) -> NodeId {
     let text = content.memo();
-    component_detail({
-        let text = text.clone();
-        move || format!("{:?}", text.get())
-    });
+    component_detail(text.map(|text| format!("{text:?}")));
     view! {
         <text string={text} font_size={font_size} color={color} align={align} />
     }
@@ -106,10 +103,7 @@ pub fn paragraph(
     #[prop(default = TEXT_MUTED)] color: Prop<Color32>,
 ) -> NodeId {
     let text = content.memo();
-    component_detail({
-        let text = text.clone();
-        move || format!("{:?}", text.get())
-    });
+    component_detail(text.map(|text| format!("{text:?}")));
     view! {
         <text string={text} font_size={FONT_BODY} color={color} wrap={true} />
     }

@@ -12,10 +12,7 @@ const PADDING_VERTICAL: f32 = 3.0;
 #[component]
 pub fn chip(label: Prop<String>) -> NodeId {
     let label_text = label.memo();
-    component_detail({
-        let label_text = label_text.clone();
-        move || label_text.get()
-    });
+    component_detail(label_text.clone());
 
     view! {
         <bordered corner_radius={CHIP_RADIUS}>

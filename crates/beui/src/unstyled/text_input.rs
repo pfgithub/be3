@@ -93,10 +93,7 @@ pub fn text_input(
         on_submit,
     }));
     set_component_state(editor.clone());
-    component_detail({
-        let text_value = text_value.clone();
-        move || detail(&text_value.get())
-    });
+    component_detail(text_value.map(|value| detail(&value)));
 
     value.apply({
         let editor = editor.clone();

@@ -175,9 +175,11 @@ fn set_detail(shadow: NodeId, detail: String) {
     });
 }
 
-pub fn component_detail(detail: impl Fn() -> String + 'static) {
+pub fn component_detail(detail: impl IntoProp<String>) {
     let shadow = current_component();
-    create_effect(move || set_detail(shadow, detail()));
+    detail
+        .into_prop()
+        .apply(move |detail| set_detail(shadow, detail));
 }
 
 pub fn set_component_state<T: 'static>(state: T) {

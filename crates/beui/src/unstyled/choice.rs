@@ -7,7 +7,7 @@ use crate::document::Document;
 use crate::input::{Key, KeyPress};
 use crate::node::NodeId;
 use crate::reactive::{
-    component_detail, create_effect, create_selector, create_signal, intrinsic, set_component_name,
+    component_detail, create_effect, create_signal, intrinsic, set_component_name,
     set_component_state, Callback, ListBuilder, Memo, Prop, ReadSignal, RenderFn, WriteSignal,
 };
 use crate::unstyled;
@@ -67,19 +67,10 @@ pub fn choice(
     let selected_prop = selected;
     let option = option.expect("choice requires an `option` builder");
     let (selected, set_selected) = create_signal(None);
-    let selection = create_selector({
-        let selected = selected.clone();
-        move || selected.get()
-    });
-    let tab_stop_owner = create_selector({
-        let selected = selected.clone();
-        move || selected.get().unwrap_or(0)
-    });
+    let selection = selected.selector();
+    let tab_stop_owner = selected.map(|selected| selected.unwrap_or(0)).selector();
     let (focus, set_focus) = create_signal(None);
-    let focused = create_selector({
-        let focus = focus.clone();
-        move || focus.get()
-    });
+    let focused = focus.selector();
 
     let state: Handle = Rc::new(State {
         options: labels
@@ -99,10 +90,10 @@ pub fn choice(
     set_component_state(state.clone());
     component_detail({
         let state = state.clone();
-        move || match selected.get() {
+        selected.map(move |selected| match selected {
             Some(index) => state.options[index].label.clone(),
             None => String::new(),
-        }
+        })
     });
 
     let buttons: Vec<_> = labels

@@ -30,8 +30,7 @@ pub fn checkbox(label: Prop<String>, checked: Prop<bool>, on_change: Callback<bo
             checked={checked}
             on_change={move |checked| on_change.call(checked)}
             content={move |handle: ToggleHandle| {
-                let checked = handle.checked.clone();
-                component_detail(move || detail(checked.get()).to_owned());
+                component_detail(handle.checked.map(|checked| detail(checked).to_owned()));
                 view! { <checkbox_face handle={handle} label={label} /> }
             }}
         />
@@ -50,10 +49,7 @@ fn checkbox_face(handle: ToggleHandle, label: Prop<String>) -> NodeId {
         let (checked, hovered) = (checked.clone(), hovered);
         move || box_fill(checked.get(), hovered.get())
     });
-    let border_visible = create_memo({
-        let checked = checked.clone();
-        move || !checked.get()
-    });
+    let border_visible = checked.map(|checked| !checked);
 
     view! {
         <outline color={ACCENT} width={FOCUS_RING_WIDTH} radius={RADIUS} offset={FOCUS_RING_OFFSET} visible={focused}>

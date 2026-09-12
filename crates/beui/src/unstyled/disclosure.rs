@@ -34,10 +34,7 @@ pub fn disclosure(
 
     let (open_read, set_open) = open.signal();
 
-    component_detail({
-        let open = open_read.clone();
-        move || if open.get() { "open" } else { "closed" }.to_owned()
-    });
+    component_detail(open_read.map(|open| if open { "open" } else { "closed" }.to_owned()));
 
     set_component_state(State {
         open: open_read.clone(),

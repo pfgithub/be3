@@ -32,10 +32,7 @@ pub fn accordion(
         .expect("accordion requires a child, e.g. <accordion>{content}</accordion>");
 
     let title_text = title.memo();
-    component_detail({
-        let title_text = title_text.clone();
-        move || title_text.get()
-    });
+    component_detail(title_text.clone());
 
     view! {
         <unstyled::disclosure

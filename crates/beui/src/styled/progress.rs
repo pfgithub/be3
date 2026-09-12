@@ -2,7 +2,7 @@ use beui_macros::{component, view};
 
 use crate::node::NodeId;
 use crate::reactive::{
-    component_detail, create_memo, FillBuilder, Prop, RowBuilder, SizedBuilder, SpacerBuilder,
+    component_detail, FillBuilder, Prop, RowBuilder, SizedBuilder, SpacerBuilder,
 };
 use crate::styled::theme::{ACCENT, TRACK};
 
@@ -13,18 +13,9 @@ const RADIUS: u8 = 3;
 pub fn progress(value: Prop<f32>) -> NodeId {
     let value_read = value.map(|value| value.clamp(0.0, 1.0)).memo();
 
-    let filled_percent = create_memo({
-        let value_read = value_read.clone();
-        move || filled_size(value_read.get())
-    });
-    let rest_percent = create_memo({
-        let value_read = value_read.clone();
-        move || rest_size(value_read.get())
-    });
-    component_detail({
-        let value_read = value_read.clone();
-        move || detail(value_read.get())
-    });
+    let filled_percent = value_read.map(filled_size);
+    let rest_percent = value_read.map(rest_size);
+    component_detail(value_read.map(detail));
 
     view! {
         <sized height={HEIGHT}>

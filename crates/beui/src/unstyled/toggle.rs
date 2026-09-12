@@ -28,10 +28,7 @@ pub fn toggle(
     let (focused, set_focused) = create_signal(false);
     let (key_active, set_key_active) = create_signal(false);
 
-    component_detail({
-        let checked = checked_read.clone();
-        move || detail(checked.get()).to_owned()
-    });
+    component_detail(checked_read.map(|checked| detail(checked).to_owned()));
 
     let content_node = content.map(|build| {
         build.call(ToggleHandle {
