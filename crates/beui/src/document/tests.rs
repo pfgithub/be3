@@ -1,5 +1,6 @@
 use super::*;
 
+mod a_closure_child_receives_the_handle_its_slot_hands_over;
 mod a_component_function_appears_in_the_inspector_tree_without_hiding_its_children;
 mod a_disabled_button_prop_tracks_a_signal_and_blocks_clicks_while_true;
 mod a_missing_required_prop_panics_at_the_view_that_wrote_it;
@@ -17,6 +18,7 @@ mod arrow_keys_in_a_select_search_box_move_the_highlighted_option_without_editin
 mod arrow_keys_move_a_visible_highlight_through_an_open_context_menu;
 mod arrow_keys_step_the_focused_slider;
 mod backspace_deletes_the_character_before_the_caret;
+mod children_written_between_show_tags_are_not_built_until_it_is_shown;
 mod clicking_a_checkbox_toggles_it;
 mod clicking_a_row_collapses_its_children;
 mod clicking_a_row_selects_the_node_it_lists;

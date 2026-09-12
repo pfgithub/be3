@@ -561,6 +561,29 @@ impl<I: IntoIterator<Item = (NodeId, Prop<ItemSize>)>> From<I> for Children {
     }
 }
 
+#[diagnostic::on_unimplemented(
+    message = "this component builds exactly one child",
+    label = "write one child between these tags"
+)]
+pub trait OneChild {
+    fn one_child(self) -> NodeId;
+}
+
+impl OneChild for [(NodeId, Prop<ItemSize>); 1] {
+    fn one_child(self) -> NodeId {
+        let [(child, _)] = self;
+        child
+    }
+}
+
+#[diagnostic::on_unimplemented(
+    message = "this component hands a value to the children it builds",
+    label = "write these children as a single closure taking that value"
+)]
+pub trait UnitHandle<H> {}
+
+impl<F> UnitHandle<()> for F {}
+
 pub use crate::base::click_catcher::ClickCatcherBuilder;
 pub use crate::base::fill::FillBuilder;
 pub use crate::base::focusable::FocusableBuilder;
@@ -616,7 +639,7 @@ pub fn spacer() -> NodeId {
 }
 
 #[component]
-pub fn show(condition: Prop<bool>, then: Option<Render>) -> NodeId {
+pub fn show(condition: Prop<bool>, #[prop(children)] then: Option<Render>) -> NodeId {
     let mut then = then;
     let visibility = with_document(|document| document.create_visibility(false));
     let built: Rc<Cell<Option<NodeId>>> = Rc::new(Cell::new(None));
@@ -634,7 +657,7 @@ pub fn show(condition: Prop<bool>, then: Option<Render>) -> NodeId {
 }
 
 #[component]
-pub fn dynamic<T>(value: Prop<T>, view: Option<RenderFn<T>>) -> NodeId
+pub fn dynamic<T>(value: Prop<T>, #[prop(children)] view: Option<RenderFn<T>>) -> NodeId
 where
     T: Clone + Default + 'static,
 {
@@ -661,7 +684,7 @@ pub fn for_each<T, K>(
     spacing: f32,
     items: Prop<Vec<T>>,
     key: Option<Func<T, K>>,
-    view: Option<RenderFn<T>>,
+    #[prop(children)] view: Option<RenderFn<T>>,
     #[prop(default = ItemSize::Intrinsic)] item_size: ItemSize,
 ) -> NodeId
 where

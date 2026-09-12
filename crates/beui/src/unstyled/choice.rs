@@ -62,7 +62,7 @@ pub fn choice(
     selected: Prop<Option<usize>>,
     kind: ChoiceKind,
     on_change: Callback<Option<usize>>,
-    option: Option<RenderFn<ChoiceOptionHandle>>,
+    #[prop(children)] option: Option<RenderFn<ChoiceOptionHandle>>,
 ) -> NodeId {
     set_component_name(kind_name(kind));
     let selected_prop = selected;

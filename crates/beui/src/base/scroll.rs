@@ -543,7 +543,7 @@ impl Document {
 pub fn virtual_list(
     count: Prop<usize>,
     item_height: Prop<f32>,
-    item: Option<RenderFn<usize>>,
+    #[prop(children)] item: Option<RenderFn<usize>>,
     focus_color: Prop<Color32>,
     on_change: Callback<ScrollPosition>,
 ) -> NodeId {

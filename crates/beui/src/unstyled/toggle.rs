@@ -19,7 +19,7 @@ pub struct ToggleHandle {
 #[component]
 pub fn toggle(
     checked: Prop<bool>,
-    content: Option<Render<ToggleHandle>>,
+    #[prop(children)] content: Option<Render<ToggleHandle>>,
     on_change: Callback<bool>,
 ) -> NodeId {
     let (checked_read, set_checked) = create_signal(checked.peek());

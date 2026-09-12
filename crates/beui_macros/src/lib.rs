@@ -1,5 +1,5 @@
 use proc_macro::TokenStream;
-use quote::{format_ident, quote};
+use quote::{format_ident, quote, quote_spanned};
 use syn::braced;
 use syn::parenthesized;
 use syn::parse::{Parse, ParseStream};
@@ -25,6 +25,7 @@ struct Prop {
     callback_args: Option<Vec<Type>>,
     is_click_callback: bool,
     default: Option<Expr>,
+    is_children_slot: bool,
 }
 
 struct Render {
@@ -73,6 +74,7 @@ fn func_setter(
 
 fn render_setter(
     ident: &Ident,
+    method: &Ident,
     render: &Render,
     wrap: impl Fn(proc_macro2::TokenStream) -> proc_macro2::TokenStream,
 ) -> proc_macro2::TokenStream {
@@ -96,26 +98,77 @@ fn render_setter(
     };
     let stored = wrap(build);
     quote! {
-        pub fn #ident(mut self, value: impl #signature) -> Self {
+        pub fn #method(mut self, value: impl #signature) -> Self {
             self.#ident = Some(#stored);
             self
         }
     }
 }
 
-fn take_prop_default(attrs: &mut Vec<Attribute>) -> Option<Expr> {
-    let position = attrs.iter().position(|attr| attr.path().is_ident("prop"))?;
-    let attr = attrs.remove(position);
-    let mut default = None;
-    attr.parse_nested_meta(|meta| {
-        if !meta.path.is_ident("default") {
-            return Err(meta.error("expected `default = <expr>`"));
+fn render_children_block(
+    ident: &Ident,
+    render: &Render,
+    wrap: impl Fn(proc_macro2::TokenStream) -> proc_macro2::TokenStream,
+) -> proc_macro2::TokenStream {
+    let handle = render
+        .handle
+        .clone()
+        .unwrap_or_else(|| syn::parse_quote!(()));
+    let (bound, build) = if render.once {
+        (
+            quote! { ::core::ops::FnOnce() -> ChildrenBlock + 'static },
+            quote! { ::beui::reactive::Render::new(
+                move |_handle: #handle| ::beui::reactive::OneChild::one_child(children()),
+            ) },
+        )
+    } else {
+        (
+            quote! { ::core::ops::Fn() -> ChildrenBlock + 'static },
+            quote! { ::beui::reactive::RenderFn::new(
+                move |_handle: #handle| ::beui::reactive::OneChild::one_child(children()),
+            ) },
+        )
+    };
+    let stored = wrap(build);
+    quote! {
+        pub fn children_block<ChildrenFn, ChildrenBlock>(mut self, children: ChildrenFn) -> Self
+        where
+            ChildrenFn: #bound + ::beui::reactive::UnitHandle<#handle>,
+            ChildrenBlock: ::beui::reactive::OneChild + 'static,
+        {
+            self.#ident = Some(#stored);
+            self
         }
-        default = Some(meta.value()?.parse::<Expr>()?);
-        Ok(())
+    }
+}
+
+struct PropAttr {
+    default: Option<Expr>,
+    children: bool,
+}
+
+fn take_prop_attr(attrs: &mut Vec<Attribute>) -> PropAttr {
+    let mut parsed = PropAttr {
+        default: None,
+        children: false,
+    };
+    let Some(position) = attrs.iter().position(|attr| attr.path().is_ident("prop")) else {
+        return parsed;
+    };
+    let attr = attrs.remove(position);
+    attr.parse_nested_meta(|meta| {
+        if meta.path.is_ident("children") {
+            parsed.children = true;
+            return Ok(());
+        }
+        if meta.path.is_ident("default") {
+            parsed.default = Some(meta.value()?.parse::<Expr>()?);
+            return Ok(());
+        }
+        Err(meta.error("expected `children` or `default = <expr>`"))
     })
-    .expect("#[prop(...)] expects `default = <expr>`");
-    Some(default.expect("#[prop(...)] expects `default = <expr>`"))
+    .expect("#[prop(...)] expects `children`, `default = <expr>`, or both");
+    parsed
 }
 
 struct ComponentAttr {
@@ -233,7 +286,7 @@ pub fn component(attr: TokenStream, item: TokenStream) -> TokenStream {
                 Pat::Ident(pat_ident) => pat_ident.ident.clone(),
                 _ => panic!("#[component] props must be simple identifiers"),
             };
-            let default = take_prop_default(attrs);
+            let PropAttr { default, children } = take_prop_attr(attrs);
             let inner_ty = generic_inner(ty, "Option");
             let optional_reactive_inner_ty = inner_ty
                 .as_ref()
@@ -262,6 +315,7 @@ pub fn component(attr: TokenStream, item: TokenStream) -> TokenStream {
                 callback_args: generic_args(ty, "Callback"),
                 is_click_callback: is_named_type(ty, "ClickCallback"),
                 default,
+                is_children_slot: children,
             }
         })
         .collect();
@@ -270,6 +324,89 @@ pub fn component(attr: TokenStream, item: TokenStream) -> TokenStream {
         let ident = &prop.ident;
         let ty = &prop.ty;
         quote! { #ident: Option<#ty> }
+    });
+
+    let designated: Vec<&Prop> = props.iter().filter(|prop| prop.is_children_slot).collect();
+    if designated.len() > 1 {
+        panic!("component `{name}` marks more than one prop `#[prop(children)]`");
+    }
+    let named_children = props.iter().find(|prop| prop.ident == "children");
+    if let (Some(slot), Some(children)) = (designated.first(), named_children) {
+        if slot.ident != children.ident {
+            panic!(
+                "component `{name}` already takes its children through `children`, so `{}` cannot be `#[prop(children)]`",
+                slot.ident,
+            );
+        }
+    }
+    let children_slot = designated.first().copied().or(named_children);
+    if let Some(slot) = children_slot {
+        let known = slot.is_children
+            || slot.is_child
+            || slot.is_optional_child
+            || slot.render.is_some()
+            || slot.optional_render.is_some();
+        if !known {
+            panic!(
+                "prop `{}` of component `{name}` is `#[prop(children)]`, so it must be typed `Children`, `Child`, `Option<Child>`, `Render<_>`, or `RenderFn<_>`",
+                slot.ident,
+            );
+        }
+    }
+
+    let children_methods = children_slot.map(|prop| {
+        let ident = &prop.ident;
+        if prop.is_children {
+            quote! {
+                pub fn children_block<ChildrenBlock>(
+                    mut self,
+                    children: impl ::core::ops::FnOnce() -> ChildrenBlock,
+                ) -> Self
+                where
+                    ChildrenBlock: Into<::beui::reactive::Children>,
+                {
+                    self.#ident = Some(children().into());
+                    self
+                }
+            }
+        } else if prop.is_child || prop.is_optional_child {
+            let stored = if prop.is_optional_child {
+                quote! { Some(children.only()) }
+            } else {
+                quote! { children.only() }
+            };
+            quote! {
+                pub fn children_block<ChildrenBlock>(
+                    mut self,
+                    children: impl ::core::ops::FnOnce() -> ChildrenBlock,
+                ) -> Self
+                where
+                    ChildrenBlock: Into<::beui::reactive::Children>,
+                {
+                    let children: ::beui::reactive::Children = children().into();
+                    self.#ident = #stored;
+                    self
+                }
+            }
+        } else {
+            let children_render = format_ident!("children_render");
+            let (render, block) = match &prop.optional_render {
+                Some(render) => (
+                    render_setter(ident, &children_render, render, |build| {
+                        quote! { Some(#build) }
+                    }),
+                    render_children_block(ident, render, |build| quote! { Some(#build) }),
+                ),
+                None => {
+                    let render = prop.render.as_ref().expect("checked above");
+                    (
+                        render_setter(ident, &children_render, render, |build| build),
+                        render_children_block(ident, render, |build| build),
+                    )
+                }
+            };
+            quote! { #render #block }
+        }
     });
 
     let setters = props.iter().map(|prop| {
@@ -295,9 +432,9 @@ pub fn component(attr: TokenStream, item: TokenStream) -> TokenStream {
                 }
             }
         } else if let Some(render) = &prop.optional_render {
-            render_setter(ident, render, |build| quote! { Some(#build) })
+            render_setter(ident, ident, render, |build| quote! { Some(#build) })
         } else if let Some(render) = &prop.render {
-            render_setter(ident, render, |build| build)
+            render_setter(ident, ident, render, |build| build)
         } else if let Some(args) = &prop.optional_func_args {
             func_setter(ident, args, |build| quote! { Some(#build) })
         } else if let Some(args) = &prop.func_args {
@@ -444,6 +581,8 @@ pub fn component(attr: TokenStream, item: TokenStream) -> TokenStream {
 
         impl #generics #builder_ident #generics #where_clause {
             #(#setters)*
+
+            #children_methods
 
             pub fn test_id(mut self, value: impl Into<String>) -> Self {
                 self.test_id = Some(value.into());
@@ -732,6 +871,17 @@ fn expand_view_node(node: &ViewNode) -> proc_macro2::TokenStream {
     match &node.children {
         None => quote! { #builder_path::default() #(#setters)* .build() },
         Some(children) => {
+            let tag = last.span();
+            if let [ViewChild {
+                sizing: None,
+                kind: ViewChildKind::Expr(Expr::Closure(closure)),
+            }] = children.as_slice()
+            {
+                let children_render = format_ident!("children_render", span = tag);
+                return quote! {
+                    #builder_path::default() #(#setters)* .#children_render(#closure) .build()
+                };
+            }
             let items = children.iter().map(|child| {
                 let node = match &child.kind {
                     ViewChildKind::Node(node) => expand_view_node(node),
@@ -752,8 +902,10 @@ fn expand_view_node(node: &ViewNode) -> proc_macro2::TokenStream {
                     }
                 }
             });
+            let block = quote_spanned! { tag => move || [#(#items),*] };
+            let children_block = format_ident!("children_block", span = tag);
             quote! {
-                #builder_path::default() #(#setters)* .children([#(#items),*]) .build()
+                #builder_path::default() #(#setters)* .#children_block(#block) .build()
             }
         }
     }

@@ -54,7 +54,7 @@ type Handle = Rc<RefCell<Editor>>;
 pub fn text_input(
     value: Prop<String>,
     focused: Prop<bool>,
-    content: Option<Render<TextInputHandle>>,
+    #[prop(children)] content: Option<Render<TextInputHandle>>,
     placeholder: Prop<String>,
     #[prop(default = FONT_SIZE)] font_size: Prop<f32>,
     #[prop(default = Color32::WHITE)] color: Prop<Color32>,

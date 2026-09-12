@@ -11,7 +11,7 @@ use crate::reactive::{
 pub struct ContainerSize(pub ReadSignal<Vec2>);
 
 #[component]
-pub fn container(content: Render<ReadSignal<Vec2>>) -> NodeId {
+pub fn container(#[prop(children)] content: Render<ReadSignal<Vec2>>) -> NodeId {
     let size = node_size(current_component());
     provide_context(ContainerSize(size.clone()));
     content.call(size)
