@@ -61,15 +61,23 @@ impl ListNode {
         }
     }
 
-    fn intrinsic_lengths(&self, doc: &Document, painter: &Painter, cross: f32) -> Vec<f32> {
+    fn intrinsic_lengths(
+        &self,
+        doc: &Document,
+        painter: &Painter,
+        main: f32,
+        cross: f32,
+    ) -> Vec<f32> {
+        let measured = |item: &ListItem| {
+            let available = self.axes(f32::INFINITY, cross);
+            let size = crate::layout::measure(doc, painter, item.child, available);
+            self.main_and_cross(size).0
+        };
         self.items
             .iter()
             .map(|item| match item.size {
-                ItemSize::Intrinsic => {
-                    let available = self.axes(f32::INFINITY, cross);
-                    let size = crate::layout::measure(doc, painter, item.child, available);
-                    self.main_and_cross(size).0
-                }
+                ItemSize::Intrinsic => measured(item),
+                ItemSize::Percent(_) if !main.is_finite() => measured(item),
                 ItemSize::Fixed(_) | ItemSize::Percent(_) => 0.0,
             })
             .collect()
@@ -81,7 +89,8 @@ impl Element for ListNode {
         let (available_main, available_cross) = self.main_and_cross(available);
 
         let sizes: Vec<ItemSize> = self.items.iter().map(|item| item.size).collect();
-        let intrinsic_lengths = self.intrinsic_lengths(doc, painter, available_cross);
+        let intrinsic_lengths =
+            self.intrinsic_lengths(doc, painter, available_main, available_cross);
         let main_lengths =
             distribute_main_axis(available_main, self.spacing, &sizes, &intrinsic_lengths);
 
@@ -110,7 +119,8 @@ impl Element for ListNode {
         let (available_main, available_cross) = self.main_and_cross(rect.size());
 
         let sizes: Vec<ItemSize> = self.items.iter().map(|item| item.size).collect();
-        let intrinsic_lengths = self.intrinsic_lengths(doc, painter, available_cross);
+        let intrinsic_lengths =
+            self.intrinsic_lengths(doc, painter, available_main, available_cross);
         let main_lengths =
             distribute_main_axis(available_main, self.spacing, &sizes, &intrinsic_lengths);
 
@@ -190,6 +200,16 @@ pub(crate) fn distribute_main_axis(
     sizes: &[ItemSize],
     intrinsic_lengths: &[f32],
 ) -> Vec<f32> {
+    if !available_main.is_finite() {
+        return sizes
+            .iter()
+            .zip(intrinsic_lengths)
+            .map(|(size, length)| match size {
+                ItemSize::Fixed(fixed) => fixed.max(0.0),
+                ItemSize::Intrinsic | ItemSize::Percent(_) => *length,
+            })
+            .collect();
+    }
     let count = sizes.len();
     let spacing_total = if count > 1 {
         spacing * (count as f32 - 1.0)

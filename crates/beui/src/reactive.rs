@@ -517,6 +517,10 @@ pub fn percent(node: NodeId, weight: impl IntoProp<f32>) -> (NodeId, Prop<ItemSi
     (node, weight.into_prop().map(ItemSize::Percent))
 }
 
+pub fn size(node: NodeId, size: impl IntoProp<ItemSize>) -> (NodeId, Prop<ItemSize>) {
+    (node, size.into_prop())
+}
+
 #[derive(Default)]
 pub struct Children(Vec<(NodeId, Prop<ItemSize>)>);
 

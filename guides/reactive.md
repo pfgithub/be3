@@ -260,7 +260,16 @@ swapped out.
 ```
 
 `@intrinsic`/`@fixed(size)`/`@percent(weight)` prefix a child inside `view!` to
-give it an `ItemSize` in a `row`/`column`. See
+give it an `ItemSize` in a `row`/`column`, and `@size(item_size)` takes a whole
+`ItemSize` so a child can switch between kinds reactively — a memo that reads
+`narrower_than` and returns `ItemSize::Fixed` in a column where it returned
+`ItemSize::Percent` in a row, for instance. A percent child takes its share of
+what is left over, so it needs a bounded main axis: inside a list that is being
+measured intrinsically there is no leftover space to share, and percent children
+fall back to their intrinsic length there, the way `height: 50%` of an
+auto-height parent does in CSS. A `scroll` measures as nothing, so a percent
+scroll inside an intrinsically measured column collapses; give it a fixed length
+for that case. See
 `crates/beui/examples/counter.rs` for a full example and
 `crates/beui/src/document/tests/a_reactive_tree_can_nest_builder_calls_without_threading_the_document.rs`
 and `.../a_signal_write_from_a_click_handler_updates_its_bound_text_in_the_same_frame.rs`

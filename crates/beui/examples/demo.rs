@@ -15,7 +15,9 @@ use beui::styled::{
     TextInputBuilder, TitleBuilder, ToggleButtonBuilder,
 };
 use beui::unstyled::{narrower_than, ContainerBuilder};
-use beui::{unstyled, Color32, Context, Document, NodeId, Rect, ScrollPosition, TextAlign};
+use beui::{
+    unstyled, Color32, Context, Document, ItemSize, NodeId, Rect, ScrollPosition, TextAlign,
+};
 use beui_macros::component;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -32,6 +34,7 @@ const CARD_NARROW_WIDTH: f32 = 460.0;
 const TABS_NARROW_WIDTH: f32 = 380.0;
 const ICON_BUTTON_WIDTH: f32 = 44.0;
 const ROW_COUNT: usize = 10_000;
+const NARROW_ROWS_HEIGHT: f32 = 320.0;
 const ROW_HEIGHT: f32 = 34.0;
 const COMPACT_ROW_HEIGHT: f32 = 25.0;
 const ROW_PADDING_HORIZONTAL: f32 = 12.0;
@@ -314,6 +317,14 @@ fn main_panel(count: ReadSignal<i64>) -> NodeId {
     });
     let item_rows = rows.clone();
     let (scroll_position, set_scroll_position) = create_signal(ScrollPosition::ZERO);
+    let narrow = narrower_than(NARROW_WIDTH);
+    let rows_size = create_memo(move || {
+        if narrow.get() {
+            ItemSize::Fixed(NARROW_ROWS_HEIGHT)
+        } else {
+            ItemSize::Percent(100.0)
+        }
+    });
 
     view! {
         <column spacing={20.0}>
@@ -325,7 +336,7 @@ fn main_panel(count: ReadSignal<i64>) -> NodeId {
                 </column>
             </card>
             <controls rows={rows.clone()} />
-            @percent(100.0) <card>
+            @size(rows_size) <card>
                 <column spacing={12.0}>
                     <centered_row spacing={12.0}>
                         <heading content={format!("Rows ({ROW_COUNT})")} />

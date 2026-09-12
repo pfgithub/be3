@@ -445,6 +445,7 @@ enum ViewSizing {
     Intrinsic,
     Fixed(Expr),
     Percent(Expr),
+    Size(Expr),
 }
 
 impl Parse for ViewSizing {
@@ -462,9 +463,14 @@ impl Parse for ViewSizing {
                 parenthesized!(args in input);
                 Ok(ViewSizing::Percent(args.parse()?))
             }
+            "size" => {
+                let args;
+                parenthesized!(args in input);
+                Ok(ViewSizing::Size(args.parse()?))
+            }
             other => Err(syn::Error::new(
                 ident.span(),
-                format!("unknown sizing `@{other}`, expected `@intrinsic`, `@fixed(size)`, or `@percent(weight)`"),
+                format!("unknown sizing `@{other}`, expected `@intrinsic`, `@fixed(size)`, `@percent(weight)`, or `@size(item_size)`"),
             )),
         }
     }
@@ -607,6 +613,9 @@ fn expand_view_node(node: &ViewNode) -> proc_macro2::TokenStream {
                     }
                     Some(ViewSizing::Percent(weight)) => {
                         quote! { ::beui::reactive::percent(#node, #weight) }
+                    }
+                    Some(ViewSizing::Size(size)) => {
+                        quote! { ::beui::reactive::size(#node, #size) }
                     }
                 }
             });
