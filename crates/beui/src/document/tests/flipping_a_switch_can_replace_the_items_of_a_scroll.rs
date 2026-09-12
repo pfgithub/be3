@@ -25,21 +25,21 @@ fn check_compact_rows(inset: f32) {
             });
             let row_height = item_height.clone();
             view! {
-                <column spacing={0.0}>
+                <column spacing=0.0>
                     <switch
-                        node_ref={&switch}
-                        on={false}
+                        node_ref=&switch
+                        on=false
                         on_change={move |on: bool| set_compact.set(on)}
                     />
                     @percent(100.0) <virtual_list
-                        node_ref={&scroll}
-                        count={VIRTUAL_ITEM_COUNT}
-                        item_height={item_height}
+                        node_ref=&scroll
+                        count=VIRTUAL_ITEM_COUNT
+                        item_height
                         item={move |index: usize| {
                             sink.borrow_mut().push(index);
                             let height = row_height.get() / 2.0;
                             view! {
-                                <padding horizontal={0.0} vertical={height}><spacer /></padding>
+                                <padding horizontal=0.0 vertical={height}><spacer /></padding>
                             }
                         }}
                     />

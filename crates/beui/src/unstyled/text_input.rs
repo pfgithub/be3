@@ -132,7 +132,7 @@ pub fn text_input(
             }}
         >
             <click_catcher
-                cursor={CursorIcon::Text}
+                cursor=CursorIcon::Text
                 on_press={{
                     let editor = editor.clone();
                     move |press: PointerPress| point(&editor, press)
@@ -150,16 +150,16 @@ pub fn text_input(
                     let field = view! {
                         <padding horizontal={padding_horizontal} vertical={padding_vertical}>
                             <text
-                                node_ref={&text}
-                                string={string}
-                                font_size={font_size}
-                                color={color}
-                                selection_color={selection_color}
-                                caret_color={caret_color}
-                                caret={caret}
-                                selection={selection}
-                                align={TextAlign::Start}
-                                clip={true}
+                                node_ref=&text
+                                string
+                                font_size
+                                color
+                                selection_color
+                                caret_color
+                                caret
+                                selection
+                                align=TextAlign::Start
+                                clip=true
                             />
                         </padding>
                     };

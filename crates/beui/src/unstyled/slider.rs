@@ -88,7 +88,7 @@ pub fn slider(
             }}
         >
             <click_catcher
-                cursor={CursorIcon::PointingHand}
+                cursor=CursorIcon::PointingHand
                 on_drag={move |press: PointerPress| set_value(press.fraction.x)}
                 on_active_change={move |dragging: bool| {
                     set_dragging.set(dragging);

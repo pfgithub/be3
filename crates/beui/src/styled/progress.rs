@@ -20,10 +20,10 @@ pub fn progress(value: Prop<f32>) -> NodeId {
     component_detail(create_memo(move || detail(value_read.get())));
 
     view! {
-        <sized height={HEIGHT}>
-            <fill color={TRACK} radius={RADIUS}>
-                <row spacing={0.0}>
-                    @percent(filled) <fill color={ACCENT} radius={RADIUS}></fill>
+        <sized height=HEIGHT>
+            <fill color=TRACK radius=RADIUS>
+                <row spacing=0.0>
+                    @percent(filled) <fill color=ACCENT radius=RADIUS></fill>
                     @percent(rest) <spacer />
                 </row>
             </fill>

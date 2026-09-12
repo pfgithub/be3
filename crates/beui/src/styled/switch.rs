@@ -30,7 +30,7 @@ pub fn switch(on: Prop<bool>, on_change: Callback<bool>) -> NodeId {
             content={move |handle: ToggleHandle| {
                 let checked = handle.checked.clone();
                 component_detail(create_memo(move || detail(checked.get()).to_owned()));
-                view! { <switch_track handle={handle} /> }
+                view! { <switch_track handle /> }
             }}
         />
     }
@@ -55,14 +55,14 @@ fn switch_track(handle: ToggleHandle) -> NodeId {
     let track_color = create_memo(move || track_fill(checked.get(), hovered.get()));
 
     view! {
-        <outline color={ACCENT} width={FOCUS_RING_WIDTH} radius={RADIUS} offset={FOCUS_RING_OFFSET} visible={focused}>
-            <sized width={WIDTH} height={HEIGHT}>
-                <fill color={track_color} radius={TRACK_RADIUS}>
-                    <padding horizontal={PADDING} vertical={PADDING}>
-                        <centered_row spacing={0.0}>
+        <outline color=ACCENT width=FOCUS_RING_WIDTH radius=RADIUS offset=FOCUS_RING_OFFSET visible={focused}>
+            <sized width=WIDTH height=HEIGHT>
+                <fill color={track_color} radius=TRACK_RADIUS>
+                    <padding horizontal=PADDING vertical=PADDING>
+                        <centered_row spacing=0.0>
                             @percent(before_percent) <spacer />
-                            <sized width={KNOB_SIZE} height={KNOB_SIZE}>
-                                <fill color={KNOB} radius={KNOB_RADIUS}></fill>
+                            <sized width=KNOB_SIZE height=KNOB_SIZE>
+                                <fill color=KNOB radius=KNOB_RADIUS></fill>
                             </sized>
                             @percent(after_percent) <spacer />
                         </centered_row>

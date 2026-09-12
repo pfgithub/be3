@@ -19,14 +19,14 @@ fn a_reactive_tree_can_nest_builder_calls_without_threading_the_document() {
             <button on_click={move || {
                 set_count.update(|count| *count += 1)
             }}>
-                <text string={"+".to_string()} />
+                <text string="+" />
             </button>
         };
         sink_value.set(Some(value_node));
         sink_increment.set(Some(increment_node));
         view! {
-            <column spacing={8.0}>
-                <row spacing={8.0}>
+            <column spacing=8.0>
+                <row spacing=8.0>
                     {increment_node}
                     {value_node}
                 </row>

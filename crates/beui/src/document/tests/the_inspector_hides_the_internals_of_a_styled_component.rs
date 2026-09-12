@@ -7,7 +7,7 @@ fn the_inspector_hides_the_internals_of_a_styled_component() {
     let (document, [_row]) = toolbar_of(|| {
         [view! {
             <list_row>
-                <text string={"Hello".to_string()} font_size={14.0} color={Color32::WHITE} />
+                <text string="Hello" font_size=14.0 color=Color32::WHITE />
             </list_row>
         }]
     });

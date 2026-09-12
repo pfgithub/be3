@@ -24,7 +24,7 @@ pub fn context_menu(
     panel: Option<RenderFn<Child>>,
     on_select: Callback<Vec<usize>>,
 ) -> NodeId {
-    let row = row.unwrap_or_else(|| RenderFn::new(|_| view! { <column spacing={0.0} /> }));
+    let row = row.unwrap_or_else(|| RenderFn::new(|_| view! { <column spacing=0.0 /> }));
     let panel = panel.unwrap_or_else(|| RenderFn::new(|content| content));
     let (open, set_open) = create_signal(false);
     let (position, set_position) = create_signal(Pos2::ZERO);
@@ -39,19 +39,19 @@ pub fn context_menu(
     let (active, close) = (open.clone(), set_open.clone());
     view! {
         <click_catcher
-            cursor={CursorIcon::Default}
+            cursor=CursorIcon::Default
             on_secondary_press={move |press: PointerPress| {
                 set_position.set(press.pos);
                 set_open.set(true);
             }}
         >
-            <column spacing={0.0}>
+            <column spacing=0.0>
                 {children}
                 <overlay
-                    node_ref={&overlay}
-                    anchor={anchor}
-                    placement={Placement::BelowStart}
-                    open={open}
+                    node_ref=&overlay
+                    anchor
+                    placement=Placement::BelowStart
+                    open
                     on_dismiss={move || dismiss.set(false)}
                 >
                     <dynamic
@@ -62,9 +62,9 @@ pub fn context_menu(
                             let on_select = on_select.clone();
                             panel.call(view! {
                                 <menu_list
-                                    node_ref={&content}
-                                    items={items}
-                                    row={row}
+                                    node_ref=&content
+                                    items
+                                    row
                                     panel={panel.clone()}
                                     active={active.clone()}
                                     on_select={move |path: Vec<usize>| {

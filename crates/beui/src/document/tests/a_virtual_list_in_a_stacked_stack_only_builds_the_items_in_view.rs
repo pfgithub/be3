@@ -24,18 +24,18 @@ fn a_virtual_list_in_a_stacked_stack_only_builds_the_items_in_view() {
                         ItemSize::Percent(100.0)
                     });
                     view! {
-                        <stack spacing={0.0} breakpoint={BREAKPOINT}>
+                        <stack spacing=0.0 breakpoint=BREAKPOINT>
                             @percent(50.0) <spacer />
-                            @percent(50.0) <column spacing={0.0}>
-                                @size(size) <column spacing={0.0}>
+                            @percent(50.0) <column spacing=0.0>
+                                @size(size) <column spacing=0.0>
                                     @percent(100.0) <virtual_list
-                                        node_ref={&scroll}
-                                        count={VIRTUAL_ITEM_COUNT}
-                                        item_height={VIRTUAL_ITEM_HEIGHT}
+                                        node_ref=&scroll
+                                        count=VIRTUAL_ITEM_COUNT
+                                        item_height=VIRTUAL_ITEM_HEIGHT
                                         item={move |index: usize| {
                                             sink.borrow_mut().push(index);
                                             view! {
-                                                <padding horizontal={0.0} vertical={VIRTUAL_ITEM_HEIGHT / 2.0}>
+                                                <padding horizontal=0.0 vertical={VIRTUAL_ITEM_HEIGHT / 2.0}>
                                                     <spacer />
                                                 </padding>
                                             }

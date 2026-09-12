@@ -7,9 +7,9 @@ fn listbox_typeahead_matches_prefixes_and_cycles_repeated_letters() {
     let (document, [listbox, after]) = toolbar_of(|| {
         [
             view! {
-                <listbox labels={vec!["Apple".to_string(), "Banana".to_string(), "Blueberry".to_string(), "Cherry".to_string()]} selected={Some(0)} />
+                <listbox labels={vec!["Apple".to_string(), "Banana".to_string(), "Blueberry".to_string(), "Cherry".to_string()]} selected=Some(0) />
             },
-            view! { <labelled_button label={"After".to_string()} /> },
+            view! { <labelled_button label="After" /> },
         ]
     });
     let after_focus = unstyled::button_focused(&document, after);

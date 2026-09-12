@@ -32,10 +32,10 @@ pub fn accordion(
 
     view! {
         <unstyled::disclosure
-            spacing={SPACING}
+            spacing=SPACING
             on_toggle={move |open| on_toggle.call(open)}
-            header={move |handle| view! { <accordion_header handle={handle} title={title_text} /> }}
-            open={open}
+            header={move |handle| view! { <accordion_header handle title={title_text} /> }}
+            open
         >
             {children}
         </unstyled::disclosure>
@@ -53,24 +53,24 @@ fn accordion_header(handle: DisclosureHandle, title: Memo<String>) -> NodeId {
     let header_color = create_memo(move || header_fill(hovered.get()));
     let marker_glyph = create_memo(move || glyph(open.get()).to_owned());
     view! {
-        <outline color={ACCENT} width={2.0} radius={RADIUS} offset={2.0} visible={focused}>
-            <fill color={header_color} radius={RADIUS}>
-                <padding horizontal={PADDING_HORIZONTAL} vertical={PADDING_VERTICAL}>
-                    <centered_row spacing={SPACING}>
-                        <sized width={MARKER_WIDTH}>
+        <outline color=ACCENT width=2.0 radius=RADIUS offset=2.0 visible={focused}>
+            <fill color={header_color} radius=RADIUS>
+                <padding horizontal=PADDING_HORIZONTAL vertical=PADDING_VERTICAL>
+                    <centered_row spacing=SPACING>
+                        <sized width=MARKER_WIDTH>
                             <text
                                 string={marker_glyph}
-                                font_size={FONT_SMALL}
-                                color={TEXT_MUTED}
-                                monospace={true}
-                                align={TextAlign::Center}
+                                font_size=FONT_SMALL
+                                color=TEXT_MUTED
+                                monospace=true
+                                align=TextAlign::Center
                             />
                         </sized>
                         @percent(100.0) <text
                             string={title}
-                            font_size={FONT_HEADING}
-                            color={TEXT}
-                            align={TextAlign::Start}
+                            font_size=FONT_HEADING
+                            color=TEXT
+                            align=TextAlign::Start
                         />
                     </centered_row>
                 </padding>

@@ -20,7 +20,7 @@ fn tabbing_to_an_offscreen_control_reveals_it() {
                     })
                 })
                 .collect();
-            view! { <scroll node_ref={&scroll} children={items} /> }
+            view! { <scroll node_ref=&scroll children={items} /> }
         }
     });
     let scroll = scroll.get();

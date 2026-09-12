@@ -26,7 +26,7 @@ pub fn toggle_button(
         <toggle
             checked={pressed}
             on_change={move |pressed| on_change.call(pressed)}
-            content={move |handle| view! { <toggle_button_face handle={handle} label={label_text} /> }}
+            content={move |handle| view! { <toggle_button_face handle label={label_text} /> }}
         />
     }
 }
@@ -46,11 +46,11 @@ fn toggle_button_face(handle: ToggleHandle, label: Prop<String>) -> NodeId {
     let border_color = create_memo(move || if checked.get() { ACCENT } else { BORDER });
 
     view! {
-        <outline color={ACCENT} width={2.0} radius={RADIUS} offset={3.0} visible={focused}>
-            <outline color={border_color} width={1.0} radius={RADIUS} offset={0.0} visible={true}>
-                <fill color={fill_color} radius={RADIUS}>
-                    <padding horizontal={14.0} vertical={8.0}>
-                        <text string={label} font_size={FONT_BODY} color={TEXT} />
+        <outline color=ACCENT width=2.0 radius=RADIUS offset=3.0 visible={focused}>
+            <outline color={border_color} width=1.0 radius=RADIUS offset=0.0 visible=true>
+                <fill color={fill_color} radius=RADIUS>
+                    <padding horizontal=14.0 vertical=8.0>
+                        <text string={label} font_size=FONT_BODY color=TEXT />
                     </padding>
                 </fill>
             </outline>

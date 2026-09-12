@@ -11,15 +11,15 @@ fn focus_loss_and_hidden_content_cancel_keyboard_activation() {
         move || {
             [
                 view! {
-                    <visibility visible={true}>
+                    <visibility visible=true>
                         <labelled_button
-                            node_ref={&button}
-                            label={"Click".to_string()}
+                            node_ref=&button
+                            label="Click"
                             on_click={move || counter.set(counter.get() + 1)}
                         />
                     </visibility>
                 },
-                view! { <labelled_button label={"After".to_string()} /> },
+                view! { <labelled_button label="After" /> },
             ]
         }
     });

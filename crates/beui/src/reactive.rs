@@ -590,22 +590,22 @@ pub fn list(
 
 #[component(base)]
 pub fn row(spacing: Prop<f32>, children: Children) -> NodeId {
-    view! { <list direction={Direction::Horizontal} spacing={spacing} children={children} /> }
+    view! { <list direction=Direction::Horizontal spacing children /> }
 }
 
 #[component(base)]
 pub fn column(spacing: Prop<f32>, children: Children) -> NodeId {
-    view! { <list direction={Direction::Vertical} spacing={spacing} children={children} /> }
+    view! { <list direction=Direction::Vertical spacing children /> }
 }
 
 #[component(base)]
 pub fn centered_row(spacing: Prop<f32>, children: Children) -> NodeId {
     view! {
         <list
-            direction={Direction::Horizontal}
-            align={Align::Center}
-            spacing={spacing}
-            children={children}
+            direction=Direction::Horizontal
+            align=Align::Center
+            spacing
+            children
         />
     }
 }
@@ -639,7 +639,7 @@ where
     T: Clone + Default + 'static,
 {
     let view = view.expect("dynamic requires a `view` callback");
-    let parent = view! { <column spacing={0.0} /> };
+    let parent = view! { <column spacing=0.0 /> };
     let built: Rc<Cell<Option<NodeId>>> = Rc::new(Cell::new(None));
     create_effect(move || {
         let value = value.get();
@@ -670,7 +670,7 @@ where
 {
     let key = key.expect("for_each requires a `key` callback");
     let view = view.expect("for_each requires a `view` callback");
-    let parent = view! { <column spacing={spacing} /> };
+    let parent = view! { <column spacing /> };
     let existing: Rc<RefCell<HashMap<K, NodeId>>> = Rc::new(RefCell::new(HashMap::new()));
     create_effect(move || {
         let items = items.get();
@@ -704,9 +704,9 @@ where
 pub fn button(children: Children, disabled: Prop<bool>, on_click: ClickCallback) -> NodeId {
     view! {
         <unstyled::button
-            disabled={disabled}
+            disabled
             on_click={move || on_click.call()}
-            children={children}
+            children
         />
     }
 }

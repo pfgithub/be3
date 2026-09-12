@@ -34,8 +34,8 @@ pub fn pressable(
             on_activate={key_click}
         >
             <click_catcher
-                cursor={CursorIcon::PointingHand}
-                key_active={key_active}
+                cursor=CursorIcon::PointingHand
+                key_active
                 on_click={click}
                 on_hover_change={move |hovered| on_hover_change.call(hovered)}
                 on_active_change={move |active| on_active_change.call(active)}

@@ -11,36 +11,36 @@ fn every_styled_interactive_control_paints_a_keyboard_focus_ring() {
     let controls: &[fn() -> NodeId] = &[
         || {
             view! {
-                <button label={"Button".to_string()} variant={styled::ButtonVariant::Primary} />
+                <button label="Button" variant=styled::ButtonVariant::Primary />
             }
         },
-        || view! { <checkbox label={"Check".to_string()} checked={false} /> },
-        || view! { <switch on={false} /> },
-        || view! { <slider value={0.5} /> },
-        || view! { <text_input value={"Text".to_string()} /> },
-        || view! { <tabs labels={vec!["One".to_string(), "Two".to_string()]} selected={0} /> },
+        || view! { <checkbox label="Check" checked=false /> },
+        || view! { <switch on=false /> },
+        || view! { <slider value=0.5 /> },
+        || view! { <text_input value="Text" /> },
+        || view! { <tabs labels={vec!["One".to_string(), "Two".to_string()]} selected=0 /> },
         || {
             view! {
-                <radio_group labels={vec!["One".to_string(), "Two".to_string()]} selected={Some(0)} />
+                <radio_group labels={vec!["One".to_string(), "Two".to_string()]} selected=Some(0) />
             }
         },
         || {
             view! {
-                <listbox labels={vec!["One".to_string(), "Two".to_string()]} selected={Some(0)} />
+                <listbox labels={vec!["One".to_string(), "Two".to_string()]} selected=Some(0) />
             }
         },
-        || view! { <toggle_button label={"Toggle".to_string()} pressed={false} /> },
+        || view! { <toggle_button label="Toggle" pressed=false /> },
         || {
             view! {
-                <accordion title={"Header".to_string()} open={false}>
-                    <text string={"Content".to_string()} font_size={14.0} color={Color32::WHITE} />
+                <accordion title="Header" open=false>
+                    <text string="Content" font_size=14.0 color=Color32::WHITE />
                 </accordion>
             }
         },
         || {
             view! {
                 <list_row>
-                    <text string={"Row".to_string()} font_size={14.0} color={Color32::WHITE} />
+                    <text string="Row" font_size=14.0 color=Color32::WHITE />
                 </list_row>
             }
         },

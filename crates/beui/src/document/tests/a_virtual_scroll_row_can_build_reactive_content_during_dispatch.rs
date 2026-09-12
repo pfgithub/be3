@@ -8,11 +8,11 @@ fn a_virtual_scroll_row_can_build_reactive_content_during_dispatch() {
         let scroll = scroll.clone();
         move || {
             view! {
-                <column spacing={0.0}>
+                <column spacing=0.0>
                     @percent(100.0) <virtual_list
-                        node_ref={&scroll}
-                        count={VIRTUAL_ITEM_COUNT}
-                        item_height={VIRTUAL_ITEM_HEIGHT}
+                        node_ref=&scroll
+                        count=VIRTUAL_ITEM_COUNT
+                        item_height=VIRTUAL_ITEM_HEIGHT
                         item={|index: usize| view! { <text string={format!("Row {index}")} /> }}
                     />
                 </column>

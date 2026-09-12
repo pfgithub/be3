@@ -82,7 +82,7 @@ pub fn select(
 ) -> NodeId {
     let selected_prop = selected;
     let initial = selected_prop.peek().filter(|index| *index < options.len());
-    let option = option.unwrap_or_else(|| RenderFn::new(|_| view! { <column spacing={0.0} /> }));
+    let option = option.unwrap_or_else(|| RenderFn::new(|_| view! { <column spacing=0.0 /> }));
     let popup = popup.unwrap_or_else(|| Render::new(|content| content));
 
     let (highlighted, set_highlighted) = create_signal(initial);
@@ -121,8 +121,7 @@ pub fn select(
     });
     set_component_state(state.clone());
 
-    let trigger_view =
-        trigger.unwrap_or_else(|| Render::new(|_| view! { <column spacing={0.0} /> }));
+    let trigger_view = trigger.unwrap_or_else(|| Render::new(|_| view! { <column spacing=0.0 /> }));
     let trigger_content = move |handle: ButtonHandle| {
         trigger_view.call(SelectTriggerHandle {
             selected,
@@ -140,7 +139,7 @@ pub fn select(
             intrinsic(view! {
                 <select_row
                     state={state.clone()}
-                    index={index}
+                    index
                     label={row.label.clone()}
                     option={option.clone()}
                     highlight={highlight.clone()}
@@ -163,7 +162,7 @@ pub fn select(
     let (trigger_blur, search_blur) = (state.clone(), state.clone());
 
     view! {
-        <column spacing={0.0}>
+        <column spacing=0.0>
             <unstyled::button
                 node_ref={&state.trigger}
                 focused={focused.memo(Focus::Trigger)}
@@ -174,12 +173,12 @@ pub fn select(
             />
             <overlay
                 anchor={&state.trigger}
-                placement={Placement::BelowStart}
+                placement=Placement::BelowStart
                 open={is_open.clone()}
                 on_dismiss={move || dismiss(&dismiss_state)}
             >
                 {popup.call(view! {
-                    <column spacing={6.0}>
+                    <column spacing=6.0>
                         <unstyled::text_input
                             node_ref={&state.search}
                             value={search_text}
@@ -201,7 +200,7 @@ pub fn select(
                             }}
                             on_key_override={move |press: KeyPress| navigate(&navigate_state, press)}
                         />
-                        @fixed(OPTIONS_MAX_HEIGHT) <scroll reveal={reveal} children={items} />
+                        @fixed(OPTIONS_MAX_HEIGHT) <scroll reveal children={items} />
                     </column>
                 })}
             </overlay>
@@ -220,10 +219,10 @@ fn select_row(
     let (hover_state, click_state) = (state.clone(), state.clone());
     let visible = state.rows[index].visible.clone();
     view! {
-        <visibility visible={visible}>
+        <visibility visible>
             <unstyled::button
                 node_ref={&state.rows[index].button}
-                tab_stop={false}
+                tab_stop=false
                 content={move |button: ButtonHandle| {
                     let hovered = button.hovered.clone();
                     create_effect(move || {

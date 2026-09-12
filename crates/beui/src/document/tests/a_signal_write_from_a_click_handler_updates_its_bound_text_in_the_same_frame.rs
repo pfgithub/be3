@@ -8,7 +8,7 @@ fn a_signal_write_from_a_click_handler_updates_its_bound_text_in_the_same_frame(
         [
             view! {
                 <button on_click={move || set_count.update(|count| *count += 1)}>
-                    <text string={"+".to_string()} />
+                    <text string="+" />
                 </button>
             },
             view! { <text string={create_memo(move || count.get().to_string())} /> },

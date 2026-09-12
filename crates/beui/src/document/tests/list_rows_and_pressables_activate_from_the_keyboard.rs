@@ -10,12 +10,12 @@ fn list_rows_and_pressables_activate_from_the_keyboard() {
         [
             view! {
                 <list_row on_click={move || rows.set(rows.get() + 1)}>
-                    <text string={"Row".to_string()} font_size={14.0} color={Color32::WHITE} />
+                    <text string="Row" font_size=14.0 color=Color32::WHITE />
                 </list_row>
             },
             view! {
                 <unstyled::pressable on_click={move || presses.set(presses.get() + 1)}>
-                    <text string={"Press".to_string()} font_size={14.0} color={Color32::WHITE} />
+                    <text string="Press" font_size=14.0 color=Color32::WHITE />
                 </unstyled::pressable>
             },
         ]

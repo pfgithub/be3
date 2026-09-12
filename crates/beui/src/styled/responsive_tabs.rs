@@ -31,7 +31,7 @@ pub fn responsive_tabs(
     let tab_set = set_selected.clone();
 
     view! {
-        <column spacing={0.0}>
+        <column spacing=0.0>
             <show condition={wide} then={move || view! {
                 <tabs labels={tab_labels} selected={tab_selected} on_change={move |index| {
                     tab_set.set(index);

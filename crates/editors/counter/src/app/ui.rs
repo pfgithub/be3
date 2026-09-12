@@ -47,29 +47,29 @@ impl CounterUi {
             let increment = step(&counter, &sink, Counter::increment);
 
             view! {
-                <fill color={BACKGROUND} radius={0}>
-                    <padding horizontal={PADDING} vertical={PADDING}>
-                        <column spacing={16.0}>
+                <fill color=BACKGROUND radius=0>
+                    <padding horizontal=PADDING vertical=PADDING>
+                        <column spacing=16.0>
                             <display
                                 content={create_memo(clone!(count -> move || count.get().to_string()))}
                                 test_id={"counter.value"}
                             />
-                            <centered_row spacing={10.0}>
+                            <centered_row spacing=10.0>
                                 @fixed(BUTTON_WIDTH) <button
-                                    label={"-".to_string()}
-                                    variant={ButtonVariant::Primary}
+                                    label="-"
+                                    variant=ButtonVariant::Primary
                                     test_id={"counter.decrement"}
                                     on_click={decrement}
                                 />
                                 @fixed(BUTTON_WIDTH) <button
-                                    label={"+".to_string()}
-                                    variant={ButtonVariant::Primary}
+                                    label="+"
+                                    variant=ButtonVariant::Primary
                                     test_id={"counter.increment"}
                                     on_click={increment}
                                 />
                                 <button
-                                    label={"Reset".to_string()}
-                                    variant={ButtonVariant::Secondary}
+                                    label="Reset"
+                                    variant=ButtonVariant::Secondary
                                     test_id={"counter.reset"}
                                     on_click={reset}
                                 />

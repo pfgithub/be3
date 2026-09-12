@@ -17,10 +17,10 @@ fn view_attributes_can_be_written_without_braces() {
             view! {
                 <column spacing=0.0>
                     <row spacing=0.0>
-                        <sized node_ref={&box_ref} width=BOX_WIDTH height=40.0>
+                        <sized node_ref=&box_ref width=BOX_WIDTH height=40.0>
                             <fill color=Color32::from_gray(40) radius=4>
                                 <text
-                                    node_ref={&label}
+                                    node_ref=&label
                                     string=LABEL
                                     font_size=LABEL_SIZE
                                     align=TextAlign::End

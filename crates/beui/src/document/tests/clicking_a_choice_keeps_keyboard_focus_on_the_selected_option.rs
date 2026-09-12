@@ -6,7 +6,7 @@ use crate::styled::RadioGroupBuilder;
 fn clicking_a_choice_keeps_keyboard_focus_on_the_selected_option() {
     let (document, [group]) = toolbar_of(|| {
         [
-            view! { <radio_group labels={vec!["One".to_string(), "Two".to_string(), "Three".to_string()]} selected={Some(0)} /> },
+            view! { <radio_group labels={vec!["One".to_string(), "Two".to_string(), "Three".to_string()]} selected=Some(0) /> },
         ]
     });
     let options = document.children(document.shadow_root(document.shadow_root(group)));

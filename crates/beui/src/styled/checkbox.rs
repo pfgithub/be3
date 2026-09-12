@@ -27,12 +27,12 @@ const FOCUS_RING_OFFSET: f32 = 4.0;
 pub fn checkbox(label: Prop<String>, checked: Prop<bool>, on_change: Callback<bool>) -> NodeId {
     view! {
         <toggle
-            checked={checked}
+            checked
             on_change={move |checked| on_change.call(checked)}
             content={move |handle: ToggleHandle| {
                 let checked = handle.checked.clone();
                 component_detail(create_memo(move || detail(checked.get()).to_owned()));
-                view! { <checkbox_face handle={handle} label={label} /> }
+                view! { <checkbox_face handle label /> }
             }}
         />
     }
@@ -50,16 +50,16 @@ fn checkbox_face(handle: ToggleHandle, label: Prop<String>) -> NodeId {
     let border_visible = create_memo(clone!(checked -> move || !checked.get()));
 
     view! {
-        <outline color={ACCENT} width={FOCUS_RING_WIDTH} radius={RADIUS} offset={FOCUS_RING_OFFSET} visible={focused}>
-            <centered_row spacing={SPACING}>
-                <sized width={BOX_SIZE} height={BOX_SIZE}>
-                    <outline color={BORDER} width={BORDER_WIDTH} radius={CHIP_RADIUS} offset={0.0} visible={border_visible}>
-                        <fill color={fill_color} radius={CHIP_RADIUS}>
-                            <centered_row spacing={0.0}>
+        <outline color=ACCENT width=FOCUS_RING_WIDTH radius=RADIUS offset=FOCUS_RING_OFFSET visible={focused}>
+            <centered_row spacing=SPACING>
+                <sized width=BOX_SIZE height=BOX_SIZE>
+                    <outline color=BORDER width=BORDER_WIDTH radius=CHIP_RADIUS offset=0.0 visible={border_visible}>
+                        <fill color={fill_color} radius=CHIP_RADIUS>
+                            <centered_row spacing=0.0>
                                 @percent(100.0) <spacer />
                                 <visibility visible={checked}>
-                                    <sized width={MARK_SIZE} height={MARK_SIZE}>
-                                        <fill color={ON_ACCENT} radius={MARK_RADIUS}></fill>
+                                    <sized width=MARK_SIZE height=MARK_SIZE>
+                                        <fill color=ON_ACCENT radius=MARK_RADIUS></fill>
                                     </sized>
                                 </visibility>
                                 @percent(100.0) <spacer />
@@ -67,7 +67,7 @@ fn checkbox_face(handle: ToggleHandle, label: Prop<String>) -> NodeId {
                         </fill>
                     </outline>
                 </sized>
-                @percent(100.0) <text string={label} font_size={FONT_BODY} color={TEXT} align={TextAlign::Start} />
+                @percent(100.0) <text string={label} font_size=FONT_BODY color=TEXT align=TextAlign::Start />
             </centered_row>
         </outline>
     }

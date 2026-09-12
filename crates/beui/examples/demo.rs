@@ -50,9 +50,9 @@ impl DemoApp {
         let document = build(|| {
             let (count, set_count) = create_signal(0i64);
             view! {
-                <fill color={BACKGROUND} radius={0}>
+                <fill color=BACKGROUND radius=0>
                     <container content={move |_| view! {
-                        <demo_shell count={count} set_count={set_count} />
+                        <demo_shell count set_count />
                     }} />
                 </fill>
             }
@@ -123,11 +123,11 @@ fn scroll_row(index: usize, rows: Rows, compact: bool) -> NodeId {
             on_click={move || select_rows.select(index)}
             content={move |handle| view! {
                 <scroll_row_face
-                    index={index}
-                    handle={handle}
-                    selected={selected}
+                    index
+                    handle
+                    selected
                     timings={rows.timings}
-                    compact={compact}
+                    compact
                 />
             }}
         />
@@ -159,15 +159,15 @@ fn scroll_row_face(
     });
 
     view! {
-        <outline color={ACCENT} width={2.0} radius={RADIUS} offset={0.0} visible={focused}>
-            <fill color={fill_color} radius={RADIUS}>
-                <padding horizontal={ROW_PADDING_HORIZONTAL} vertical={vertical}>
-                    <centered_row spacing={12.0}>
+        <outline color=ACCENT width=2.0 radius=RADIUS offset=0.0 visible={focused}>
+            <fill color={fill_color} radius=RADIUS>
+                <padding horizontal=ROW_PADDING_HORIZONTAL vertical>
+                    <centered_row spacing=12.0>
                         @percent(100.0) <body content={format!("Row {index}")} />
                         <visibility visible={timings}>
                             <caption
                                 content={format!("{} ms", 7 + index * 3 % 91)}
-                                align={TextAlign::End}
+                                align=TextAlign::End
                                 color={value_color}
                             />
                         </visibility>
@@ -189,10 +189,10 @@ fn demo_shell(count: ReadSignal<i64>, set_count: WriteSignal<i64>) -> NodeId {
         }
     });
     view! {
-        <column spacing={0.0}>
-            @fixed(header_height) <demo_header set_count={set_count} />
+        <column spacing=0.0>
+            @fixed(header_height) <demo_header set_count />
             @fixed(SEPARATOR_HEIGHT) <separator/>
-            @percent(100.0) <demo_body count={count} />
+            @percent(100.0) <demo_body count />
         </column>
     }
 }
@@ -211,23 +211,23 @@ fn demo_header(set_count: WriteSignal<i64>) -> NodeId {
         }
     });
     view! {
-        <fill color={SURFACE} radius={0}>
-            <padding horizontal={horizontal} vertical={0.0}>
-                <centered_row spacing={10.0}>
-                    <centered_row spacing={10.0}>
-                        <title content={"beui".to_string()} />
+        <fill color=SURFACE radius=0>
+            <padding horizontal vertical=0.0>
+                <centered_row spacing=10.0>
+                    <centered_row spacing=10.0>
+                        <title content="beui" />
                         <visibility visible={wide}>
-                            <caption content={"retained mode ui".to_string()} />
+                            <caption content="retained mode ui" />
                         </visibility>
                     </centered_row>
                     @percent(100.0) <spacer />
-                    <button label={"Reset".to_string()} variant={ButtonVariant::Secondary} on_click={move || {
+                    <button label="Reset" variant=ButtonVariant::Secondary on_click={move || {
                         reset_count.set(0);
                     }} />
-                    @fixed(ICON_BUTTON_WIDTH) <button label={"-".to_string()} variant={ButtonVariant::Primary} on_click={move || {
+                    @fixed(ICON_BUTTON_WIDTH) <button label="-" variant=ButtonVariant::Primary on_click={move || {
                         decrement_count.update(|value| *value = value.saturating_sub(1));
                     }} />
-                    @fixed(ICON_BUTTON_WIDTH) <button label={"+".to_string()} variant={ButtonVariant::Primary} on_click={move || {
+                    @fixed(ICON_BUTTON_WIDTH) <button label="+" variant=ButtonVariant::Primary on_click={move || {
                         set_count.update(|value| *value = value.saturating_add(1));
                     }} />
                 </centered_row>
@@ -248,9 +248,9 @@ fn demo_body(count: ReadSignal<i64>) -> NodeId {
     });
     view! {
         <padding horizontal={padding.clone()} vertical={padding}>
-            <stack spacing={BODY_SPACING}>
+            <stack spacing=BODY_SPACING>
                 @percent(32.0) <sidebar />
-                @percent(68.0) <main_panel count={count} />
+                @percent(68.0) <main_panel count />
             </stack>
         </padding>
     }
@@ -263,22 +263,22 @@ fn sidebar() -> NodeId {
     let keyboard_open = open.clone();
     view! {
         <card>
-            <column spacing={12.0}>
-                <accordion title={"About".to_string()} open={open}>
-                    <paragraph content={"beui keeps a retained tree of nodes. Base nodes carry behaviour only, unstyled \
-                         components compose them, and the styled components paint them.".to_string()} />
+            <column spacing=12.0>
+                <accordion title="About" open>
+                    <paragraph content="beui keeps a retained tree of nodes. Base nodes carry behaviour only, unstyled \
+                         components compose them, and the styled components paint them." />
                 </accordion>
                 @fixed(SEPARATOR_HEIGHT) <separator/>
-                <accordion title={"Keyboard".to_string()} open={keyboard_open}>
-                    <column spacing={12.0}>
-                        <shortcut keys={"Tab".to_string()} description={"move focus to the next control".to_string()} />
-                        <shortcut keys={"Shift+Tab".to_string()} description={"move focus back".to_string()} />
-                        <shortcut keys={"Enter".to_string()} description={"activate the focused control".to_string()} />
-                        <shortcut keys={"Arrows".to_string()} description={"adjust sliders or move within choices".to_string()} />
-                        <shortcut keys={"Page Up/Down".to_string()} description={"scroll the focused row list".to_string()} />
-                        <shortcut keys={"Ctrl+Z".to_string()} description={"undo an edit in a text field".to_string()} />
-                        <shortcut keys={"Ctrl+Shift+I".to_string()} description={"open the inspector".to_string()} />
-                        <shortcut keys={"Ctrl+Shift+C".to_string()} description={"pick a node to inspect".to_string()} />
+                <accordion title="Keyboard" open={keyboard_open}>
+                    <column spacing=12.0>
+                        <shortcut keys="Tab" description="move focus to the next control" />
+                        <shortcut keys="Shift+Tab" description="move focus back" />
+                        <shortcut keys="Enter" description="activate the focused control" />
+                        <shortcut keys="Arrows" description="adjust sliders or move within choices" />
+                        <shortcut keys="Page Up/Down" description="scroll the focused row list" />
+                        <shortcut keys="Ctrl+Z" description="undo an edit in a text field" />
+                        <shortcut keys="Ctrl+Shift+I" description="open the inspector" />
+                        <shortcut keys="Ctrl+Shift+C" description="pick a node to inspect" />
                     </column>
                 </accordion>
             </column>
@@ -310,32 +310,32 @@ fn main_panel(count: ReadSignal<i64>) -> NodeId {
     });
 
     view! {
-        <column spacing={20.0}>
+        <column spacing=20.0>
             <card>
-                <column spacing={4.0}>
-                    <caption content={"Counter".to_string()} />
+                <column spacing=4.0>
+                    <caption content="Counter" />
                     <display content={create_memo(clone!(count -> move || count.get().to_string()))} />
-                    <paragraph content={"Click the header buttons, or focus one with Tab and press Enter.".to_string()} />
+                    <paragraph content="Click the header buttons, or focus one with Tab and press Enter." />
                 </column>
             </card>
             <controls rows={rows.clone()} />
             @size(rows_size) <card>
-                <column spacing={12.0}>
-                    <centered_row spacing={12.0}>
+                <column spacing=12.0>
+                    <centered_row spacing=12.0>
                         <heading content={format!("Rows ({ROW_COUNT})")} />
-                        @percent(100.0) <caption content={status_text} align={TextAlign::End} />
+                        @percent(100.0) <caption content={status_text} align=TextAlign::End />
                     </centered_row>
                     @fixed(SEPARATOR_HEIGHT) <separator/>
-                    @percent(100.0) <row spacing={10.0}>
+                    @percent(100.0) <row spacing=10.0>
                         @percent(100.0) <virtual_list
-                            count={ROW_COUNT}
+                            count=ROW_COUNT
                             item_height={row_height}
-                            focus_color={ACCENT}
+                            focus_color=ACCENT
                             on_change={move |position| set_scroll_position.set(position)}
                             item={move |index: usize| {
                                 let rows = item_rows.clone();
                                 let compact = rows.compact.get();
-                                view! { <scroll_row index={index} rows={rows} compact={compact} /> }
+                                view! { <scroll_row index rows compact /> }
                             }}
                         />
                         @fixed(SCROLLBAR_WIDTH) <scrollbar position={scroll_position} />
@@ -350,7 +350,7 @@ fn main_panel(count: ReadSignal<i64>) -> NodeId {
 fn controls(rows: Rows) -> NodeId {
     view! {
         <card>
-            <container content={move |_| view! { <control_panels rows={rows} /> }} />
+            <container content={move |_| view! { <control_panels rows /> }} />
         </card>
     }
 }
@@ -363,16 +363,16 @@ fn control_panels(rows: Rows) -> NodeId {
     let list_rows = rows.clone();
 
     view! {
-        <column spacing={16.0}>
+        <column spacing=16.0>
             <responsive_tabs
                 labels={vec!["List".to_string(), "Load".to_string(), "Name".to_string(), "Choices".to_string(), "Menus".to_string()]}
-                selected={0}
-                breakpoint={TABS_NARROW_WIDTH}
+                selected=0
+                breakpoint=TABS_NARROW_WIDTH
                 on_change={move |selected| {
                     set_selected_tab.set(selected);
                 }}
             />
-            <column spacing={0.0}>
+            <column spacing=0.0>
                 <show condition={tab.memo(0)} then={move || view! { <list_controls rows={list_rows} /> }} />
                 <show condition={tab.memo(1)} then={|| view! { <load_controls /> }} />
                 <show condition={tab.memo(2)} then={|| view! { <name_controls /> }} />
@@ -388,13 +388,13 @@ fn list_controls(rows: Rows) -> NodeId {
     let timing_rows = rows.clone();
     let compact_rows = rows.clone();
     view! {
-        <column spacing={12.0}>
-            <checkbox label={"Show timings".to_string()} checked={true} on_change={move |checked| {
+        <column spacing=12.0>
+            <checkbox label="Show timings" checked=true on_change={move |checked| {
                 timing_rows.show_timings(checked);
             }} />
-            <centered_row spacing={12.0}>
-                <switch on={false} on_change={move |on| compact_rows.set_compact(on)} />
-                @percent(100.0) <body content={"Compact rows".to_string()} />
+            <centered_row spacing=12.0>
+                <switch on=false on_change={move |on| compact_rows.set_compact(on)} />
+                @percent(100.0) <body content="Compact rows" />
             </centered_row>
         </column>
     }
@@ -406,12 +406,12 @@ fn load_controls() -> NodeId {
     let readout_value = progress_value.clone();
 
     view! {
-        <column spacing={12.0}>
-            <centered_row spacing={12.0}>
-                <caption content={"Simulated load".to_string()} />
-                @percent(100.0) <caption content={create_memo(move || percent_label(readout_value.get()))} align={TextAlign::End} />
+        <column spacing=12.0>
+            <centered_row spacing=12.0>
+                <caption content="Simulated load" />
+                @percent(100.0) <caption content={create_memo(move || percent_label(readout_value.get()))} align=TextAlign::End />
             </centered_row>
-            <slider value={0.4} on_change={move |value| {
+            <slider value=0.4 on_change={move |value| {
                 set_progress_value.set(value);
             }} />
             <progress value={progress_value} />
@@ -424,15 +424,15 @@ fn name_controls() -> NodeId {
     let (greeting_text, set_greeting_text) = create_signal(greeting_label(""));
 
     view! {
-        <column spacing={12.0}>
-            <centered_row spacing={12.0}>
-                <caption content={"Display name".to_string()} />
-                @percent(100.0) <caption content={greeting_text} align={TextAlign::End} />
+        <column spacing=12.0>
+            <centered_row spacing=12.0>
+                <caption content="Display name" />
+                @percent(100.0) <caption content={greeting_text} align=TextAlign::End />
             </centered_row>
-            <text_input value={String::new()} placeholder={"Type a name".to_string()} on_change={move |value| {
+            <text_input value=String::new() placeholder="Type a name" on_change={move |value| {
                 set_greeting_text.set(greeting_label(&value));
             }} />
-            <paragraph content={"Click to place the caret, drag to select, and Ctrl+Z to undo.".to_string()} />
+            <paragraph content="Click to place the caret, drag to select, and Ctrl+Z to undo." />
         </column>
     }
 }
@@ -458,17 +458,17 @@ fn choice_controls() -> NodeId {
     let (pin_status_text, set_pin_status_text) = create_signal("Selection is unpinned".to_string());
 
     view! {
-        <stack spacing={20.0} breakpoint={CARD_NARROW_WIDTH}>
-            @percent(50.0) <column spacing={8.0}>
-                <caption content={"Update mode".to_string()} />
-                <radio_group labels={vec!["Automatic".to_string(), "Manual".to_string(), "Scheduled".to_string()]} selected={Some(0)} on_change={move |selected| {
+        <stack spacing=20.0 breakpoint=CARD_NARROW_WIDTH>
+            @percent(50.0) <column spacing=8.0>
+                <caption content="Update mode" />
+                <radio_group labels={vec!["Automatic".to_string(), "Manual".to_string(), "Scheduled".to_string()]} selected=Some(0) on_change={move |selected| {
                     if let Some(index) = selected {
                         let text = format!("{} updates", modes[index]);
                         set_mode_status_text.set(text);
                     }
                 }} />
                 <caption content={mode_status_text} />
-                <toggle_button label={"Pin selection".to_string()} pressed={false} on_change={move |pressed| {
+                <toggle_button label="Pin selection" pressed=false on_change={move |pressed| {
                     let text = if pressed {
                         "Selection is pinned"
                     } else {
@@ -479,9 +479,9 @@ fn choice_controls() -> NodeId {
                 }} />
                 <caption content={pin_status_text} />
             </column>
-            @percent(50.0) <column spacing={8.0}>
-                <caption content={"Highlight color (type to search)".to_string()} />
-                <listbox labels={vec!["Amber".to_string(), "Blue".to_string(), "Green".to_string(), "Purple".to_string()]} selected={Some(1)} on_change={move |selected| {
+            @percent(50.0) <column spacing=8.0>
+                <caption content="Highlight color (type to search)" />
+                <listbox labels={vec!["Amber".to_string(), "Blue".to_string(), "Green".to_string(), "Purple".to_string()]} selected=Some(1) on_change={move |selected| {
                     if let Some(index) = selected {
                         let text = format!("{} selected", colors[index]);
                         set_color_status_text.set(text);
@@ -516,10 +516,10 @@ fn menu_controls() -> NodeId {
     ];
 
     view! {
-        <stack spacing={20.0} breakpoint={CARD_NARROW_WIDTH}>
-            @percent(50.0) <column spacing={8.0}>
-                <caption content={"Favorite fruit (type to search)".to_string()} />
-                <select options={fruits} selected={Some(0)} on_change={move |selected| {
+        <stack spacing=20.0 breakpoint=CARD_NARROW_WIDTH>
+            @percent(50.0) <column spacing=8.0>
+                <caption content="Favorite fruit (type to search)" />
+                <select options={fruits} selected=Some(0) on_change={move |selected| {
                     let text = selected
                         .and_then(|index| fruit_names.get(index))
                         .map_or_else(
@@ -530,8 +530,8 @@ fn menu_controls() -> NodeId {
                 }} />
                 <caption content={fruit_status_text} />
             </column>
-            @percent(50.0) <column spacing={8.0}>
-                <context_menu items={items} on_select={move |path: Vec<usize>| {
+            @percent(50.0) <column spacing=8.0>
+                <context_menu items on_select={move |path: Vec<usize>| {
                     let label = match path.as_slice() {
                         [0] => "Copy".to_owned(),
                         [1] => "Paste".to_owned(),
@@ -542,9 +542,9 @@ fn menu_controls() -> NodeId {
                     set_menu_status_text.set(format!("Chose: {label}"));
                 }}>
                     <card>
-                        <column spacing={4.0}>
-                            <caption content={"Right-click the card below".to_string()} />
-                            <paragraph content={"The Share item opens a submenu on hover or Right Arrow; Left Arrow closes it.".to_string()} />
+                        <column spacing=4.0>
+                            <caption content="Right-click the card below" />
+                            <paragraph content="The Share item opens a submenu on hover or Right Arrow; Left Arrow closes it." />
                         </column>
                     </card>
                 </context_menu>

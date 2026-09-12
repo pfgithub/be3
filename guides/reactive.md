@@ -172,14 +172,14 @@ fn app() -> beui::NodeId {
     let decrement = set_count.clone();
     let count_text = create_memo(move || count.get().to_string());
     view! {
-        <column spacing={0.0}>
-            <row spacing={8.0}>
+        <column spacing=0.0>
+            <row spacing=8.0>
                 <button on_click={move || decrement.update(|count| *count -= 1)}>
-                    <text string={"-".to_string()} />
+                    <text string="-" />
                 </button>
                 <text string={count_text} /> // updates itself when `count` changes
                 <button on_click={move || set_count.update(|count| *count += 1)}>
-                    <text string={"+".to_string()} />
+                    <text string="+" />
                 </button>
             </row>
         </column>
@@ -196,6 +196,32 @@ effect that keeps that property in sync. `#[component(base)]` is for the base
 elements, which do the same but without a shadow node of their own. Every
 builder also accepts `test_id` and `node_ref`.
 
+## Writing attributes
+
+An attribute value in braces is any expression at all, and that is what closures,
+blocks, method chains, and anything containing `<` or `>` need. Values simple
+enough to read on their own may drop the braces: literals, paths, a call on a
+path, a unary expression, and a reference to a path.
+
+```rust
+<fill color=SURFACE radius=0>
+<caption content=count_text align=TextAlign::End />
+<list direction=Direction::Horizontal />
+<sized node_ref=&panel width=TRIGGER_WIDTH height=HEIGHT>
+<fill color=Color32::from_gray(40) radius=4>
+```
+
+An attribute written as a bare name takes the value of the binding with that
+name, so `<list direction spacing children />` is `direction={direction}
+spacing={spacing} children={children}`. There is no boolean shorthand: `visible`
+means `visible={visible}`, never `visible={true}`.
+
+A prop typed `String`, `Option<String>`, or `Prop<String>` accepts a string
+literal directly, so `content="Inspector"` needs no `to_string()`.
+
+A tag whose required props are missing panics from the `view!` line that wrote
+it, not from inside the generated builder.
+
 The base elements and the structural primitives that insert and remove nodes for
 a living — `show`, `dynamic`, `for_each`, `virtual_list` — are the only code that
 touches `Document` directly. Everything above them, unstyled and styled
@@ -208,7 +234,7 @@ actually changes.
 
 ```rust
 let fill = create_memo(move || if hovered.get() { HOVER } else { REST });
-view! { <fill color={fill} radius={RADIUS}>{child}</fill> }
+view! { <fill color={fill} radius=RADIUS>{child}</fill> }
 ```
 
 `Prop<T>` reads with `get()`, which subscribes the computation around it, and
@@ -248,8 +274,8 @@ part of its chrome to its caller the way JSX passes children as a function:
 fn checkbox(label: Prop<String>, checked: Prop<bool>) -> NodeId {
     view! {
         <toggle
-            checked={checked}
-            content={move |handle| view! { <checkbox_face handle={handle} label={label} /> }}
+            checked
+            content={move |handle| view! { <checkbox_face handle label /> }}
         />
     }
 }
@@ -312,7 +338,7 @@ need the value itself rather than a boolean, like a menu whose items can be
 swapped out.
 
 ```rust
-<dynamic value={items} view={move |items: Vec<MenuItem>| view! { <menu_list items={items} /> }} />
+<dynamic value={items} view={move |items: Vec<MenuItem>| view! { <menu_list items /> }} />
 ```
 
 `@intrinsic`/`@fixed(size)`/`@percent(weight)` prefix a child inside `view!` to

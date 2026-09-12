@@ -25,17 +25,17 @@ pub fn text_input(
 ) -> NodeId {
     view! {
         <unstyled::text_input
-            value={value}
-            placeholder={placeholder}
-            font_size={FONT_BODY}
-            color={TEXT}
-            placeholder_color={TEXT_MUTED}
-            selection_color={ACCENT_SOFT}
-            caret_color={ACCENT}
-            padding_horizontal={PADDING_HORIZONTAL}
+            value
+            placeholder
+            font_size=FONT_BODY
+            color=TEXT
+            placeholder_color=TEXT_MUTED
+            selection_color=ACCENT_SOFT
+            caret_color=ACCENT
+            padding_horizontal=PADDING_HORIZONTAL
             on_change={move |value| on_change.call(value)}
             on_submit={move |value| on_submit.call(value)}
-            content={move |handle| view! { <text_input_frame handle={handle} /> }}
+            content={move |handle| view! { <text_input_frame handle /> }}
         />
     }
 }
@@ -52,10 +52,10 @@ fn text_input_frame(handle: TextInputHandle) -> NodeId {
         move || border_color(focused.get(), hovered.get())
     });
     view! {
-        <outline color={ACCENT} width={FOCUS_RING_WIDTH} radius={RADIUS} offset={FOCUS_RING_OFFSET} visible={focused}>
-            <sized height={HEIGHT}>
-                <outline color={border} width={BORDER_WIDTH} radius={RADIUS} offset={0.0} visible={true}>
-                    <fill color={SURFACE_RAISED} radius={RADIUS}>{field}</fill>
+        <outline color=ACCENT width=FOCUS_RING_WIDTH radius=RADIUS offset=FOCUS_RING_OFFSET visible={focused}>
+            <sized height=HEIGHT>
+                <outline color={border} width=BORDER_WIDTH radius=RADIUS offset=0.0 visible=true>
+                    <fill color=SURFACE_RAISED radius=RADIUS>{field}</fill>
                 </outline>
             </sized>
         </outline>

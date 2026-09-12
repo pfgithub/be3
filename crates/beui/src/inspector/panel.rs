@@ -91,27 +91,27 @@ pub(crate) fn build(state: &Rc<State>) -> Panel {
         let bounds_text = create_memo(move || summary.with(|summary| summary.bounds.clone()));
         let (list_state, list_rows) = (state.clone(), rows.clone());
         view! {
-        <row spacing={0.0}>
+        <row spacing=0.0>
             @fixed(SEPARATOR_HEIGHT) <separator />
-            @percent(100.0) <fill color={SURFACE} radius={0}>
-                <column spacing={0.0}>
-                    <padding horizontal={HEADER_PADDING} vertical={HEADER_PADDING}>
-                        <centered_row spacing={HEADER_SPACING}>
-                            <heading content={"Inspector".to_string()} />
-                            @percent(100.0) <caption content={count_text} align={TextAlign::End} />
-                            <pick_toggle state={state.clone()} picking={picking} />
+            @percent(100.0) <fill color=SURFACE radius=0>
+                <column spacing=0.0>
+                    <padding horizontal=HEADER_PADDING vertical=HEADER_PADDING>
+                        <centered_row spacing=HEADER_SPACING>
+                            <heading content="Inspector" />
+                            @percent(100.0) <caption content={count_text} align=TextAlign::End />
+                            <pick_toggle state={state.clone()} picking />
                         </centered_row>
                     </padding>
                     @fixed(SEPARATOR_HEIGHT) <separator />
-                    @percent(100.0) <padding horizontal={BODY_PADDING} vertical={BODY_PADDING}>
-                        <row spacing={BODY_SPACING}>
+                    @percent(100.0) <padding horizontal=BODY_PADDING vertical=BODY_PADDING>
+                        <row spacing=BODY_SPACING>
                             @percent(100.0) <scroll
-                                focus_color={ACCENT}
-                                reveal={reveal}
+                                focus_color=ACCENT
+                                reveal
                                 on_change={move |value| set_position.set(value)}
                             >
                                 <for_each
-                                    spacing={0.0}
+                                    spacing=0.0
                                     items={keys}
                                     key={|key: Key| key}
                                     view={move |key: Key| view! {
@@ -124,14 +124,14 @@ pub(crate) fn build(state: &Rc<State>) -> Panel {
                                     }}
                                 />
                             </scroll>
-                            @fixed(SCROLLBAR_WIDTH) <scrollbar position={position} />
+                            @fixed(SCROLLBAR_WIDTH) <scrollbar position />
                         </row>
                     </padding>
                     @fixed(SEPARATOR_HEIGHT) <separator />
-                    <padding horizontal={FOOTER_PADDING} vertical={FOOTER_PADDING}>
-                        <column spacing={FOOTER_SPACING}>
+                    <padding horizontal=FOOTER_PADDING vertical=FOOTER_PADDING>
+                        <column spacing=FOOTER_SPACING>
                             <code content={selection_text} />
-                            <code content={bounds_text} color={TEXT_MUTED} />
+                            <code content={bounds_text} color=TEXT_MUTED />
                         </column>
                     </padding>
                 </column>
@@ -182,15 +182,15 @@ fn pick_toggle(state: Rc<State>, picking: Memo<bool>) -> NodeId {
     let picker = state;
     view! {
         <unstyled::pressable on_click={move || picker.toggle_picking()}>
-            <bordered corner_radius={CHIP_RADIUS}>
-                <fill color={fill_color} radius={CHIP_RADIUS}>
+            <bordered corner_radius=CHIP_RADIUS>
+                <fill color={fill_color} radius=CHIP_RADIUS>
                     <padding
-                        horizontal={TOGGLE_PADDING_HORIZONTAL}
-                        vertical={TOGGLE_PADDING_VERTICAL}
+                        horizontal=TOGGLE_PADDING_HORIZONTAL
+                        vertical=TOGGLE_PADDING_VERTICAL
                     >
                         <code
-                            content={"Pick".to_owned()}
-                            align={TextAlign::Center}
+                            content="Pick"
+                            align=TextAlign::Center
                             color={label_color}
                         />
                     </padding>
@@ -242,33 +242,33 @@ fn tree_row(row_key: Key, entries: Entries, state: Rc<State>, rows: Rows) -> Nod
     let (hover, selection, expansion) = (state.clone(), state.clone(), state);
     view! {
         <click_catcher
-            node_ref={&row}
-            cursor={CursorIcon::PointingHand}
+            node_ref=&row
+            cursor=CursorIcon::PointingHand
             on_click={move || selection.select(node)}
             on_hover_change={move |hovered| hover.hover(node, hovered)}
         >
             <outline
-                color={ACCENT}
-                width={BORDER_WIDTH}
-                radius={RADIUS}
-                offset={0.0}
+                color=ACCENT
+                width=BORDER_WIDTH
+                radius=RADIUS
+                offset=0.0
                 visible={selected}
             >
                 <list_row>
-                    <centered_row spacing={ROW_SPACING}>
+                    <centered_row spacing=ROW_SPACING>
                         @fixed(indent) <spacer />
                         @fixed(MARKER_WIDTH) <unstyled::pressable
-                            node_ref={&marker}
+                            node_ref=&marker
                             enabled={expandable}
                             on_click={move || {
                                 expansion.set_expanded(key, !expanded.get_untracked());
                             }}
                         >
-                            <code content={glyph} color={TEXT_MUTED} align={TextAlign::Center} />
+                            <code content={glyph} color=TEXT_MUTED align=TextAlign::Center />
                         </unstyled::pressable>
                         <code content={kind} />
-                        @percent(100.0) <code content={detail} color={TEXT_MUTED} />
-                        <code content={size} color={TEXT_MUTED} align={TextAlign::End} />
+                        @percent(100.0) <code content={detail} color=TEXT_MUTED />
+                        <code content={size} color=TEXT_MUTED align=TextAlign::End />
                     </centered_row>
                 </list_row>
             </outline>

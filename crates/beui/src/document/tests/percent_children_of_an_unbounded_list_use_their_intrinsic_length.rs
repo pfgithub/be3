@@ -10,10 +10,10 @@ fn percent_children_of_an_unbounded_list_use_their_intrinsic_length() {
         let inner = inner.clone();
         move || {
             view! {
-                <column spacing={0.0}>
-                    <column node_ref={&inner} spacing={0.0}>
-                        @percent(100.0) <row spacing={0.0}>
-                            <padding horizontal={0.0} vertical={ITEM_HEIGHT / 2.0}>
+                <column spacing=0.0>
+                    <column node_ref=&inner spacing=0.0>
+                        @percent(100.0) <row spacing=0.0>
+                            <padding horizontal=0.0 vertical={ITEM_HEIGHT / 2.0}>
                                 <spacer />
                             </padding>
                         </row>

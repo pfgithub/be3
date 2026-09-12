@@ -148,7 +148,7 @@ pub fn choice(
     } else {
         Direction::Vertical
     };
-    view! { <list direction={direction} spacing={6.0} children={buttons} /> }
+    view! { <list direction spacing=6.0 children={buttons} /> }
 }
 
 pub fn choice_selected(document: &Document, choice: NodeId) -> Option<usize> {

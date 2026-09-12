@@ -8,7 +8,7 @@ fn enter_activates_the_focused_button() {
     let (document, [button]) = toolbar_of(|| {
         [view! {
             <labelled_button
-                label={"Click me".to_string()}
+                label="Click me"
                 on_click={move || counter.set(counter.get() + 1)}
             />
         }]

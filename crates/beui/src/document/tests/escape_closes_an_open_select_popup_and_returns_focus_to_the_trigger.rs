@@ -8,8 +8,7 @@ fn escape_closes_an_open_select_popup_and_returns_focus_to_the_trigger() {
         .iter()
         .map(|label| (*label).to_owned())
         .collect();
-    let (document, [select]) =
-        toolbar_of(|| [view! { <select options={options} selected={Some(0)} /> }]);
+    let (document, [select]) = toolbar_of(|| [view! { <select options selected=Some(0) /> }]);
     let mut harness = Harness::new(document);
     harness.frame(Vec::new());
 

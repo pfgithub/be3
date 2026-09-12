@@ -36,14 +36,14 @@ pub(super) fn choice_option(kind: Kind, handle: ChoiceOptionHandle) -> NodeId {
     let checked = selected.clone();
     let fill_color = create_memo(move || background(selected.get(), hovered.get()));
     view! {
-        <outline color={ACCENT} width={2.0} radius={RADIUS} offset={1.0} visible={focused}>
-            <fill color={fill_color} radius={RADIUS}>
-                <padding horizontal={14.0} vertical={6.0}>
+        <outline color=ACCENT width=2.0 radius=RADIUS offset=1.0 visible={focused}>
+            <fill color={fill_color} radius=RADIUS>
+                <padding horizontal=14.0 vertical=6.0>
                     <choice_label
-                        kind={kind}
-                        label={label}
+                        kind
+                        label
                         color={label_color}
-                        checked={checked}
+                        checked
                     />
                 </padding>
             </fill>
@@ -59,12 +59,12 @@ fn choice_label(kind: Kind, label: String, color: Prop<Color32>, checked: Memo<b
         TextAlign::Start
     };
     if kind != Kind::Radio {
-        return view! { <text string={label} font_size={FONT_BODY} color={color} align={align} /> };
+        return view! { <text string={label} font_size=FONT_BODY color align /> };
     }
     view! {
-        <centered_row spacing={MARK_SPACING}>
-            <radio_mark checked={checked} />
-            @percent(100.0) <text string={label} font_size={FONT_BODY} color={color} align={align} />
+        <centered_row spacing=MARK_SPACING>
+            <radio_mark checked />
+            @percent(100.0) <text string={label} font_size=FONT_BODY color align />
         </centered_row>
     }
 }
@@ -72,13 +72,13 @@ fn choice_label(kind: Kind, label: String, color: Prop<Color32>, checked: Memo<b
 #[component]
 fn radio_mark(checked: Memo<bool>) -> NodeId {
     view! {
-        <sized width={MARK_BOX} height={MARK_BOX}>
-            <outline color={BORDER} width={2.0} radius={MARK_RADIUS} offset={0.0} visible={true}>
-                <centered_row spacing={0.0}>
+        <sized width=MARK_BOX height=MARK_BOX>
+            <outline color=BORDER width=2.0 radius=MARK_RADIUS offset=0.0 visible=true>
+                <centered_row spacing=0.0>
                     @percent(100.0) <spacer />
                     <visibility visible={checked}>
-                        <sized width={MARK_DOT} height={MARK_DOT}>
-                            <fill color={ACCENT} radius={MARK_RADIUS} />
+                        <sized width=MARK_DOT height=MARK_DOT>
+                            <fill color=ACCENT radius=MARK_RADIUS />
                         </sized>
                     </visibility>
                     @percent(100.0) <spacer />

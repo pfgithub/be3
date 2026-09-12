@@ -23,19 +23,19 @@ fn a_nested_container_reports_its_own_width_not_the_windows() {
                     sizes.borrow_mut().push(size);
                     collapsed.borrow_mut().push(narrower_than(BREAKPOINT));
                     view! {
-                        <column spacing={0.0}>
-                            <stack spacing={0.0} breakpoint={BREAKPOINT}>
-                                @percent(100.0) <sized node_ref={&outer_item} height={ITEM_HEIGHT}>
+                        <column spacing=0.0>
+                            <stack spacing=0.0 breakpoint=BREAKPOINT>
+                                @percent(100.0) <sized node_ref=&outer_item height=ITEM_HEIGHT>
                                     <spacer />
                                 </sized>
                             </stack>
-                            <sized width={INNER_WIDTH}>
+                            <sized width=INNER_WIDTH>
                                 <container content={move |size| {
                                     inner_sizes.borrow_mut().push(size);
                                     inner_collapsed.borrow_mut().push(narrower_than(BREAKPOINT));
                                     view! {
-                                        <stack spacing={0.0} breakpoint={BREAKPOINT}>
-                                            @percent(100.0) <sized node_ref={&inner_item} height={ITEM_HEIGHT}>
+                                        <stack spacing=0.0 breakpoint=BREAKPOINT>
+                                            @percent(100.0) <sized node_ref=&inner_item height=ITEM_HEIGHT>
                                                 <spacer />
                                             </sized>
                                         </stack>

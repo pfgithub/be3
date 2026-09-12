@@ -11,9 +11,9 @@ const PADDING_VERTICAL: f32 = 16.0;
 #[component]
 pub fn card(children: Child) -> NodeId {
     view! {
-        <bordered corner_radius={CARD_RADIUS}>
-            <fill color={SURFACE} radius={CARD_RADIUS}>
-                <padding horizontal={PADDING_HORIZONTAL} vertical={PADDING_VERTICAL}>
+        <bordered corner_radius=CARD_RADIUS>
+            <fill color=SURFACE radius=CARD_RADIUS>
+                <padding horizontal=PADDING_HORIZONTAL vertical=PADDING_VERTICAL>
                     {children}
                 </padding>
             </fill>

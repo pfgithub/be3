@@ -8,7 +8,7 @@ fn activation_requires_a_matching_release_and_escape_cancels_it() {
     let (document, [button]) = toolbar_of(|| {
         [view! {
             <labelled_button
-                label={"Click".to_string()}
+                label="Click"
                 on_click={move || counter.set(counter.get() + 1)}
             />
         }]

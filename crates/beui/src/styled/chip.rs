@@ -17,10 +17,10 @@ pub fn chip(label: Prop<String>) -> NodeId {
     component_detail(label_text.clone());
 
     view! {
-        <bordered corner_radius={CHIP_RADIUS}>
-            <fill color={SURFACE_RAISED} radius={CHIP_RADIUS}>
-                <padding horizontal={PADDING_HORIZONTAL} vertical={PADDING_VERTICAL}>
-                    <text string={label_text} font_size={FONT_SMALL} color={TEXT} align={TextAlign::Center} />
+        <bordered corner_radius=CHIP_RADIUS>
+            <fill color=SURFACE_RAISED radius=CHIP_RADIUS>
+                <padding horizontal=PADDING_HORIZONTAL vertical=PADDING_VERTICAL>
+                    <text string={label_text} font_size=FONT_SMALL color=TEXT align=TextAlign::Center />
                 </padding>
             </fill>
         </bordered>

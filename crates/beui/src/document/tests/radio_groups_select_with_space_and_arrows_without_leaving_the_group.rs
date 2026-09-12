@@ -9,11 +9,11 @@ fn radio_groups_select_with_space_and_arrows_without_leaving_the_group() {
     let (document, [group, after]) = toolbar_of(|| {
         [
             view! {
-                <radio_group labels={vec!["One".to_string(), "Two".to_string(), "Three".to_string()]} selected={None} on_change={move |value| {
+                <radio_group labels={vec!["One".to_string(), "Two".to_string(), "Three".to_string()]} selected=None on_change={move |value| {
                     sink.borrow_mut().push(value)
                 }} />
             },
-            view! { <labelled_button label={"After".to_string()} /> },
+            view! { <labelled_button label="After" /> },
         ]
     });
     let after_focus = unstyled::button_focused(&document, after);

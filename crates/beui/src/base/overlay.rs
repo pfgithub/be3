@@ -216,7 +216,7 @@ impl Document {
         let scrim = with_reactive_scope(self, || {
             view! {
                 <click_catcher
-                    cursor={CursorIcon::Default}
+                    cursor=CursorIcon::Default
                     on_press={move |press: PointerPress| {
                         let id = press_cell.get().expect("overlay not yet initialized");
                         with_document(|document| document.dismiss_overlay_if_outside(id, press.pos));

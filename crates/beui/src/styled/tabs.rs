@@ -12,15 +12,15 @@ pub fn tabs(labels: Vec<String>, selected: Prop<usize>, on_change: Callback<usiz
     let selected = selected.map(move |selected| Some(selected.min(option_count.saturating_sub(1))));
     view! {
         <choice
-            labels={labels}
-            selected={selected}
-            kind={Kind::Tabs}
+            labels
+            selected
+            kind=Kind::Tabs
             on_change={move |selected: Option<usize>| {
                 if let Some(selected) = selected {
                     on_change.call(selected);
                 }
             }}
-            option={|handle| view! { <choice_option kind={Kind::Tabs} handle={handle} /> }}
+            option={|handle| view! { <choice_option kind=Kind::Tabs handle /> }}
         />
     }
 }

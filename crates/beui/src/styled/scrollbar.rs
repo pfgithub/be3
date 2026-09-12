@@ -20,10 +20,10 @@ pub fn scrollbar(position: Prop<ScrollPosition>) -> NodeId {
     let color = create_memo(move || thumb_color(position.get()));
 
     view! {
-        <fill color={SURFACE_RAISED} radius={RADIUS}>
-            <column spacing={0.0}>
+        <fill color=SURFACE_RAISED radius=RADIUS>
+            <column spacing=0.0>
                 @percent(before) <spacer />
-                @percent(thumb) <fill color={color} radius={RADIUS}></fill>
+                @percent(thumb) <fill color radius=RADIUS></fill>
                 @percent(after) <spacer />
             </column>
         </fill>

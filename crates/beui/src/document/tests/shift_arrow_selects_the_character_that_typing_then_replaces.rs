@@ -4,7 +4,7 @@ use crate::styled::TextInputBuilder;
 
 #[test]
 fn shift_arrow_selects_the_character_that_typing_then_replaces() {
-    let (document, [input]) = toolbar_of(|| [view! { <text_input value={"cat".to_string()} /> }]);
+    let (document, [input]) = toolbar_of(|| [view! { <text_input value="cat" /> }]);
     let mut harness = Harness::new(document);
 
     harness.key(Key::Tab, Modifiers::NONE);

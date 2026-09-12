@@ -9,12 +9,12 @@ fn clicking_an_accordion_header_hides_its_content() {
         let body = body.clone();
         move || {
             [view! {
-                <accordion title={"About".to_string()} open={true}>
+                <accordion title="About" open=true>
                     <text
-                        node_ref={&body}
-                        string={"beui keeps a retained tree of nodes.".to_string()}
-                        font_size={14.0}
-                        color={Color32::WHITE}
+                        node_ref=&body
+                        string="beui keeps a retained tree of nodes."
+                        font_size=14.0
+                        color=Color32::WHITE
                     />
                 </accordion>
             }]

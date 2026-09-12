@@ -9,11 +9,11 @@ fn caret_repaints_on_a_deadline_without_repeating_layout() {
         move || {
             view! {
                 <text
-                    node_ref={&text}
-                    string={"hello".to_string()}
-                    font_size={14.0}
-                    color={Color32::WHITE}
-                    caret={Some(0)}
+                    node_ref=&text
+                    string="hello"
+                    font_size=14.0
+                    color=Color32::WHITE
+                    caret=Some(0)
                 />
             }
         }

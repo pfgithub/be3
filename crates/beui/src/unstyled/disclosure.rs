@@ -43,7 +43,7 @@ pub fn disclosure(
     let open_for_click = open_read.clone();
 
     view! {
-        <column spacing={spacing}>
+        <column spacing>
             <unstyled::button
                 on_click={move || {
                     let next = !untrack(|| open_for_click.get());

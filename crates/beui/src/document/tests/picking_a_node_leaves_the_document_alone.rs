@@ -8,7 +8,7 @@ fn picking_a_node_leaves_the_document_alone() {
     let (document, [_button]) = toolbar_of(|| {
         [view! {
             <labelled_button
-                label={"Click me".to_string()}
+                label="Click me"
                 on_click={move || counter.set(counter.get() + 1)}
             />
         }]

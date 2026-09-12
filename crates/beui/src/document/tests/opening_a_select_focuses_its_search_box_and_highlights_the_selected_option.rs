@@ -8,8 +8,7 @@ fn opening_a_select_focuses_its_search_box_and_highlights_the_selected_option() 
         .iter()
         .map(|label| (*label).to_owned())
         .collect();
-    let (document, [select]) =
-        toolbar_of(|| [view! { <select options={options} selected={Some(1)} /> }]);
+    let (document, [select]) = toolbar_of(|| [view! { <select options selected=Some(1) /> }]);
     let mut harness = Harness::new(document);
     harness.frame(Vec::new());
 

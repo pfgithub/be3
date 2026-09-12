@@ -11,17 +11,17 @@ fn for_each_reuses_nodes_for_keys_that_persist_across_an_update() {
         move || {
             let (items, set_items) = create_signal(vec![1i64, 2, 3]);
             view! {
-                <column spacing={0.0}>
+                <column spacing=0.0>
                     <button
-                        node_ref={&shuffle}
+                        node_ref=&shuffle
                         on_click={move || set_items.set(vec![3, 2, 4])}
                     >
-                        <text string={"shuffle".to_string()} />
+                        <text string="shuffle" />
                     </button>
                     <for_each
-                        node_ref={&list}
-                        spacing={0.0}
-                        items={items}
+                        node_ref=&list
+                        spacing=0.0
+                        items
                         key={|value: i64| value}
                         view={|value: i64| view! { <text string={value.to_string()} /> }}
                     />

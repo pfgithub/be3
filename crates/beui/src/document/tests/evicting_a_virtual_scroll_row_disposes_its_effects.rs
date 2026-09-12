@@ -11,11 +11,11 @@ fn evicting_a_virtual_scroll_row_disposes_its_effects() {
         let scroll = scroll.clone();
         move || {
             view! {
-                <column spacing={0.0}>
+                <column spacing=0.0>
                     @percent(100.0) <virtual_list
-                        node_ref={&scroll}
-                        count={100}
-                        item_height={20.0}
+                        node_ref=&scroll
+                        count=100
+                        item_height=20.0
                         item={move |index: usize| {
                             let shown = shown.clone();
                             view! {

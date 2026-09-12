@@ -8,7 +8,7 @@ fn losing_window_focus_cancels_a_held_activation_key() {
     let (document, [button]) = toolbar_of(|| {
         [view! {
             <labelled_button
-                label={"Click".to_string()}
+                label="Click"
                 on_click={move || counter.set(counter.get() + 1)}
             />
         }]

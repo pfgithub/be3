@@ -378,9 +378,10 @@ pub fn component(attr: TokenStream, item: TokenStream) -> TokenStream {
             quote! { self.#ident.unwrap_or_default() }
         } else if prop.is_child {
             quote! {
-                self.#ident.unwrap_or_else(|| {
-                    panic!("component `{}` requires exactly one child", #name)
-                })
+                match self.#ident {
+                    Some(value) => value,
+                    None => panic!("component `{}` requires exactly one child", #name),
+                }
             }
         } else if let Some(default) = &prop.default {
             if prop.reactive_inner_ty.is_some() {
@@ -401,12 +402,13 @@ pub fn component(attr: TokenStream, item: TokenStream) -> TokenStream {
             quote! { self.#ident.unwrap_or_default() }
         } else {
             quote! {
-                self.#ident.unwrap_or_else(|| {
-                    panic!(
+                match self.#ident {
+                    Some(value) => value,
+                    None => panic!(
                         "missing required prop `{}` for component `{}`",
                         #ident_str, #name,
-                    )
-                })
+                    ),
+                }
             }
         };
         quote! { let #ident = #value; }

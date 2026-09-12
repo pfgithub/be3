@@ -8,7 +8,7 @@ fn clicking_the_padding_around_a_button_label_activates_it() {
     let (document, [_button]) = toolbar_of(|| {
         [view! {
             <labelled_button
-                label={"Click me".to_string()}
+                label="Click me"
                 on_click={move || counter.set(counter.get() + 1)}
             />
         }]

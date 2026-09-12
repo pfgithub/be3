@@ -9,11 +9,11 @@ fn listbox_navigation_reveals_options_inside_a_tall_scroll_item() {
         let (scroll, listbox) = (scroll.clone(), listbox.clone());
         move || {
             view! {
-                <scroll node_ref={&scroll}>
+                <scroll node_ref=&scroll>
                     <listbox
-                        node_ref={&listbox}
+                        node_ref=&listbox
                         labels={vec!["One".to_string(), "Two".to_string(), "Three".to_string(), "Four".to_string(), "Five".to_string(), "Six".to_string()]}
-                        selected={Some(0)}
+                        selected=Some(0)
                     />
                 </scroll>
             }

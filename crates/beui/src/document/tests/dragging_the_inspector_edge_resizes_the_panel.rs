@@ -9,10 +9,10 @@ fn dragging_the_inspector_edge_resizes_the_panel() {
         move || {
             view! {
                 <text
-                    node_ref={&text}
-                    string={"Hello".to_string()}
-                    font_size={14.0}
-                    color={Color32::WHITE}
+                    node_ref=&text
+                    string="Hello"
+                    font_size=14.0
+                    color=Color32::WHITE
                 />
             }
         }

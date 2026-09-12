@@ -11,7 +11,7 @@ fn removing_a_node_runs_the_cleanups_its_components_registered() {
             on_cleanup(move || outer_sink.borrow_mut().push("outer"));
             component("inner", move || {
                 on_cleanup(move || inner_sink.borrow_mut().push("inner"));
-                view! { <text string={"hi".to_owned()} /> }
+                view! { <text string="hi" /> }
             })
         })]
     });

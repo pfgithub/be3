@@ -17,20 +17,20 @@ fn a_disabled_button_prop_tracks_a_signal_and_blocks_clicks_while_true() {
             <button on_click={move || {
                 set_disabled.update(|disabled| *disabled = !*disabled)
             }}>
-                <text string={"toggle".to_string()} />
+                <text string="toggle" />
             </button>
         };
         sink_toggle.set(Some(toggle));
 
         let go = view! {
-            <button disabled={disabled} on_click={move || sink.set(sink.get() + 1)}>
-                <text string={"go".to_string()} />
+            <button disabled on_click={move || sink.set(sink.get() + 1)}>
+                <text string="go" />
             </button>
         };
         sink_go.set(Some(go));
 
         view! {
-            <column spacing={0.0}>
+            <column spacing=0.0>
                 {toggle}
                 {go}
             </column>

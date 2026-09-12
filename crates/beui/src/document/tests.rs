@@ -2,6 +2,7 @@ use super::*;
 
 mod a_component_function_appears_in_the_inspector_tree_without_hiding_its_children;
 mod a_disabled_button_prop_tracks_a_signal_and_blocks_clicks_while_true;
+mod a_missing_required_prop_panics_at_the_view_that_wrote_it;
 mod a_nested_container_reports_its_own_width_not_the_windows;
 mod a_reactive_tree_can_nest_builder_calls_without_threading_the_document;
 mod a_signal_write_from_a_click_handler_updates_its_bound_text_in_the_same_frame;
@@ -280,8 +281,8 @@ pub(crate) fn with_installed<R>(document: &mut Document, f: impl FnOnce(&mut Doc
 #[component(base)]
 pub(crate) fn menu_region() -> NodeId {
     view! {
-        <sized width={120.0} height={60.0}>
-            <fill color={Color32::from_gray(80)} radius={4} />
+        <sized width=120.0 height=60.0>
+            <fill color=Color32::from_gray(80) radius=4 />
         </sized>
     }
 }
@@ -289,9 +290,9 @@ pub(crate) fn menu_region() -> NodeId {
 #[component(base)]
 pub(crate) fn button_face(label: String) -> NodeId {
     view! {
-        <fill color={Color32::from_gray(60)} radius={4}>
-            <padding horizontal={20.0} vertical={12.0}>
-                <text string={label} font_size={14.0} color={Color32::WHITE} />
+        <fill color=Color32::from_gray(60) radius=4>
+            <padding horizontal=20.0 vertical=12.0>
+                <text string={label} font_size=14.0 color=Color32::WHITE />
             </padding>
         </fill>
     }
@@ -301,7 +302,7 @@ pub(crate) fn button_face(label: String) -> NodeId {
 pub(crate) fn labelled_button(label: String, on_click: ClickCallback) -> NodeId {
     view! {
         <unstyled::button on_click={move || on_click.call()}>
-            <button_face label={label} />
+            <button_face label />
         </unstyled::button>
     }
 }
@@ -313,15 +314,15 @@ pub(crate) fn virtual_list(built: &Rc<RefCell<Vec<usize>>>) -> (Document, NodeId
         let scroll = scroll.clone();
         move || {
             view! {
-                <column spacing={0.0}>
+                <column spacing=0.0>
                     @percent(100.0) <virtual_list
-                        node_ref={&scroll}
-                        count={VIRTUAL_ITEM_COUNT}
-                        item_height={VIRTUAL_ITEM_HEIGHT}
+                        node_ref=&scroll
+                        count=VIRTUAL_ITEM_COUNT
+                        item_height=VIRTUAL_ITEM_HEIGHT
                         item={move |index: usize| {
                             sink.borrow_mut().push(index);
                             view! {
-                                <padding horizontal={0.0} vertical={VIRTUAL_ITEM_HEIGHT / 2.0}>
+                                <padding horizontal=0.0 vertical={VIRTUAL_ITEM_HEIGHT / 2.0}>
                                     <spacer />
                                 </padding>
                             }
@@ -346,13 +347,13 @@ pub(crate) fn hello_column() -> HelloColumn {
         let (padding, text) = (padding.clone(), text.clone());
         move || {
             view! {
-                <column spacing={0.0}>
-                    <padding node_ref={&padding} horizontal={4.0} vertical={4.0}>
+                <column spacing=0.0>
+                    <padding node_ref=&padding horizontal=4.0 vertical=4.0>
                         <text
-                            node_ref={&text}
-                            string={"Hello".to_string()}
-                            font_size={14.0}
-                            color={Color32::WHITE}
+                            node_ref=&text
+                            string="Hello"
+                            font_size=14.0
+                            color=Color32::WHITE
                         />
                     </padding>
                 </column>
@@ -378,7 +379,7 @@ pub(crate) fn toolbar_of<const N: usize>(
     let document = build(move || {
         let nodes = controls();
         sink.set(Some(nodes));
-        view! { <column spacing={8.0} children={nodes.map(intrinsic)} /> }
+        view! { <column spacing=8.0 children={nodes.map(intrinsic)} /> }
     });
     let nodes = built.get().expect("the toolbar was built");
     (document, nodes)

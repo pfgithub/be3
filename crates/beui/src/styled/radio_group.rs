@@ -14,11 +14,11 @@ pub fn radio_group(
 ) -> NodeId {
     view! {
         <choice
-            labels={labels}
-            selected={selected}
-            kind={Kind::Radio}
+            labels
+            selected
+            kind=Kind::Radio
             on_change={move |selected| on_change.call(selected)}
-            option={|handle| view! { <choice_option kind={Kind::Radio} handle={handle} /> }}
+            option={|handle| view! { <choice_option kind=Kind::Radio handle /> }}
         />
     }
 }

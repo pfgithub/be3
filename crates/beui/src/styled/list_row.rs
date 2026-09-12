@@ -17,7 +17,7 @@ pub fn list_row(children: Child, on_click: ClickCallback) -> NodeId {
     view! {
         <button
             on_click={move || on_click.call()}
-            content={move |handle| view! { <list_row_face handle={handle}>{children}</list_row_face> }}
+            content={move |handle| view! { <list_row_face handle>{children}</list_row_face> }}
         />
     }
 }
@@ -31,9 +31,9 @@ fn list_row_face(handle: ButtonHandle, children: Child) -> NodeId {
     } = handle;
     let fill_color = create_memo(move || background(hovered.get(), active.get()));
     view! {
-        <outline color={ACCENT} width={2.0} radius={RADIUS} offset={0.0} visible={focused}>
-            <fill color={fill_color} radius={RADIUS}>
-                <padding horizontal={PADDING_HORIZONTAL} vertical={PADDING_VERTICAL}>{children}</padding>
+        <outline color=ACCENT width=2.0 radius=RADIUS offset=0.0 visible={focused}>
+            <fill color={fill_color} radius=RADIUS>
+                <padding horizontal=PADDING_HORIZONTAL vertical=PADDING_VERTICAL>{children}</padding>
             </fill>
         </outline>
     }

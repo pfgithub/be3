@@ -8,8 +8,7 @@ fn arrow_down_on_a_closed_select_trigger_opens_it_and_highlights_the_first_optio
         .iter()
         .map(|label| (*label).to_owned())
         .collect();
-    let (document, [select]) =
-        toolbar_of(|| [view! { <select options={options} selected={None} /> }]);
+    let (document, [select]) = toolbar_of(|| [view! { <select options selected=None /> }]);
     let mut harness = Harness::new(document);
     harness.frame(Vec::new());
 

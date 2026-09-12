@@ -67,7 +67,7 @@ pub fn button(
 
     view! {
         <focusable
-            tab_stop={tab_stop}
+            tab_stop
             focused={focus_request}
             on_key={move |press| on_key.call(press)}
             on_text={move |text| on_text.call(text)}
@@ -79,8 +79,8 @@ pub fn button(
             on_activate={key_click}
         >
             <click_catcher
-                cursor={CursorIcon::PointingHand}
-                key_active={key_active}
+                cursor=CursorIcon::PointingHand
+                key_active
                 on_click={click}
                 on_hover_change={move |hovered: bool| set_hovered.set(hovered)}
                 on_active_change={move |active: bool| set_active.set(active)}

@@ -24,12 +24,12 @@ const FOCUS_RING_OFFSET: f32 = 3.0;
 pub fn slider(value: Prop<f32>, on_change: Callback<f32>) -> NodeId {
     view! {
         <unstyled::slider
-            value={value}
+            value
             on_change={move |value| on_change.call(value)}
             content={move |handle: SliderHandle| {
                 let value = handle.value.clone();
                 component_detail(create_memo(move || detail(value.get())));
-                view! { <slider_track handle={handle} /> }
+                view! { <slider_track handle /> }
             }}
         />
     }
@@ -47,12 +47,12 @@ fn slider_track(handle: SliderHandle) -> NodeId {
     let knob_color = create_memo(move || knob_fill_color(dragging.get()));
 
     view! {
-        <outline color={ACCENT} width={FOCUS_RING_WIDTH} radius={RADIUS} offset={FOCUS_RING_OFFSET} visible={focused}>
-            <sized height={HEIGHT}>
-                <centered_row spacing={0.0}>
-                    @percent(filled_percent) <sized height={TRACK_HEIGHT}><fill color={ACCENT} radius={TRACK_RADIUS}></fill></sized>
-                    <sized width={KNOB_SIZE} height={KNOB_SIZE}><fill color={knob_color} radius={KNOB_RADIUS}></fill></sized>
-                    @percent(rest_percent) <sized height={TRACK_HEIGHT}><fill color={TRACK} radius={TRACK_RADIUS}></fill></sized>
+        <outline color=ACCENT width=FOCUS_RING_WIDTH radius=RADIUS offset=FOCUS_RING_OFFSET visible={focused}>
+            <sized height=HEIGHT>
+                <centered_row spacing=0.0>
+                    @percent(filled_percent) <sized height=TRACK_HEIGHT><fill color=ACCENT radius=TRACK_RADIUS></fill></sized>
+                    <sized width=KNOB_SIZE height=KNOB_SIZE><fill color={knob_color} radius=KNOB_RADIUS></fill></sized>
+                    @percent(rest_percent) <sized height=TRACK_HEIGHT><fill color=TRACK radius=TRACK_RADIUS></fill></sized>
                 </centered_row>
             </sized>
         </outline>

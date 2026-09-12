@@ -6,8 +6,8 @@ use crate::styled::TextInputBuilder;
 fn tab_moves_focus_from_one_text_input_to_the_next() {
     let (document, [first, second]) = toolbar_of(|| {
         [
-            view! { <text_input value={String::new()} /> },
-            view! { <text_input value={String::new()} /> },
+            view! { <text_input value=String::new() /> },
+            view! { <text_input value=String::new() /> },
         ]
     });
     let mut harness = Harness::new(document);

@@ -141,7 +141,7 @@ pub(crate) fn menu_list(
             intrinsic(view! {
                 <menu_row
                     state={state.clone()}
-                    index={index}
+                    index
                     item={item.clone()}
                     focused={focused.clone()}
                     row={row.clone()}
@@ -154,7 +154,7 @@ pub(crate) fn menu_list(
 
     let (key_state, blur_focus) = (state.clone(), focus);
     view! {
-        <column spacing={0.0}>
+        <column spacing=0.0>
             <focusable
                 node_ref={&state.root}
                 tab_stop={root_tab_stop}
@@ -166,7 +166,7 @@ pub(crate) fn menu_list(
                 }}
                 on_key={move |press: KeyPress| root_key(&key_state, press)}
             />
-            <column spacing={2.0} children={lines} />
+            <column spacing=2.0 children={lines} />
         </column>
     }
 }
@@ -205,9 +205,9 @@ fn menu_row(
         (state.clone(), state.clone(), state.clone(), state);
 
     view! {
-        <column spacing={0.0}>
+        <column spacing=0.0>
             <unstyled::button
-                node_ref={&button}
+                node_ref=&button
                 tab_stop={focused.memo(Focus::Row(index))}
                 focused={focused.memo(Focus::Row(index))}
                 on_focus_change={move |has_focus: bool| {
@@ -215,7 +215,7 @@ fn menu_row(
                         blur_state.set_focus.set(Focus::Away);
                     }
                 }}
-                content={content}
+                content
                 on_click={move || {
                     if disabled {
                         return;
@@ -244,8 +244,8 @@ fn menu_row(
                 })));
                 view! {
                     <overlay
-                        anchor={&button}
-                        placement={Placement::RightStart}
+                        anchor=&button
+                        placement=Placement::RightStart
                         open={submenu.open.clone()}
                         on_dismiss={move || dismiss.set(false)}
                     >
@@ -253,11 +253,11 @@ fn menu_row(
                             <menu_list
                                 node_ref={&submenu.content}
                                 items={children}
-                                row={row}
+                                row
                                 panel={panel.clone()}
                                 parent={leave}
                                 active={submenu.open.clone()}
-                                focus_first={true}
+                                focus_first=true
                                 on_select={move |mut path: Vec<usize>| {
                                     path.insert(0, index);
                                     select(&select_state, path);

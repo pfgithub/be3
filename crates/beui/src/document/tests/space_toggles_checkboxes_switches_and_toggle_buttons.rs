@@ -6,9 +6,9 @@ use crate::styled::{CheckboxBuilder, SwitchBuilder, ToggleButtonBuilder};
 fn space_toggles_checkboxes_switches_and_toggle_buttons() {
     let (document, [checkbox, switch, toggle]) = toolbar_of(|| {
         [
-            view! { <checkbox label={"Check".to_string()} checked={false} /> },
-            view! { <switch on={false} /> },
-            view! { <toggle_button label={"Bold".to_string()} pressed={false} /> },
+            view! { <checkbox label="Check" checked=false /> },
+            view! { <switch on=false /> },
+            view! { <toggle_button label="Bold" pressed=false /> },
         ]
     });
     let mut harness = Harness::new(document);

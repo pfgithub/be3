@@ -8,7 +8,7 @@ fn clicking_a_checkbox_toggles_it() {
     let sink = changes.clone();
     let (document, [checkbox]) = toolbar_of(|| {
         [view! {
-            <checkbox label={"Show timings".to_string()} checked={false} on_change={move |checked| {
+            <checkbox label="Show timings" checked=false on_change={move |checked| {
                 sink.borrow_mut().push(checked);
             }} />
         }]

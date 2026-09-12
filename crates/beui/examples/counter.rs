@@ -64,26 +64,26 @@ fn app() -> NodeId {
     let count_text = create_memo(move || count.get().to_string());
 
     view! {
-        <column spacing={8.0}>
-            <row spacing={8.0}>
+        <column spacing=8.0>
+            <row spacing=8.0>
                 <button disabled={is_zero} on_click={decrement_click}>
-                    <text string={"-".to_string()} />
+                    <text string="-" />
                 </button>
                 <text string={count_text} />
                 <button on_click={increment_click}>
-                    <text string={"+".to_string()} />
+                    <text string="+" />
                 </button>
                 <show condition={is_nonzero} then={move || view! {
                     <button on_click={reset_click}>
-                        <text string={"reset".to_string()} />
+                        <text string="reset" />
                     </button>
                 }} />
             </row>
             <for_each
-                spacing={4.0}
+                spacing=4.0
                 items={history}
                 key={|(id, _): (u64, i64)| id}
-                view={|(_, value): (u64, i64)| view! { <history_entry value={value} /> }}
+                view={|(_, value): (u64, i64)| view! { <history_entry value /> }}
             />
         </column>
     }

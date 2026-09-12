@@ -8,16 +8,16 @@ fn picking_a_node_reveals_it_in_the_tree() {
         let text = text.clone();
         move || {
             view! {
-                <column spacing={0.0}>
-                    <padding horizontal={4.0} vertical={4.0}>
-                        <padding horizontal={4.0} vertical={4.0}>
-                            <padding horizontal={4.0} vertical={4.0}>
-                                <padding horizontal={4.0} vertical={4.0}>
+                <column spacing=0.0>
+                    <padding horizontal=4.0 vertical=4.0>
+                        <padding horizontal=4.0 vertical=4.0>
+                            <padding horizontal=4.0 vertical=4.0>
+                                <padding horizontal=4.0 vertical=4.0>
                                     <text
-                                        node_ref={&text}
-                                        string={"Hello".to_string()}
-                                        font_size={14.0}
-                                        color={Color32::WHITE}
+                                        node_ref=&text
+                                        string="Hello"
+                                        font_size=14.0
+                                        color=Color32::WHITE
                                     />
                                 </padding>
                             </padding>

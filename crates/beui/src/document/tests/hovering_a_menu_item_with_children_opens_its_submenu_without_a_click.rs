@@ -14,11 +14,7 @@ fn hovering_a_menu_item_with_children_opens_its_submenu_without_a_click() {
     )];
     let (document, [menu]) = toolbar_of({
         let region = region.clone();
-        move || {
-            [
-                view! { <context_menu items={items}><menu_region node_ref={&region} /></context_menu> },
-            ]
-        }
+        move || [view! { <context_menu items><menu_region node_ref=&region /></context_menu> }]
     });
     let region = region.get();
     let mut harness = Harness::new(document);

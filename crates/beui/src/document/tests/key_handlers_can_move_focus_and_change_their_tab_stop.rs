@@ -23,10 +23,10 @@ fn key_handlers_can_move_focus_and_change_their_tab_stop() {
                             true
                         }}
                     >
-                        <button_face label={"First".to_string()} />
+                        <button_face label="First" />
                     </unstyled::button>
                 },
-                view! { <labelled_button node_ref={&second} label={"Second".to_string()} /> },
+                view! { <labelled_button node_ref=&second label="Second" /> },
             ]
         }
     });

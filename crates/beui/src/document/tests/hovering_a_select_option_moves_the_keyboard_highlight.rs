@@ -8,8 +8,7 @@ fn hovering_a_select_option_moves_the_keyboard_highlight() {
         .iter()
         .map(|label| (*label).to_owned())
         .collect();
-    let (document, [select]) =
-        toolbar_of(|| [view! { <select options={options} selected={None} /> }]);
+    let (document, [select]) = toolbar_of(|| [view! { <select options selected=None /> }]);
     let mut harness = Harness::new(document);
     harness.frame(Vec::new());
 

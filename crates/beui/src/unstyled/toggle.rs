@@ -61,8 +61,8 @@ pub fn toggle(
             on_activate={key_toggle}
         >
             <click_catcher
-                cursor={CursorIcon::PointingHand}
-                key_active={key_active}
+                cursor=CursorIcon::PointingHand
+                key_active
                 on_click={toggle_checked}
                 on_hover_change={move |hovered: bool| set_hovered.set(hovered)}
                 on_active_change={move |active: bool| set_active.set(active)}

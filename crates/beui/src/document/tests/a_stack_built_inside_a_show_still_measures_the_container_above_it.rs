@@ -15,16 +15,16 @@ fn a_stack_built_inside_a_show_still_measures_the_container_above_it() {
             let (visible, set_visible) = create_signal(false);
             view! {
                 <container content={move |_| view! {
-                    <column spacing={0.0}>
-                        <button node_ref={&toggle} on_click={move || set_visible.set(true)}>
-                            <text string={"toggle".to_string()} />
+                    <column spacing=0.0>
+                        <button node_ref=&toggle on_click={move || set_visible.set(true)}>
+                            <text string="toggle" />
                         </button>
                         <show condition={visible} then={move || view! {
-                            <stack spacing={0.0} breakpoint={BREAKPOINT}>
-                                @percent(50.0) <sized node_ref={&left} height={ITEM_HEIGHT}>
+                            <stack spacing=0.0 breakpoint=BREAKPOINT>
+                                @percent(50.0) <sized node_ref=&left height=ITEM_HEIGHT>
                                     <spacer />
                                 </sized>
-                                @percent(50.0) <sized node_ref={&right} height={ITEM_HEIGHT}>
+                                @percent(50.0) <sized node_ref=&right height=ITEM_HEIGHT>
                                     <spacer />
                                 </sized>
                             </stack>

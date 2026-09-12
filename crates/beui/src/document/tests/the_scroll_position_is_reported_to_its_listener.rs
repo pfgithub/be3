@@ -11,12 +11,12 @@ fn the_scroll_position_is_reported_to_its_listener() {
             .into_iter()
             .map(|row| {
                 intrinsic(view! {
-                    <text string={row} font_size={14.0} color={Color32::WHITE} />
+                    <text string={row} font_size=14.0 color=Color32::WHITE />
                 })
             })
             .collect();
         view! {
-            <column spacing={0.0}>
+            <column spacing=0.0>
                 @percent(100.0) <scroll
                     on_change={move |position| sink.set(Some(position))}
                     children={items}

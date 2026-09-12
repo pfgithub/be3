@@ -3,14 +3,14 @@ use crate::reactive::{build, component, view, ColumnBuilder, RowBuilder};
 
 #[component]
 fn widget() -> NodeId {
-    view! { <row spacing={0.0}></row> }
+    view! { <row spacing=0.0></row> }
 }
 
 #[test]
 fn a_component_function_appears_in_the_inspector_tree_without_hiding_its_children() {
     let document = build(|| {
         view! {
-            <column spacing={0.0}>
+            <column spacing=0.0>
                 <widget />
             </column>
         }

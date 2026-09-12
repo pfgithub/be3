@@ -53,10 +53,10 @@ pub fn button(
 ) -> NodeId {
     view! {
         <unstyled::button
-            disabled={disabled}
+            disabled
             on_click={move || on_click.call()}
             content={move |handle| view! {
-                <button_face handle={handle} variant={variant} label={label} />
+                <button_face handle variant label />
             }}
         />
     }
@@ -75,11 +75,11 @@ fn button_face(
     } = handle;
     let fill_color = create_memo(move || variant.fill(hovered.get(), active.get()));
     view! {
-        <outline color={ACCENT} width={FOCUS_RING_WIDTH} radius={RADIUS + 4} offset={FOCUS_RING_OFFSET} visible={focused}>
-            <outline color={BORDER} width={BORDER_WIDTH} radius={RADIUS} offset={0.0} visible={variant == ButtonVariant::Secondary}>
-                <fill color={fill_color} radius={RADIUS}>
-                    <padding horizontal={PADDING_HORIZONTAL} vertical={PADDING_VERTICAL}>
-                        <text string={label} font_size={FONT_BODY} color={variant.label()} align={TextAlign::Center} />
+        <outline color=ACCENT width=FOCUS_RING_WIDTH radius={RADIUS + 4} offset=FOCUS_RING_OFFSET visible={focused}>
+            <outline color=BORDER width=BORDER_WIDTH radius=RADIUS offset=0.0 visible={variant == ButtonVariant::Secondary}>
+                <fill color={fill_color} radius=RADIUS>
+                    <padding horizontal=PADDING_HORIZONTAL vertical=PADDING_VERTICAL>
+                        <text string={label} font_size=FONT_BODY color={variant.label()} align=TextAlign::Center />
                     </padding>
                 </fill>
             </outline>

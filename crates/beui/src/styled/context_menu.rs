@@ -26,8 +26,8 @@ pub fn context_menu(
 ) -> NodeId {
     view! {
         <unstyled::context_menu
-            items={items}
-            row={|handle| view! { <menu_row handle={handle} /> }}
+            items
+            row={|handle| view! { <menu_row handle /> }}
             panel={|content| view! { <menu_panel>{content}</menu_panel> }}
             on_select={move |path| on_select.call(path)}
         >
@@ -46,13 +46,13 @@ fn menu_row(handle: MenuRowHandle) -> NodeId {
     let color = if item.disabled { TEXT_MUTED } else { TEXT };
     let fill_color = create_memo(move || row_background(focused.get(), hovered.get()));
     view! {
-        <fill color={fill_color} radius={RADIUS}>
-            <padding horizontal={PADDING_HORIZONTAL} vertical={PADDING_VERTICAL}>
+        <fill color={fill_color} radius=RADIUS>
+            <padding horizontal=PADDING_HORIZONTAL vertical=PADDING_VERTICAL>
                 <text
                     string={item.label}
-                    font_size={FONT_BODY}
-                    color={color}
-                    align={TextAlign::Start}
+                    font_size=FONT_BODY
+                    color
+                    align=TextAlign::Start
                 />
             </padding>
         </fill>
@@ -62,10 +62,10 @@ fn menu_row(handle: MenuRowHandle) -> NodeId {
 #[component]
 fn menu_panel(children: Child) -> NodeId {
     view! {
-        <sized width={MENU_WIDTH}>
-            <outline color={BORDER} width={BORDER_WIDTH} radius={RADIUS} offset={0.0} visible={true}>
-                <fill color={SURFACE_RAISED} radius={RADIUS}>
-                    <padding horizontal={MENU_PADDING} vertical={MENU_PADDING}>{children}</padding>
+        <sized width=MENU_WIDTH>
+            <outline color=BORDER width=BORDER_WIDTH radius=RADIUS offset=0.0 visible=true>
+                <fill color=SURFACE_RAISED radius=RADIUS>
+                    <padding horizontal=MENU_PADDING vertical=MENU_PADDING>{children}</padding>
                 </fill>
             </outline>
         </sized>
