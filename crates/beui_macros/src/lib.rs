@@ -4,8 +4,9 @@ use syn::braced;
 use syn::parenthesized;
 use syn::parse::{Parse, ParseStream};
 use syn::{
-    parse_macro_input, Attribute, Expr, ExprLit, FnArg, GenericArgument, Ident, ItemFn, Lit, Pat,
-    PatType, PathArguments, Token, Type,
+    parse_macro_input, Attribute, Expr, ExprCall, ExprLit, ExprPath, ExprReference, ExprUnary,
+    FnArg, GenericArgument, Ident, ItemFn, Lit, Pat, PatType, Path, PathArguments, Token, Type,
+    UnOp,
 };
 
 struct Prop {
@@ -188,6 +189,16 @@ fn generic_args(ty: &Type, name: &str) -> Option<Vec<Type>> {
     )
 }
 
+fn is_string_type(ty: &Type) -> bool {
+    let Type::Path(path) = ty else {
+        return false;
+    };
+    let Some(segment) = path.path.segments.last() else {
+        return false;
+    };
+    segment.ident == "String" && matches!(segment.arguments, PathArguments::None)
+}
+
 fn is_named_type(ty: &Type, name: &str) -> bool {
     let Type::Path(path) = ty else {
         return false;
@@ -299,10 +310,19 @@ pub fn component(attr: TokenStream, item: TokenStream) -> TokenStream {
                 }
             }
         } else if let Some(inner_ty) = &prop.inner_ty {
-            quote! {
-                pub fn #ident(mut self, value: #inner_ty) -> Self {
-                    self.#ident = Some(Some(value));
-                    self
+            if is_string_type(inner_ty) {
+                quote! {
+                    pub fn #ident(mut self, value: impl Into<String>) -> Self {
+                        self.#ident = Some(Some(value.into()));
+                        self
+                    }
+                }
+            } else {
+                quote! {
+                    pub fn #ident(mut self, value: #inner_ty) -> Self {
+                        self.#ident = Some(Some(value));
+                        self
+                    }
                 }
             }
         } else if prop.is_click_callback {
@@ -328,6 +348,13 @@ pub fn component(attr: TokenStream, item: TokenStream) -> TokenStream {
             quote! {
                 pub fn #ident(mut self, value: impl ::beui::reactive::IntoProp<#inner_ty>) -> Self {
                     self.#ident = Some(::beui::reactive::IntoProp::into_prop(value));
+                    self
+                }
+            }
+        } else if is_string_type(&prop.ty) {
+            quote! {
+                pub fn #ident(mut self, value: impl Into<String>) -> Self {
+                    self.#ident = Some(value.into());
                     self
                 }
             }
@@ -426,6 +453,7 @@ pub fn component(attr: TokenStream, item: TokenStream) -> TokenStream {
                 self
             }
 
+            #[track_caller]
             pub fn build(self) #output {
                 let test_id = self.test_id;
                 let node_ref = self.node_ref;
@@ -449,20 +477,96 @@ struct ViewAttr {
     value: Expr,
 }
 
+fn parse_unbraced_value(input: ParseStream) -> syn::Result<Expr> {
+    if input.peek(Token![&]) {
+        let and_token = input.parse::<Token![&]>()?;
+        let mutability: Option<Token![mut]> = input.parse()?;
+        let expr = parse_unbraced_value(input)?;
+        return Ok(Expr::Reference(ExprReference {
+            attrs: Vec::new(),
+            and_token,
+            mutability,
+            expr: Box::new(expr),
+        }));
+    }
+
+    if input.peek(Token![-]) {
+        let minus = input.parse::<Token![-]>()?;
+        let expr = parse_unbraced_value(input)?;
+        return Ok(Expr::Unary(ExprUnary {
+            attrs: Vec::new(),
+            op: UnOp::Neg(minus),
+            expr: Box::new(expr),
+        }));
+    }
+
+    if input.peek(Token![!]) {
+        let bang = input.parse::<Token![!]>()?;
+        let expr = parse_unbraced_value(input)?;
+        return Ok(Expr::Unary(ExprUnary {
+            attrs: Vec::new(),
+            op: UnOp::Not(bang),
+            expr: Box::new(expr),
+        }));
+    }
+
+    if input.peek(Lit) || input.peek(syn::LitBool) {
+        let lit: Lit = input.parse()?;
+        return Ok(Expr::Lit(ExprLit {
+            attrs: Vec::new(),
+            lit,
+        }));
+    }
+
+    if input.peek(Ident)
+        || input.peek(Token![::])
+        || input.peek(Token![crate])
+        || input.peek(Token![self])
+        || input.peek(Token![Self])
+        || input.peek(Token![super])
+    {
+        let path = Path::parse_mod_style(input)?;
+        let func = Expr::Path(ExprPath {
+            attrs: Vec::new(),
+            qself: None,
+            path,
+        });
+        if input.peek(syn::token::Paren) {
+            let args;
+            let paren_token = parenthesized!(args in input);
+            return Ok(Expr::Call(ExprCall {
+                attrs: Vec::new(),
+                func: Box::new(func),
+                paren_token,
+                args: args.parse_terminated(Expr::parse, Token![,])?,
+            }));
+        }
+        return Ok(func);
+    }
+
+    Err(input.error(
+        "expected a literal, a path, a path call, or a braced expression `={...}` for an attribute value",
+    ))
+}
+
 impl Parse for ViewAttr {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let key: Ident = input.parse()?;
+        if !input.peek(Token![=]) {
+            let value = Expr::Path(ExprPath {
+                attrs: Vec::new(),
+                qself: None,
+                path: Path::from(key.clone()),
+            });
+            return Ok(ViewAttr { key, value });
+        }
         input.parse::<Token![=]>()?;
         let value = if input.peek(syn::token::Brace) {
             let content;
             braced!(content in input);
             content.parse::<Expr>()?
         } else {
-            let lit: Lit = input.parse()?;
-            Expr::Lit(ExprLit {
-                attrs: Vec::new(),
-                lit,
-            })
+            parse_unbraced_value(input)?
         };
         Ok(ViewAttr { key, value })
     }

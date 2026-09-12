@@ -467,6 +467,12 @@ impl<T: 'static> IntoProp<T> for T {
     }
 }
 
+impl IntoProp<String> for &'static str {
+    fn into_prop(self) -> Prop<String> {
+        Prop::Static(self.to_string())
+    }
+}
+
 impl<T: 'static> IntoProp<T> for Prop<T> {
     fn into_prop(self) -> Prop<T> {
         self
