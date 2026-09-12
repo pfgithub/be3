@@ -79,11 +79,14 @@ A tap may drift by up to eight logical points. Beyond that threshold BEUI
 locks the gesture to its dominant axis. Vertical gestures drag the deepest
 scroll view under the initial contact, keep that scroll captured when the
 finger leaves its rectangle, and do not click the row where the gesture
-started. Horizontal gestures remain available to controls such as sliders.
-The touch pointer disappears after release, so touch does not leave hover
-styling behind. Platform integrations may provide synthesized pointer events
-alongside touch events; BEUI suppresses those duplicates while the touch is
-active.
+started. A released vertical drag coasts with its sampled velocity, and a drag
+beyond either end of a scroll view is resisted before springing back. Touch
+contacts do not hover controls, and focus is assigned only after a gesture
+resolves as a tap. Horizontal gestures remain available to controls such as
+sliders. The touch pointer disappears after release, so touch does not leave
+hover styling behind. Platform integrations may provide synthesized pointer
+events alongside touch events; BEUI suppresses those duplicates while the
+touch is active.
 
 Standalone apps receive winit touch events automatically. Open the inspector
 with Ctrl+Shift+I and enable “Emulate touch with mouse” to turn the primary

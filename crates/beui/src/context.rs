@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use crate::color::Color32;
 use crate::font::{FontId, FontSources, Fonts, Galley};
-use crate::geometry::{pos2, vec2, Rect};
+use crate::geometry::{pos2, vec2, Pos2, Rect};
 use crate::input::{CursorIcon, InputState, RawInput};
 use crate::painter::{Painter, Shape};
 
@@ -22,6 +22,7 @@ struct Inner {
     copied_text: RefCell<Option<String>>,
     cursor_icon: Cell<CursorIcon>,
     touch_emulation: Cell<bool>,
+    touch_cursor: Cell<Option<Pos2>>,
     repaint: Cell<bool>,
     repaint_after: Cell<Duration>,
     previous: RefCell<Option<(Vec<Shape>, f32)>>,
@@ -62,6 +63,7 @@ impl Context {
                 copied_text: RefCell::new(None),
                 cursor_icon: Cell::new(CursorIcon::Default),
                 touch_emulation: Cell::new(false),
+                touch_cursor: Cell::new(None),
                 repaint: Cell::new(false),
                 repaint_after: Cell::new(Duration::MAX),
                 previous: RefCell::new(None),
@@ -131,6 +133,11 @@ impl Context {
         self.inner.touch_emulation.set(enabled);
     }
 
+    #[cfg(feature = "window")]
+    pub(crate) fn set_touch_cursor(&self, pos: Option<Pos2>) {
+        self.inner.touch_cursor.set(pos);
+    }
+
     pub fn request_repaint(&self) {
         self.inner.repaint.set(true);
         self.request_repaint_after(Duration::ZERO);
@@ -189,7 +196,12 @@ impl Context {
         if !self.touch_emulation() {
             return;
         }
-        let Some(pos) = self.input(|input| input.pointer.interact_pos()) else {
+        let Some(pos) = self
+            .inner
+            .touch_cursor
+            .get()
+            .or_else(|| self.input(|input| input.pointer.interact_pos()))
+        else {
             return;
         };
         let radius = 10.0;

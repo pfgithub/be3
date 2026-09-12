@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::time::Instant;
 
 use crate::geometry::{Pos2, Vec2};
@@ -7,6 +7,8 @@ const MULTI_CLICK_DELAY: f32 = 0.3;
 const MULTI_CLICK_DISTANCE: f32 = 6.0;
 const MULTI_CLICK_LIMIT: u32 = 4;
 const TOUCH_DRAG_THRESHOLD: f32 = 8.0;
+const TOUCH_VELOCITY_WINDOW: f32 = 0.12;
+const MAX_TOUCH_VELOCITY: f32 = 4_000.0;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Key {
@@ -286,6 +288,8 @@ pub struct TouchState {
     cancelled: bool,
     dragged: bool,
     scroll_delta: Vec2,
+    samples: VecDeque<(Instant, Pos2)>,
+    velocity: Vec2,
 }
 
 impl TouchState {
@@ -299,6 +303,8 @@ impl TouchState {
             self.previous = None;
             self.direction = TouchDirection::Undecided;
             self.dragged = false;
+            self.samples.clear();
+            self.velocity = Vec2::ZERO;
             if pointer.from_touch {
                 pointer.pos = None;
                 pointer.from_touch = false;
@@ -336,6 +342,9 @@ impl TouchState {
         self.started = true;
         self.direction = TouchDirection::Undecided;
         self.dragged = false;
+        self.samples.clear();
+        self.samples.push_back((Instant::now(), pos));
+        self.velocity = Vec2::ZERO;
         pointer.pos = Some(pos);
         pointer.primary_down = true;
         pointer.primary_pressed = true;
@@ -370,6 +379,7 @@ impl TouchState {
         } else if self.direction == TouchDirection::Vertical {
             self.scroll_delta = self.scroll_delta + (pos - previous);
         }
+        self.sample(pos);
     }
 
     fn finish(
@@ -406,7 +416,35 @@ impl TouchState {
         self.previous = None;
         self.direction = TouchDirection::Undecided;
         self.dragged = false;
+        self.samples.clear();
+        self.velocity = Vec2::ZERO;
         pointer.from_touch = false;
+    }
+
+    fn sample(&mut self, pos: Pos2) {
+        let now = Instant::now();
+        self.samples.push_back((now, pos));
+        while self.samples.len() > 2
+            && self.samples.front().is_some_and(|(when, _)| {
+                now.duration_since(*when).as_secs_f32() > TOUCH_VELOCITY_WINDOW
+            })
+        {
+            self.samples.pop_front();
+        }
+        let Some((then, origin)) = self.samples.front().copied() else {
+            return;
+        };
+        let elapsed = now.duration_since(then).as_secs_f32();
+        if elapsed <= f32::EPSILON {
+            return;
+        }
+        let measured = (pos - origin) * elapsed.recip();
+        let speed = measured.x.hypot(measured.y);
+        self.velocity = if speed > MAX_TOUCH_VELOCITY {
+            measured * (MAX_TOUCH_VELOCITY / speed)
+        } else {
+            measured
+        };
     }
 
     pub fn points(&self) -> impl Iterator<Item = &TouchPoint> {
@@ -443,6 +481,10 @@ impl TouchState {
 
     pub fn scroll_delta(&self) -> Vec2 {
         self.scroll_delta
+    }
+
+    pub fn velocity(&self) -> Vec2 {
+        self.velocity
     }
 }
 

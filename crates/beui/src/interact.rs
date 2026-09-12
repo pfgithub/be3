@@ -23,11 +23,13 @@ pub(crate) fn interact(
         secondary_pressed_this_frame: ctx.input(|input| input.pointer.secondary_pressed()),
         scroll_delta: ctx.input(|input| input.scroll_delta.y),
         touch_started: ctx.input(|input| input.touch.started()),
+        touch_active: ctx.input(|input| input.touch.active()),
         touch_ended: ctx.input(|input| input.touch.ended()),
         touch_cancelled: ctx.input(|input| input.touch.cancelled()),
         touch_dragged: ctx.input(|input| input.touch.dragged()),
         touch_scrolling: ctx.input(|input| input.touch.scrolling()),
         touch_scroll_delta: ctx.input(|input| input.touch.scroll_delta().y),
+        touch_velocity: ctx.input(|input| input.touch.velocity().y),
         touch_scroll_target: None,
         clicks: ctx.input(|input| input.pointer.clicks()),
         modifiers: ctx.input(|input| input.modifiers),
@@ -59,7 +61,9 @@ pub(crate) fn interact(
         }
     }
 
-    if input.pressed_this_frame {
+    if (input.pressed_this_frame && !input.touch_started)
+        || (input.touch_ended && !input.touch_dragged && !input.touch_cancelled)
+    {
         doc.update_focus(focus_target);
     }
 

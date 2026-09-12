@@ -2,6 +2,7 @@ use crate::color::Color32;
 use crate::input::{Key, KeyPress};
 use std::any::Any;
 use std::collections::HashMap;
+use std::time::Instant;
 
 use crate::geometry::{pos2, vec2, Rect, Vec2};
 use crate::painter::Painter;
@@ -13,6 +14,13 @@ use crate::reactive::{
     RenderFn, ScopeContext,
 };
 use beui_macros::component;
+
+const INERTIA_FRICTION: f32 = 4.5;
+const MINIMUM_VELOCITY: f32 = 5.0;
+const RUBBER_BAND_FACTOR: f32 = 0.55;
+const SPRING_DAMPING: f32 = 24.0;
+const SPRING_STIFFNESS: f32 = 180.0;
+const MAX_ANIMATION_STEP: f32 = 0.05;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct ScrollPosition {
@@ -58,6 +66,10 @@ pub(crate) struct ScrollNode {
     pub(crate) items: Vec<NodeId>,
     pub(crate) virtual_items: Option<VirtualItems>,
     pub(crate) offset: f32,
+    overscroll: f32,
+    drag_offset: Option<f32>,
+    velocity: f32,
+    last_update: Instant,
     pub(crate) focused: bool,
     focus_color: Color32,
     position: Option<ScrollPosition>,
@@ -72,6 +84,10 @@ impl ScrollNode {
             items: Vec::new(),
             virtual_items: None,
             offset: 0.0,
+            overscroll: 0.0,
+            drag_offset: None,
+            velocity: 0.0,
+            last_update: Instant::now(),
             focused: false,
             focus_color: Color32::WHITE,
             position: None,
@@ -209,6 +225,68 @@ impl ScrollNode {
 
         self.virtual_items = Some(items);
     }
+
+    fn drag(&mut self, position: &mut ScrollPosition, delta: f32) {
+        let raw = self.drag_offset.unwrap_or(position.offset) - delta;
+        self.drag_offset = Some(raw);
+        position.offset = raw.clamp(0.0, position.max_offset());
+        self.overscroll = rubber_band(raw - position.offset, position.viewport);
+        self.velocity = 0.0;
+    }
+
+    fn release(&mut self, velocity: f32) {
+        self.drag_offset = None;
+        self.velocity = if self.overscroll == 0.0 {
+            velocity
+        } else {
+            velocity * 0.35
+        };
+        if self.velocity.abs() < MINIMUM_VELOCITY && self.overscroll == 0.0 {
+            self.velocity = 0.0;
+        }
+    }
+
+    fn animate(&mut self, position: &mut ScrollPosition, elapsed: f32) {
+        let elapsed = elapsed.min(MAX_ANIMATION_STEP);
+        if elapsed <= 0.0 {
+            return;
+        }
+        if self.overscroll != 0.0 {
+            let acceleration = -SPRING_STIFFNESS * self.overscroll - SPRING_DAMPING * self.velocity;
+            self.velocity += acceleration * elapsed;
+            self.overscroll += self.velocity * elapsed;
+            if self.overscroll.abs() < 0.25 && self.velocity.abs() < MINIMUM_VELOCITY {
+                self.overscroll = 0.0;
+                self.velocity = 0.0;
+            }
+            return;
+        }
+        if self.velocity == 0.0 {
+            return;
+        }
+        let raw = position.offset + self.velocity * elapsed;
+        position.offset = raw.clamp(0.0, position.max_offset());
+        self.velocity *= (-INERTIA_FRICTION * elapsed).exp();
+        if raw != position.offset {
+            self.overscroll = raw - position.offset;
+        } else if self.velocity.abs() < MINIMUM_VELOCITY {
+            self.velocity = 0.0;
+        }
+    }
+
+    fn animating(&self) -> bool {
+        self.overscroll != 0.0 || self.velocity != 0.0
+    }
+}
+
+fn rubber_band(distance: f32, viewport: f32) -> f32 {
+    if distance == 0.0 {
+        return 0.0;
+    }
+    let dimension = viewport.max(1.0);
+    let magnitude =
+        dimension * (1.0 - 1.0 / (distance.abs() * RUBBER_BAND_FACTOR / dimension + 1.0));
+    magnitude.copysign(distance)
 }
 
 fn build_item(
@@ -239,7 +317,8 @@ impl Element for ScrollNode {
         let content = self.content(heights.iter().sum());
         let offset = self
             .anchored_offset(&heights)
-            .clamp(0.0, (content - rect.height()).max(0.0));
+            .clamp(0.0, (content - rect.height()).max(0.0))
+            + self.overscroll;
         let mut cursor = rect.top() + self.top(offset);
         for (&item, height) in self.items.iter().zip(&heights) {
             if cursor >= rect.bottom() {
@@ -275,20 +354,44 @@ impl Element for ScrollNode {
         rect: Rect,
         focus_target: &mut Option<NodeId>,
     ) -> Vec<NodeId> {
-        if input.pressed_this_frame && input.pointer_pos.is_some_and(|pos| rect.contains(pos)) {
+        let accepts_focus = (input.pressed_this_frame && !input.touch_started)
+            || (input.touch_ended && !input.touch_dragged && !input.touch_cancelled);
+        if accepts_focus && input.pointer_pos.is_some_and(|pos| rect.contains(pos)) {
             *focus_target = Some(id);
         }
         let mut position = self.position(doc, painter, rect);
         let anchored_offset = position.offset;
+        let previous_overscroll = self.overscroll;
+        let now = Instant::now();
+        let elapsed = now.duration_since(self.last_update).as_secs_f32();
+        self.last_update = now;
+        let touch_target = input.touch_scroll_target == Some(id);
+        if !touch_target {
+            self.drag_offset = None;
+            self.animate(&mut position, elapsed);
+        }
         if input.scroll_delta != 0.0 && input.pointer_pos.is_some_and(|pos| rect.contains(pos)) {
+            self.velocity = 0.0;
+            self.overscroll = 0.0;
             position.offset -= input.scroll_delta;
         }
-        if input.touch_scroll_target == Some(id) {
-            position.offset -= input.touch_scroll_delta;
+        if touch_target {
+            if input.touch_started {
+                self.drag_offset = Some(position.offset);
+                self.velocity = 0.0;
+            }
+            if input.touch_scroll_delta != 0.0 {
+                self.drag(&mut position, input.touch_scroll_delta);
+            }
+            if input.touch_ended {
+                self.release(-input.touch_velocity);
+            } else if input.touch_cancelled {
+                self.release(0.0);
+            }
         }
         position.offset = position.offset.clamp(0.0, position.max_offset());
 
-        if self.offset != position.offset {
+        if self.offset != position.offset || self.overscroll != previous_overscroll {
             doc.arena.invalidate();
             self.offset = position.offset;
         }
@@ -300,6 +403,9 @@ impl Element for ScrollNode {
         if !self.on_change.is_empty() && self.reported != Some(position) {
             self.reported = Some(position);
             self.on_change.call(position);
+        }
+        if self.animating() {
+            painter.ctx().request_repaint();
         }
 
         self.items.clone()
@@ -379,12 +485,30 @@ impl Document {
 
     pub(crate) fn set_scroll_offset(&mut self, scroll: NodeId, offset: f32) {
         let node = self.arena.get_as::<ScrollNode>(scroll);
-        if node.offset == offset && node.anchor.is_none() {
+        if node.offset == offset
+            && node.anchor.is_none()
+            && node.overscroll == 0.0
+            && node.velocity == 0.0
+        {
             return;
         }
         let node = self.arena.get_mut_as::<ScrollNode>(scroll);
         node.offset = offset;
         node.anchor = None;
+        node.overscroll = 0.0;
+        node.drag_offset = None;
+        node.velocity = 0.0;
+        node.last_update = Instant::now();
+    }
+
+    #[cfg(test)]
+    pub(crate) fn scroll_overscroll(&self, scroll: NodeId) -> f32 {
+        self.arena.get_as::<ScrollNode>(scroll).overscroll
+    }
+
+    #[cfg(test)]
+    pub(crate) fn scroll_is_animating(&self, scroll: NodeId) -> bool {
+        self.arena.get_as::<ScrollNode>(scroll).animating()
     }
 
     pub(crate) fn set_scroll_on_change(

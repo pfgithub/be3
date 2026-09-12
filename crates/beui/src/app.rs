@@ -279,6 +279,7 @@ impl ApplicationHandler for Runner {
             }
             WindowEvent::CursorMoved { position, .. } => {
                 self.pointer = self.logical(position);
+                self.context.set_touch_cursor(Some(self.pointer));
                 if self.context.touch_emulation() {
                     if self.emulated_touch {
                         self.push(emulated_touch(TouchPhase::Move, self.pointer));
@@ -288,6 +289,7 @@ impl ApplicationHandler for Runner {
                 }
             }
             WindowEvent::CursorLeft { .. } => {
+                self.context.set_touch_cursor(None);
                 if self.emulated_touch {
                     self.emulated_touch = false;
                     self.push(emulated_touch(TouchPhase::Cancel, self.pointer));

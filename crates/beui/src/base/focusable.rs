@@ -80,7 +80,10 @@ impl Element for FocusableNode {
         focus_target: &mut Option<NodeId>,
     ) -> Vec<NodeId> {
         let hovered = input.pointer_pos.is_some_and(|pos| rect.contains(pos));
-        if input.pressed_this_frame && hovered {
+        if hovered
+            && ((input.pressed_this_frame && !input.touch_started)
+                || (input.touch_ended && !input.touch_dragged && !input.touch_cancelled))
+        {
             *focus_target = Some(id);
         }
         self.child.into_iter().collect()

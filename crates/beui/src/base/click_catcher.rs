@@ -113,15 +113,15 @@ impl Element for ClickCatcherNode {
             self.armed = false;
             self.dragged = None;
         }
-        let hovered = input.pointer_pos.is_some_and(|pos| rect.contains(pos));
-        if hovered && input.pressed_this_frame {
+        let contains_pointer = input.pointer_pos.is_some_and(|pos| rect.contains(pos));
+        if contains_pointer && input.pressed_this_frame {
             self.armed = true;
             if let Some(pos) = input.pointer_pos {
                 let press = self.press(input, rect, pos);
                 self.on_press.call(press);
             }
         }
-        if hovered && input.secondary_pressed_this_frame {
+        if contains_pointer && input.secondary_pressed_this_frame {
             if let Some(pos) = input.pointer_pos {
                 let press = self.press(input, rect, pos);
                 self.on_secondary_press.call(press);
@@ -132,12 +132,13 @@ impl Element for ClickCatcherNode {
             self.dragged = None;
         }
         if input.released_this_frame {
-            if hovered && self.armed && !input.touch_dragged && !input.touch_cancelled {
+            if contains_pointer && self.armed && !input.touch_dragged && !input.touch_cancelled {
                 self.on_click.call();
             }
             self.armed = false;
             self.dragged = None;
         }
+        let hovered = contains_pointer && !input.touch_active && !input.touch_ended;
         if hovered || self.is_active() {
             painter.ctx().set_cursor_icon(self.cursor);
         }

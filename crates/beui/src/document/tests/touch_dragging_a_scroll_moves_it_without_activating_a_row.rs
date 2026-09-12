@@ -33,9 +33,16 @@ fn touch_dragging_a_scroll_moves_it_without_activating_a_row() {
 
     harness.touch(TouchPhase::Start, start);
     harness.touch(TouchPhase::Move, end);
+    assert_eq!(harness.document().focused_node(), None);
     harness.touch(TouchPhase::End, end);
+    let released_offset = harness.document().scroll_offset(scroll);
+    assert!((released_offset - 100.0).abs() < 0.01);
+
+    std::thread::sleep(std::time::Duration::from_millis(20));
     harness.frame(Vec::new());
 
-    assert!((harness.document().scroll_offset(scroll) - 100.0).abs() < 0.01);
+    assert!(harness.document().scroll_offset(scroll) > released_offset);
+    assert!(harness.document().scroll_is_animating(scroll));
+    assert_eq!(harness.document().focused_node(), None);
     assert_eq!(clicks.get(), 0);
 }
