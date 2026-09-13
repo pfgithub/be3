@@ -4,17 +4,18 @@ use std::error::Error;
 use std::fs;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::thread;
 
 pub fn fix_repository(root: &Path, check: bool) -> Result<(), Box<dyn Error>> {
-    let mut violations = find_layout_violations(root)?;
-    violations.extend(find_files_with_comments(root)?);
+    let mut violations = find_violations(root)?;
     violations.sort_unstable();
     violations.dedup();
 
+    if violations.is_empty() {
+        return Ok(());
+    }
     if check {
-        if violations.is_empty() {
-            return Ok(());
-        }
         return Err(format!("Rust source fixes required:\n{}", violations.join("\n")).into());
     }
 
@@ -223,19 +224,6 @@ fn text(source: &[u8], range: Range<usize>) -> &str {
     std::str::from_utf8(&source[range]).expect("Rust source is UTF-8")
 }
 
-fn find_files_with_comments(root: &Path) -> Result<Vec<String>, Box<dyn Error>> {
-    let mut paths = Vec::new();
-    collect_crate_files(root, &mut paths)?;
-    let mut violations = Vec::new();
-    for path in paths {
-        let source = fs::read(&path)?;
-        if strip_comments(&source)? != source {
-            violations.push(format!("comments: {}", relative(root, &path)));
-        }
-    }
-    Ok(violations)
-}
-
 fn strip_repository_comments(root: &Path) -> Result<(), Box<dyn Error>> {
     let mut paths = Vec::new();
     collect_crate_files(root, &mut paths)?;
@@ -250,38 +238,13 @@ fn strip_repository_comments(root: &Path) -> Result<(), Box<dyn Error>> {
 }
 
 fn find_layout_violations(root: &Path) -> Result<Vec<String>, Box<dyn Error>> {
+    find_violations(root)
+}
+
+fn find_violations(root: &Path) -> Result<Vec<String>, Box<dyn Error>> {
     let mut paths = Vec::new();
     collect_crate_files(root, &mut paths)?;
-    let mut violations = Vec::new();
-
-    for path in &paths {
-        if path.file_name().is_some_and(|name| name == "mod.rs") {
-            violations.push(format!("module file: {}", relative(root, path)));
-        }
-
-        let source = fs::read(path)?;
-        let tree = parse(&source)?;
-        if inline_tests(tree.syntax()).is_some() {
-            violations.push(format!("inline tests: {}", relative(root, path)));
-        }
-        if path_modules(tree.syntax())
-            .iter()
-            .any(|module| is_test_module_owner(path, &module.name))
-        {
-            violations.push(format!("test path attribute: {}", relative(root, path)));
-        }
-
-        let functions = attributed_test_functions(tree.syntax());
-        if !functions.is_empty()
-            && !(is_individual_test_file(path)
-                && functions.len() == 1
-                && path
-                    .file_stem()
-                    .is_some_and(|stem| stem == functions[0].name.as_str()))
-        {
-            violations.push(format!("test functions: {}", relative(root, path)));
-        }
-    }
+    let mut violations = inspect_files(root, &paths)?;
 
     for path in &paths {
         if !is_individual_test_file(path) {
@@ -328,6 +291,79 @@ fn find_layout_violations(root: &Path) -> Result<Vec<String>, Box<dyn Error>> {
         }
     }
 
+    Ok(violations)
+}
+
+fn inspect_files(root: &Path, paths: &[PathBuf]) -> Result<Vec<String>, Box<dyn Error>> {
+    if paths.is_empty() {
+        return Ok(Vec::new());
+    }
+    let workers = thread::available_parallelism()
+        .map_or(1, usize::from)
+        .min(paths.len());
+    let next = AtomicUsize::new(0);
+    let results = thread::scope(|scope| {
+        let handles = (0..workers)
+            .map(|_| scope.spawn(|| inspect_file_queue(root, paths, &next)))
+            .collect::<Vec<_>>();
+        handles
+            .into_iter()
+            .map(|handle| handle.join())
+            .collect::<Vec<_>>()
+    });
+    let mut violations = Vec::new();
+    for result in results {
+        let result = result.map_err(|_| "Rust source inspection thread panicked")?;
+        violations.extend(result.map_err(|error| -> Box<dyn Error> { error.into() })?);
+    }
+    Ok(violations)
+}
+
+fn inspect_file_queue(
+    root: &Path,
+    paths: &[PathBuf],
+    next: &AtomicUsize,
+) -> Result<Vec<String>, String> {
+    let mut violations = Vec::new();
+    loop {
+        let index = next.fetch_add(1, Ordering::Relaxed);
+        let Some(path) = paths.get(index) else {
+            break;
+        };
+        let source = fs::read(path).map_err(|error| error.to_string())?;
+        let tree = parse(&source).map_err(|error| error.to_string())?;
+        let relative = relative(root, path);
+        if path.file_name().is_some_and(|name| name == "mod.rs") {
+            violations.push(format!("module file: {relative}"));
+        }
+        if inline_tests(tree.syntax()).is_some() {
+            violations.push(format!("inline tests: {relative}"));
+        }
+        if path_modules(tree.syntax())
+            .iter()
+            .any(|module| is_test_module_owner(path, &module.name))
+        {
+            violations.push(format!("test path attribute: {relative}"));
+        }
+        let functions = attributed_test_functions(tree.syntax());
+        if !functions.is_empty()
+            && !(is_individual_test_file(path)
+                && functions.len() == 1
+                && path
+                    .file_stem()
+                    .is_some_and(|stem| stem == functions[0].name.as_str()))
+        {
+            violations.push(format!("test functions: {relative}"));
+        }
+        if tree
+            .syntax()
+            .descendants_with_tokens()
+            .filter_map(NodeOrToken::into_token)
+            .any(|token| ast::AnyComment::cast(token).is_some())
+        {
+            violations.push(format!("comments: {relative}"));
+        }
+    }
     Ok(violations)
 }
 

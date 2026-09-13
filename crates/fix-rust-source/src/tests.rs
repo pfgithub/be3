@@ -9,6 +9,7 @@ fn temporary_directory() -> PathBuf {
 }
 
 mod fix_repository_check_reports_without_changes;
+mod fix_repository_does_not_rewrite_compliant_repository;
 mod fix_repository_enforces_rust_layout;
 mod fix_repository_ignores_sources_outside_crates;
 mod fix_repository_removes_test_path_attributes;
