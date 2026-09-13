@@ -273,6 +273,9 @@ it takes exactly one and arrives as the `NodeId` itself, so wrappers use
 `{children}` in their `view!` without unwrapping, and a caller who writes none
 gets a panic naming the component. `Option<Child>` is the same for a wrapper
 whose child is optional, like `fill` or a `button` that takes `content` instead.
+Non-base components expose these subtree props as named slots in the inspector.
+Their own view stays under `shadow`, while the nodes supplied by the caller stay
+under the prop name; base elements remain transparent and add neither boundary.
 
 A `view!` with more than one root is a `Children` rather than a `NodeId`, so a
 fixed set of siblings can be written in one place and handed to a `Children`

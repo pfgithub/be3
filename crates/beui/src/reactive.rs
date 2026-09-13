@@ -28,6 +28,7 @@ thread_local! {
     static PENDING_DETAIL: RefCell<HashMap<NodeId, String>> = RefCell::new(HashMap::new());
     static PENDING_STATE: RefCell<HashMap<NodeId, Box<dyn Any>>> = RefCell::new(HashMap::new());
     static PENDING_ACCESSIBILITY: RefCell<HashMap<NodeId, accesskit::Node>> = RefCell::new(HashMap::new());
+    static PENDING_SLOTS: RefCell<HashMap<NodeId, Vec<NodeId>>> = RefCell::new(HashMap::new());
 }
 
 struct ActiveDocumentGuard;
@@ -147,8 +148,9 @@ pub fn component(name: &'static str, f: impl FnOnce() -> NodeId) -> NodeId {
     let name = COMPONENT_NAME
         .with(|cell| cell.replace(outer_name))
         .unwrap_or(name);
+    let slots = PENDING_SLOTS.with(|cell| cell.borrow_mut().remove(&shadow).unwrap_or_default());
     with_document(|document| {
-        document.finish_shadow(shadow, name, root, Vec::new());
+        document.finish_shadow(shadow, name, root, slots);
         document.register_node_scope(shadow, scope);
     });
     if let Some(detail) = PENDING_DETAIL.with(|cell| cell.borrow_mut().remove(&shadow)) {
@@ -339,8 +341,25 @@ fn in_component<R>(owner: Option<NodeId>, f: impl FnOnce() -> R) -> R {
     f()
 }
 
+fn component_slot(owner: NodeId, name: &'static str, content: NodeId) -> NodeId {
+    let slot = with_document(|document| document.create_slot(owner, name, content));
+    with_document(|document| {
+        if document.contains(owner) {
+            document.add_shadow_slot(owner, slot);
+        } else {
+            PENDING_SLOTS.with(|cell| cell.borrow_mut().entry(owner).or_default().push(slot));
+        }
+    });
+    slot
+}
+
+pub fn component_child_slot(name: &'static str, child: Child) -> Child {
+    component_slot(current_component(), name, child)
+}
+
 pub struct Render<H = ()> {
     owner: Option<NodeId>,
+    slots: Vec<(NodeId, &'static str)>,
     render: Box<dyn FnOnce(H) -> NodeId>,
 }
 
@@ -348,17 +367,27 @@ impl<H> Render<H> {
     pub fn new(render: impl FnOnce(H) -> NodeId + 'static) -> Self {
         Self {
             owner: CURRENT_COMPONENT.with(Cell::get),
+            slots: Vec::new(),
             render: Box::new(render),
         }
     }
 
     pub fn call(self, handle: H) -> NodeId {
-        in_component(self.owner, || (self.render)(handle))
+        let node = in_component(self.owner, || (self.render)(handle));
+        self.slots.into_iter().fold(node, |node, (owner, name)| {
+            component_slot(owner, name, node)
+        })
+    }
+
+    pub fn into_component_slot(mut self, name: &'static str) -> Self {
+        self.slots.push((current_component(), name));
+        self
     }
 }
 
 pub struct RenderFn<H> {
     owner: Option<NodeId>,
+    slots: Vec<(NodeId, &'static str)>,
     render: Rc<dyn Fn(H) -> NodeId>,
 }
 
@@ -366,12 +395,21 @@ impl<H> RenderFn<H> {
     pub fn new(render: impl Fn(H) -> NodeId + 'static) -> Self {
         Self {
             owner: CURRENT_COMPONENT.with(Cell::get),
+            slots: Vec::new(),
             render: Rc::new(render),
         }
     }
 
     pub fn call(&self, handle: H) -> NodeId {
-        in_component(self.owner, || (self.render)(handle))
+        let node = in_component(self.owner, || (self.render)(handle));
+        self.slots.iter().fold(node, |node, &(owner, name)| {
+            component_slot(owner, name, node)
+        })
+    }
+
+    pub fn into_component_slot(mut self, name: &'static str) -> Self {
+        self.slots.push((current_component(), name));
+        self
     }
 }
 
@@ -379,6 +417,7 @@ impl<H> Clone for RenderFn<H> {
     fn clone(&self) -> Self {
         Self {
             owner: self.owner,
+            slots: self.slots.clone(),
             render: self.render.clone(),
         }
     }
@@ -537,6 +576,15 @@ pub type Child = NodeId;
 pub struct Children(Vec<(NodeId, Prop<ItemSize>)>);
 
 impl Children {
+    pub fn into_component_slots(self, name: &'static str) -> Self {
+        Self(
+            self.0
+                .into_iter()
+                .map(|(child, size)| (component_child_slot(name, child), size))
+                .collect(),
+        )
+    }
+
     fn mount(self, parent: NodeId) {
         let initial_sizes: Vec<ItemSize> = untrack(|| {
             self.0
