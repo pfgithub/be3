@@ -50,8 +50,7 @@ fn children_written_between_show_tags_are_not_built_until_it_is_shown() {
     harness.frame(Vec::new());
     assert_eq!(builds.get(), 1, "showing it must build the children block");
     assert!(harness.document().is_visible(visibility));
-    let slot = harness.document().children(visibility)[0];
-    let child = harness.document().children(slot)[0];
+    let child = harness.document().children(visibility)[0];
     assert_eq!(
         text_of(harness.document(), harness.document().shadow_root(child)),
         "panel"

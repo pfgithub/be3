@@ -145,18 +145,6 @@ impl Document {
         for child in children {
             self.detach_subtree(child, scopes);
         }
-        let slot_owner = self
-            .arena
-            .get(id)
-            .as_any()
-            .downcast_ref::<crate::base::shadow::SlotNode>()
-            .map(|slot| slot.owner);
-        if let Some(owner) = slot_owner.filter(|owner| self.arena.contains(*owner)) {
-            self.arena
-                .get_mut_as::<crate::base::shadow::ShadowNode>(owner)
-                .slots
-                .retain(|slot| *slot != id);
-        }
         self.arena.remove(id);
         self.sizes.remove(&id);
         self.accessibility.remove(&id);

@@ -51,8 +51,7 @@ fn tabs_collapse_into_a_select_when_their_container_is_narrow() {
 
     assert!(!harness.document().is_visible(wide));
     assert!(harness.document().is_visible(narrow));
-    let select_slot = harness.document().children(narrow)[0];
-    let select = harness.document().children(select_slot)[0];
+    let select = harness.document().children(narrow)[0];
     assert!(harness.document().node_rect(select).is_some());
     assert!(harness
         .document()

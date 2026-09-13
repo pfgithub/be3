@@ -48,8 +48,7 @@ fn show_lazily_builds_and_toggles_its_child_when_the_condition_changes() {
         "showing it for the first time must build it"
     );
     assert!(harness.document().is_visible(visibility));
-    let slot = harness.document().children(visibility)[0];
-    let child = harness.document().children(slot)[0];
+    let child = harness.document().children(visibility)[0];
     assert_eq!(text_of(harness.document(), child), "panel");
 
     harness.click(harness.center(toggle));

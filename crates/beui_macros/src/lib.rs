@@ -495,105 +495,58 @@ pub fn component(attr: TokenStream, item: TokenStream) -> TokenStream {
         }
     });
 
-    let field_lets = props
-        .iter()
-        .map(|prop| {
-            let ident = &prop.ident;
-            let ident_str = ident.to_string();
-            let value = if prop.inner_ty.is_some() {
-                quote! { self.#ident.unwrap_or(None) }
-            } else if prop.is_children {
-                quote! { self.#ident.unwrap_or_default() }
-            } else if prop.is_child {
-                quote! {
-                    match self.#ident {
-                        Some(value) => value,
-                        None => panic!("component `{}` requires exactly one child", #name),
-                    }
+    let field_lets = props.iter().map(|prop| {
+        let ident = &prop.ident;
+        let ident_str = ident.to_string();
+        let value = if prop.inner_ty.is_some() {
+            quote! { self.#ident.unwrap_or(None) }
+        } else if prop.is_children {
+            quote! { self.#ident.unwrap_or_default() }
+        } else if prop.is_child {
+            quote! {
+                match self.#ident {
+                    Some(value) => value,
+                    None => panic!("component `{}` requires exactly one child", #name),
                 }
-            } else if let Some(default) = &prop.default {
-                if prop.reactive_inner_ty.is_some() {
-                    quote! {
-                        self.#ident
-                            .unwrap_or_else(|| ::beui::reactive::IntoProp::into_prop(#default))
-                    }
-                } else {
-                    quote! { self.#ident.unwrap_or_else(|| #default) }
-                }
-            } else if prop.reactive_inner_ty.is_some() {
-                quote! {
-                    self.#ident.unwrap_or_else(|| {
-                        ::beui::reactive::Prop::Static(::core::default::Default::default())
-                    })
-                }
-            } else if prop.callback_args.is_some() || prop.is_click_callback {
-                quote! { self.#ident.unwrap_or_default() }
-            } else {
-                quote! {
-                    match self.#ident {
-                        Some(value) => value,
-                        None => panic!(
-                            "missing required prop `{}` for component `{}`",
-                            #ident_str, #name,
-                        ),
-                    }
-                }
-            };
-            quote! { let #ident = #value; }
-        })
-        .collect::<Vec<_>>();
-
-    let slot_lets = props
-        .iter()
-        .filter_map(|prop| {
-            let ident = &prop.ident;
-            let name = ident.to_string();
-            if prop.is_children {
-                Some(quote! {
-                    let #ident = #ident.into_component_slots(#name);
-                })
-            } else if prop.is_child {
-                Some(quote! {
-                    let #ident = ::beui::reactive::component_child_slot(#name, #ident);
-                })
-            } else if prop.is_optional_child {
-                Some(quote! {
-                    let #ident = #ident.map(|child| {
-                        ::beui::reactive::component_child_slot(#name, child)
-                    });
-                })
-            } else if prop.render.is_some() {
-                Some(quote! {
-                    let #ident = #ident.into_component_slot(#name);
-                })
-            } else if prop.optional_render.is_some() {
-                Some(quote! {
-                    let #ident = #ident.map(|render| render.into_component_slot(#name));
-                })
-            } else {
-                None
             }
-        })
-        .collect::<Vec<_>>();
+        } else if let Some(default) = &prop.default {
+            if prop.reactive_inner_ty.is_some() {
+                quote! {
+                    self.#ident
+                        .unwrap_or_else(|| ::beui::reactive::IntoProp::into_prop(#default))
+                }
+            } else {
+                quote! { self.#ident.unwrap_or_else(|| #default) }
+            }
+        } else if prop.reactive_inner_ty.is_some() {
+            quote! {
+                self.#ident.unwrap_or_else(|| {
+                    ::beui::reactive::Prop::Static(::core::default::Default::default())
+                })
+            }
+        } else if prop.callback_args.is_some() || prop.is_click_callback {
+            quote! { self.#ident.unwrap_or_default() }
+        } else {
+            quote! {
+                match self.#ident {
+                    Some(value) => value,
+                    None => panic!(
+                        "missing required prop `{}` for component `{}`",
+                        #ident_str, #name,
+                    ),
+                }
+            }
+        };
+        quote! { let #ident = #value; }
+    });
 
     let generics = &sig.generics;
     let (_, type_generics, _) = sig.generics.split_for_impl();
     let where_clause = &sig.generics.where_clause;
     let finish = if base {
-        quote! {
-            {
-                #(#field_lets)*
-                (move || #block)()
-            }
-        }
+        quote! { (move || #block)() }
     } else {
-        quote! {
-            ::beui::reactive::component(#name, move || {
-                #(#field_lets)*
-                #(#slot_lets)*
-                (move || #block)()
-            })
-        }
+        quote! { ::beui::reactive::component(#name, move || #block) }
     };
 
     let prop_idents: Vec<_> = props.iter().map(|prop| prop.ident.clone()).collect();
@@ -640,6 +593,7 @@ pub fn component(attr: TokenStream, item: TokenStream) -> TokenStream {
             pub fn build(self) #output {
                 let test_id = self.with_test_id;
                 let node_ref = self.with_node_ref;
+                #(#field_lets)*
                 let node = #finish;
                 if let Some(test_id) = test_id {
                     ::beui::reactive::with_document(|document| document.set_test_id(node, test_id));
