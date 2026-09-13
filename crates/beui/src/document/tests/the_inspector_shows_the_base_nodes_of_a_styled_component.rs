@@ -3,7 +3,7 @@ use crate::reactive::{view, Text};
 use crate::styled::ListRow;
 
 #[test]
-fn the_inspector_hides_the_internals_of_a_styled_component() {
+fn the_inspector_shows_the_base_nodes_of_a_styled_component() {
     let (document, [_row]) = toolbar_of(|| {
         [view! {
             <ListRow>
@@ -17,6 +17,11 @@ fn the_inspector_hides_the_internals_of_a_styled_component() {
 
     assert_eq!(
         harness.tree(),
-        ["column", "  ListRow", "    Button", "      focusable"]
+        [
+            "column",
+            "  focusable",
+            "    click-catcher",
+            "      outline"
+        ]
     );
 }

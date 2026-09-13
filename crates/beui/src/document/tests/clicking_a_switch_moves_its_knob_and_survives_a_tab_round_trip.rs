@@ -1,6 +1,6 @@
 use super::*;
 use crate::reactive::{create_memo, create_signal, view, NodeRef, Show};
-use crate::styled::Switch;
+use crate::styled::{switch_on, Switch};
 
 #[test]
 fn clicking_a_switch_moves_its_knob_and_survives_a_tab_round_trip() {
@@ -29,10 +29,7 @@ fn clicking_a_switch_moves_its_knob_and_survives_a_tab_round_trip() {
     harness.frame(Vec::new());
     let on_rect = harness.rect(knob);
     assert_ne!(off_rect, on_rect, "clicking the switch must move the knob");
-    assert_eq!(
-        harness.document().node_detail(switch).as_deref(),
-        Some("on")
-    );
+    assert!(switch_on(harness.document(), switch));
 
     with_installed(harness.document_mut(), |_| set_tab.set(1));
     harness.frame(Vec::new());
@@ -42,14 +39,11 @@ fn clicking_a_switch_moves_its_knob_and_survives_a_tab_round_trip() {
     harness.click(harness.center(switch));
     harness.frame(Vec::new());
     assert_eq!(harness.rect(knob), off_rect, "the knob must move back off");
-    assert_eq!(
-        harness.document().node_detail(switch).as_deref(),
-        Some("off")
-    );
+    assert!(!switch_on(harness.document(), switch));
 }
 
 fn knob_of(document: &Document, switch: NodeId) -> NodeId {
-    let mut id = document.shadow_root(switch);
+    let mut id = switch;
     loop {
         let children = document.children(id);
         if children.len() > 1 {

@@ -36,7 +36,7 @@ fn selecting_a_leaf_item_in_a_nested_context_menu_closes_the_whole_menu_stack() 
     }]);
     harness.frame(Vec::new());
 
-    let inner = harness.document().shadow_root(menu);
+    let inner = menu;
     let overlay = unstyled::context_menu_overlay(harness.document(), inner);
 
     harness.key(Key::ArrowDown, Modifiers::NONE);

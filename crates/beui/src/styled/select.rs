@@ -147,13 +147,11 @@ fn SelectPopup(children: Child) -> NodeId {
 }
 
 pub fn select_selected(document: &Document, select: NodeId) -> Option<usize> {
-    let inner = document.shadow_root(select);
-    unstyled::select_selected(document, inner)
+    unstyled::select_selected(document, select)
 }
 
 pub fn select_open(document: &Document, select: NodeId) -> bool {
-    let inner = document.shadow_root(select);
-    unstyled::select_open(document, inner)
+    unstyled::select_open(document, select)
 }
 
 fn trigger_label(options: &[String], selected: Option<usize>) -> String {

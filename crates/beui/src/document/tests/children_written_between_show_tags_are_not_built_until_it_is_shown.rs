@@ -37,7 +37,7 @@ fn children_written_between_show_tags_are_not_built_until_it_is_shown() {
     let (toggle, panel) = (toggle.get(), panel.get());
     let mut harness = Harness::new(document);
     harness.frame(Vec::new());
-    let visibility = harness.document().shadow_root(panel);
+    let visibility = panel;
 
     assert_eq!(
         builds.get(),
@@ -51,10 +51,7 @@ fn children_written_between_show_tags_are_not_built_until_it_is_shown() {
     assert_eq!(builds.get(), 1, "showing it must build the children block");
     assert!(harness.document().is_visible(visibility));
     let child = harness.document().children(visibility)[0];
-    assert_eq!(
-        text_of(harness.document(), harness.document().shadow_root(child)),
-        "panel"
-    );
+    assert_eq!(text_of(harness.document(), child), "panel");
 
     harness.click(harness.center(toggle));
     harness.frame(Vec::new());

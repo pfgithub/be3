@@ -4,7 +4,7 @@ use beui_macros::{component, view};
 
 use crate::base::TextAlign;
 use crate::node::NodeId;
-use crate::reactive::{clone, component_detail, create_memo, Prop, Text};
+use crate::reactive::{create_memo, Prop, Text};
 use crate::styled::theme::{
     FONT_BODY, FONT_DISPLAY, FONT_HEADING, FONT_SMALL, FONT_TITLE, ICON_SIZE, TEXT, TEXT_MUTED,
 };
@@ -38,7 +38,7 @@ pub fn IconSized(glyph: String, font_size: Prop<f32>, color: Prop<Color32>) -> N
     }
 }
 
-#[component(base)]
+#[component]
 fn Line(
     content: Prop<String>,
     font_size: Prop<f32>,
@@ -46,9 +46,6 @@ fn Line(
     #[prop(default = TextAlign::Start)] align: Prop<TextAlign>,
 ) -> NodeId {
     let text = create_memo(move || content.get());
-    component_detail(create_memo(
-        clone!(text -> move || format!("{:?}", text.get())),
-    ));
     view! {
         <Text string={text} font_size color align />
     }
@@ -105,9 +102,6 @@ pub fn Paragraph(
     #[prop(default = TEXT_MUTED)] color: Prop<Color32>,
 ) -> NodeId {
     let text = create_memo(move || content.get());
-    component_detail(create_memo(
-        clone!(text -> move || format!("{:?}", text.get())),
-    ));
     view! {
         <Text string={text} font_size=FONT_BODY color wrap=true />
     }

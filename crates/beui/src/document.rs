@@ -1,3 +1,4 @@
+use std::any::Any;
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::Instant;
@@ -38,7 +39,8 @@ pub struct Document {
     next_paint: Option<Instant>,
     reactive_scope: ::reactive::Scope,
     node_scopes: HashMap<NodeId, Vec<::reactive::Scope>>,
-    sizes: HashMap<NodeId, SizeWatcher>,
+    sizes: HashMap<NodeId, Vec<SizeWatcher>>,
+    component_states: HashMap<NodeId, Vec<Box<dyn Any>>>,
     pub(crate) accessibility_id: u32,
     pub(crate) accessibility: HashMap<NodeId, Node>,
 }
@@ -71,6 +73,7 @@ impl Document {
             reactive_scope: ::reactive::Scope::new(),
             node_scopes: HashMap::new(),
             sizes: HashMap::new(),
+            component_states: HashMap::new(),
             accessibility_id: accessibility::next_document_id(),
             accessibility: HashMap::new(),
         }
@@ -147,6 +150,7 @@ impl Document {
         }
         self.arena.remove(id);
         self.sizes.remove(&id);
+        self.component_states.remove(&id);
         self.accessibility.remove(&id);
         scopes.extend(self.node_scopes.remove(&id).unwrap_or_default());
         if self.root == Some(id) {
@@ -273,15 +277,42 @@ impl Document {
     }
 
     pub(crate) fn watch_size(&mut self, id: NodeId) -> ::reactive::ReadSignal<Vec2> {
+        if let Some(watcher) = self.sizes.get(&id).and_then(|watchers| watchers.first()) {
+            return watcher.read.clone();
+        }
         let size = self.rects.get(&id).map_or(Vec2::ZERO, Rect::size);
+        let (read, write) = ::reactive::create_signal(size);
+        self.sizes.entry(id).or_default().push(SizeWatcher {
+            read: read.clone(),
+            write,
+        });
+        read
+    }
+
+    pub(crate) fn register_size_watcher(
+        &mut self,
+        id: NodeId,
+        read: ::reactive::ReadSignal<Vec2>,
+        write: ::reactive::WriteSignal<Vec2>,
+    ) {
         self.sizes
             .entry(id)
-            .or_insert_with(|| {
-                let (read, write) = ::reactive::create_signal(size);
-                SizeWatcher { read, write }
-            })
-            .read
-            .clone()
+            .or_default()
+            .push(SizeWatcher { read, write });
+    }
+
+    pub(crate) fn set_component_state_dyn(&mut self, id: NodeId, state: Box<dyn Any>) {
+        self.component_states.entry(id).or_default().push(state);
+    }
+
+    pub fn component_state<T: 'static>(&self, id: NodeId) -> &T {
+        self.component_states
+            .get(&id)
+            .into_iter()
+            .flatten()
+            .rev()
+            .find_map(|state| state.downcast_ref::<T>())
+            .unwrap_or_else(|| panic!("component has no {} state", std::any::type_name::<T>()))
     }
 
     fn settle_layout(&mut self, ctx: &Context, rect: Rect) {
@@ -298,9 +329,12 @@ impl Document {
         let changed: Vec<(::reactive::WriteSignal<Vec2>, Vec2)> = self
             .sizes
             .iter()
-            .filter_map(|(id, watcher)| {
+            .flat_map(|(id, watchers)| {
                 let size = self.rects.get(id).map_or(Vec2::ZERO, Rect::size);
-                (watcher.read.get_untracked() != size).then(|| (watcher.write.clone(), size))
+                watchers
+                    .iter()
+                    .filter(move |watcher| watcher.read.get_untracked() != size)
+                    .map(move |watcher| (watcher.write.clone(), size))
             })
             .collect();
         if changed.is_empty() {

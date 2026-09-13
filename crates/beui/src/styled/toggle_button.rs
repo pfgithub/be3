@@ -4,9 +4,7 @@ use beui_macros::{component, view};
 use crate::color::Color32;
 use crate::document::Document;
 use crate::node::NodeId;
-use crate::reactive::{
-    component_detail, create_memo, Callback, Fill, Outline, Padding, Prop, Text,
-};
+use crate::reactive::{create_memo, Callback, Fill, Outline, Padding, Prop, Text};
 use crate::styled::theme::{
     ACCENT, ACCENT_SOFT, BORDER, FONT_BODY, RADIUS, SURFACE, SURFACE_RAISED, TEXT,
 };
@@ -16,7 +14,6 @@ use crate::unstyled::{Toggle, ToggleHandle};
 #[component]
 pub fn ToggleButton(label: Prop<String>, pressed: Prop<bool>, on_change: Callback<bool>) -> NodeId {
     let label_text = create_memo(move || label.get());
-    component_detail(label_text.clone());
     let accessibility = create_memo({
         let label_text = label_text.clone();
         move || {
@@ -72,5 +69,5 @@ fn fill_for(pressed: bool, hovered: bool) -> Color32 {
 }
 
 pub fn toggle_button_pressed(document: &Document, button: NodeId) -> bool {
-    unstyled::toggle_checked(document, document.shadow_root(button)).get()
+    unstyled::toggle_checked(document, button).get()
 }

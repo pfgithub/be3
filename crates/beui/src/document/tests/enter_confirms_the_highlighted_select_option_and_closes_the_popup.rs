@@ -20,7 +20,7 @@ fn enter_confirms_the_highlighted_select_option_and_closes_the_popup() {
     let mut harness = Harness::new(document);
     harness.frame(Vec::new());
 
-    let inner = harness.document().shadow_root(select);
+    let inner = select;
     let trigger = unstyled::select_trigger(harness.document(), inner);
     harness.click(harness.center(trigger));
     harness.frame(Vec::new());

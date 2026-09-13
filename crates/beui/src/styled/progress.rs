@@ -3,8 +3,7 @@ use beui_macros::{component, view};
 
 use crate::node::NodeId;
 use crate::reactive::{
-    clone, component_accessibility, component_detail, create_memo, Fill, ItemSize, Prop, Row,
-    Sized, Spacer,
+    clone, component_accessibility, create_memo, Fill, ItemSize, Prop, Row, Sized, Spacer,
 };
 use crate::styled::theme::{ACCENT, TRACK};
 
@@ -18,9 +17,6 @@ pub fn Progress(value: Prop<f32>, #[prop(default = String::new())] label: Prop<S
 
     let filled = create_memo(clone!(value_read -> move || filled_size(value_read.get())));
     let rest = create_memo(clone!(value_read -> move || rest_size(value_read.get())));
-    component_detail(create_memo(
-        clone!(value_read -> move || detail(value_read.get())),
-    ));
     component_accessibility(create_memo(clone!(value_read -> move || {
         let value = value_read.get();
         let mut node = Node::new(Role::ProgressIndicator);
@@ -44,10 +40,6 @@ pub fn Progress(value: Prop<f32>, #[prop(default = String::new())] label: Prop<S
             </Fill>
         </Sized>
     }
-}
-
-fn detail(value: f32) -> String {
-    format!("{}%", (value * 100.0).round())
 }
 
 fn filled_size(value: f32) -> ItemSize {

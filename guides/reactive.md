@@ -193,11 +193,10 @@ let document = build(|| view! { <App /> });
 That exact function name is also the constructor that returns the builder `view!`
 fills in. A prop typed `Prop<T>` accepts
 either a plain `T` or a signal or memo of `T`; the reactive forms create an
-effect that keeps that property in sync. `#[component(base)]` is for the base
-elements, which do the same but without a shadow node of their own. Every tag
-also accepts the framework slots `@test_id`, `@node_ref`, and `@sizing`, which
-live in their own `@` namespace so a component is free to name its own props
-whatever it likes.
+effect that keeps that property in sync. Components return their base node
+directly. Every tag also accepts the framework slots `@test_id`, `@node_ref`,
+and `@sizing`, which live in their own `@` namespace so a component is free to
+name its own props whatever it likes.
 
 ## Writing attributes
 
@@ -332,14 +331,11 @@ attribute, like `panel={panel.clone()}` — only a closure or a tag block can be
 written between the tags.
 
 A render prop runs with the component that *wrote* it installed, not the one
-that calls it, so `component_detail` inside one labels the outer component.
-`component_detail` takes the same thing a `Prop<String>` does — a plain string
-or a signal or memo of one — so the label a component shows in the inspector is
-written the way its other properties are: `component_detail(checked.map(label))`.
-`Func<V, R>` is the same idea for a plain callback that returns a value, like
-`for_each`'s `key`. A prop of any of these three types also accepts an already
-built `Render`/`RenderFn`/`Func`, which is how a component forwards one it was
-given.
+that calls it, so component-scoped state and accessibility inside one belong to
+the outer component. `Func<V, R>` is the same idea for a plain callback that
+returns a value, like `for_each`'s `key`. A prop of any of these three types also
+accepts an already built `Render`/`RenderFn`/`Func`, which is how a component
+forwards one it was given.
 
 State a component keeps for its own handlers belongs in an `Rc` the handlers
 capture; `set_component_state` additionally publishes it so that a test holding
@@ -450,7 +446,7 @@ effects that woke up rebuild before it lays out again — up to a few passes per
 frame — so a size-driven change is visible in the frame that caused it rather
 than one frame later. The signal reads `Vec2::ZERO` until the first layout.
 
-`unstyled::container` ties the two together: it measures its own shadow node,
+`unstyled::container` ties the two together: it measures its returned base node,
 provides that size as `ContainerSize`, and hands the signal to its `content`
 render prop. Anything below it can then ask `container_size()`, or
 `narrower_than(width)` for a `Memo<bool>` that is true when the nearest container
@@ -469,13 +465,14 @@ container whose children react to its width — can oscillate. Give containers a
 width that comes from their parent.
 
 Each `Document` owns a root `reactive::Scope` (`Document::reactive_scope`), and
-every `#[component]` owns a scope of its own, registered against the shadow node
-that represents it. A component's scope is a child of the scope that built it,
-so component scopes form the same tree the nodes do. `Document::remove_node`
-disposes the scopes registered against the subtree it removes: the effects that
-were created while building those nodes stop, and the `on_cleanup` callbacks
-they registered run. Without that, an effect left alive by a removed component
-panics with "node was removed" the next time one of its inputs changes.
+every `#[component]` owns a scope of its own, registered against the base node
+it returns. Several component scopes can share a node when wrapper components
+return the same base node. A component's scope is a child of the scope that
+built it. `Document::remove_node` disposes every scope registered against the
+subtree it removes: the effects that were created while building those nodes
+stop, and the `on_cleanup` callbacks they registered run. Without that, an
+effect left alive by a removed component panics with "node was removed" the next
+time one of its inputs changes.
 
 Effects created outside any component body — directly in `build`'s closure, for
 instance — belong to the document's root scope and live as long as the document.

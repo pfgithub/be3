@@ -12,7 +12,7 @@ fn arrow_keys_in_a_select_search_box_move_the_highlighted_option_without_editing
     let mut harness = Harness::new(document);
     harness.frame(Vec::new());
 
-    let inner = harness.document().shadow_root(select);
+    let inner = select;
     let trigger = unstyled::select_trigger(harness.document(), inner);
     harness.click(harness.center(trigger));
     harness.frame(Vec::new());

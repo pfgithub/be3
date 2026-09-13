@@ -6,8 +6,8 @@ use crate::base::TextAlign;
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
-    component_detail, create_memo, Callback, CenteredRow, Child, Fill, ItemSize, Memo, Outline,
-    Padding, Prop, Sized, Text,
+    create_memo, Callback, CenteredRow, Child, Fill, ItemSize, Memo, Outline, Padding, Prop, Sized,
+    Text,
 };
 use crate::styled::theme::{
     ACCENT, FONT_HEADING, FONT_SMALL, RADIUS, SURFACE_RAISED, TEXT, TEXT_MUTED,
@@ -28,8 +28,6 @@ pub fn Accordion(
     children: Child,
 ) -> NodeId {
     let title_text = create_memo(move || title.get());
-    component_detail(title_text.clone());
-
     view! {
         <unstyled::Disclosure
             spacing=SPACING
@@ -80,7 +78,7 @@ fn AccordionHeader(handle: DisclosureHandle, title: Memo<String>) -> NodeId {
 }
 
 pub fn accordion_open(document: &Document, accordion: NodeId) -> bool {
-    unstyled::disclosure_open(document, document.shadow_root(accordion))
+    unstyled::disclosure_open(document, accordion)
 }
 
 fn glyph(open: bool) -> &'static str {

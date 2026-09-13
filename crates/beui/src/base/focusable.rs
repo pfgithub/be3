@@ -376,7 +376,7 @@ pub fn focus_within(node: NodeId) {
     });
 }
 
-#[component(base)]
+#[component]
 pub fn Focusable(
     #[prop(default = true)] tab_stop: Prop<bool>,
     focused: Prop<bool>,

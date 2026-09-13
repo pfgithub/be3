@@ -12,7 +12,7 @@ fn escape_closes_an_open_select_popup_and_returns_focus_to_the_trigger() {
     let mut harness = Harness::new(document);
     harness.frame(Vec::new());
 
-    let inner = harness.document().shadow_root(select);
+    let inner = select;
     let trigger = unstyled::select_trigger(harness.document(), inner);
     harness.click(harness.center(trigger));
     harness.frame(Vec::new());

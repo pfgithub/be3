@@ -6,7 +6,6 @@ pub(crate) mod outline;
 pub(crate) mod overlay;
 pub(crate) mod padding;
 pub(crate) mod scroll;
-pub(crate) mod shadow;
 pub(crate) mod sized;
 pub(crate) mod text;
 pub(crate) mod visibility;

@@ -174,7 +174,7 @@ impl Element for OverlayNode {
     }
 }
 
-#[component(base)]
+#[component]
 pub(crate) fn Overlay(
     anchor: Prop<OverlayAnchor>,
     #[prop(default = Placement::BelowStart)] placement: Prop<Placement>,

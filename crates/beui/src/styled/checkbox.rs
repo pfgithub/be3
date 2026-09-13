@@ -6,8 +6,8 @@ use crate::color::Color32;
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
-    clone, component_detail, create_memo, Callback, CenteredRow, Fill, ItemSize, Outline, Prop,
-    Sized, Spacer, Text, Visibility,
+    clone, create_memo, Callback, CenteredRow, Fill, ItemSize, Outline, Prop, Sized, Spacer, Text,
+    Visibility,
 };
 use crate::styled::theme::{
     ACCENT, ACCENT_HOVER, BORDER, BORDER_WIDTH, CHIP_RADIUS, FONT_BODY, ON_ACCENT, RADIUS,
@@ -28,8 +28,6 @@ pub fn Checkbox(label: Prop<String>, checked: Prop<bool>, on_change: Callback<bo
     view! {
         <Toggle checked on_change={move |checked| on_change.call(checked)}>
             {move |handle: ToggleHandle| {
-                let checked = handle.checked.clone();
-                component_detail(create_memo(move || detail(checked.get()).to_owned()));
                 view! { <CheckboxFace handle label /> }
             }}
         </Toggle>
@@ -72,15 +70,7 @@ fn CheckboxFace(handle: ToggleHandle, label: Prop<String>) -> NodeId {
 }
 
 pub fn checkbox_checked(document: &Document, checkbox: NodeId) -> bool {
-    unstyled::toggle_checked(document, document.shadow_root(checkbox)).get()
-}
-
-fn detail(checked: bool) -> &'static str {
-    if checked {
-        "checked"
-    } else {
-        "unchecked"
-    }
+    unstyled::toggle_checked(document, checkbox).get()
 }
 
 fn box_fill(checked: bool, hovered: bool) -> Color32 {

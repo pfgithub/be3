@@ -9,9 +9,8 @@ use crate::document::Document;
 use crate::input::{Key, KeyPress};
 use crate::node::NodeId;
 use crate::reactive::{
-    clone, component_accessibility, component_detail, create_effect, create_memo, create_selector,
-    create_signal, intrinsic, set_component_name, set_component_state, Callback, List, Memo, Prop,
-    ReadSignal, RenderFn, WriteSignal,
+    clone, component_accessibility, create_effect, create_memo, create_selector, create_signal,
+    intrinsic, set_component_state, Callback, List, Memo, Prop, ReadSignal, RenderFn, WriteSignal,
 };
 use crate::unstyled;
 use crate::unstyled::ButtonHandle;
@@ -66,7 +65,6 @@ pub fn Choice(
     on_change: Callback<Option<usize>>,
     #[prop(children)] option: Option<RenderFn<ChoiceOptionHandle>>,
 ) -> NodeId {
-    set_component_name(kind_name(kind));
     let selected_prop = selected;
     let option = option.expect("choice requires an `option` builder");
     let (selected, set_selected) = create_signal(None);
@@ -97,13 +95,6 @@ pub fn Choice(
         on_change,
     });
     set_component_state(state.clone());
-    component_detail(create_memo(clone!(state selected -> move || {
-        match selected.get() {
-            Some(index) => state.options[index].label.clone(),
-            None => String::new(),
-        }
-    })));
-
     let buttons: Vec<_> = labels
         .iter()
         .enumerate()
@@ -272,13 +263,5 @@ fn typeahead(state: &State, index: usize, text: &str) {
         let mut typeahead = state.typeahead.borrow_mut();
         typeahead.search = search;
         typeahead.typed_at = Some(now);
-    }
-}
-
-fn kind_name(kind: ChoiceKind) -> &'static str {
-    match kind {
-        ChoiceKind::Tabs => "tabs",
-        ChoiceKind::Radio => "radio-group",
-        ChoiceKind::Listbox => "listbox",
     }
 }

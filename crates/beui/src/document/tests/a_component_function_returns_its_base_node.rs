@@ -7,7 +7,7 @@ fn Widget() -> NodeId {
 }
 
 #[test]
-fn a_component_function_appears_in_the_inspector_tree_without_hiding_its_children() {
+fn a_component_function_returns_its_base_node() {
     let document = build(|| {
         view! {
             <Column spacing=0.0>
@@ -19,5 +19,5 @@ fn a_component_function_appears_in_the_inspector_tree_without_hiding_its_childre
 
     harness.toggle_inspector();
 
-    assert_eq!(harness.tree(), ["column", "  Widget", "    row"]);
+    assert_eq!(harness.tree(), ["column", "  row"]);
 }

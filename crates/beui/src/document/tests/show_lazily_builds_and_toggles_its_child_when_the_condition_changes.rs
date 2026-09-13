@@ -35,7 +35,7 @@ fn show_lazily_builds_and_toggles_its_child_when_the_condition_changes() {
     let (toggle, panel) = (toggle.get(), panel.get());
     let mut harness = Harness::new(document);
     harness.frame(Vec::new());
-    let visibility = harness.document().shadow_root(panel);
+    let visibility = panel;
 
     assert_eq!(builds.get(), 0, "a hidden show() must not build its child");
     assert!(!harness.document().is_visible(visibility));

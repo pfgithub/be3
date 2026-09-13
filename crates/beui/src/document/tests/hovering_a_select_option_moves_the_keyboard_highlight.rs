@@ -12,7 +12,7 @@ fn hovering_a_select_option_moves_the_keyboard_highlight() {
     let mut harness = Harness::new(document);
     harness.frame(Vec::new());
 
-    let inner = harness.document().shadow_root(select);
+    let inner = select;
     let trigger = unstyled::select_trigger(harness.document(), inner);
     with_installed(harness.document_mut(), |_| {
         crate::focus_within(trigger);

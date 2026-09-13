@@ -171,26 +171,6 @@ fn take_prop_attr(attrs: &mut Vec<Attribute>) -> PropAttr {
     parsed
 }
 
-struct ComponentAttr {
-    base: bool,
-}
-
-impl Parse for ComponentAttr {
-    fn parse(input: ParseStream) -> syn::Result<Self> {
-        if input.is_empty() {
-            return Ok(ComponentAttr { base: false });
-        }
-        let ident: Ident = input.parse()?;
-        if ident != "base" {
-            return Err(syn::Error::new(
-                ident.span(),
-                "expected `base`, e.g. `#[component(base)]`",
-            ));
-        }
-        Ok(ComponentAttr { base: true })
-    }
-}
-
 fn generic_inner(ty: &Type, name: &str) -> Option<Type> {
     let Type::Path(path) = ty else {
         return None;
@@ -252,7 +232,7 @@ fn is_named_type(ty: &Type, name: &str) -> bool {
 
 #[proc_macro_attribute]
 pub fn component(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let ComponentAttr { base } = parse_macro_input!(attr as ComponentAttr);
+    parse_macro_input!(attr as syn::parse::Nothing);
     let ItemFn {
         attrs,
         vis,
@@ -543,11 +523,7 @@ pub fn component(attr: TokenStream, item: TokenStream) -> TokenStream {
     let generics = &sig.generics;
     let (_, type_generics, _) = sig.generics.split_for_impl();
     let where_clause = &sig.generics.where_clause;
-    let finish = if base {
-        quote! { (move || #block)() }
-    } else {
-        quote! { ::beui::reactive::component(#name, move || #block) }
-    };
+    let finish = quote! { ::beui::reactive::component(move || #block) };
 
     let prop_idents: Vec<_> = props.iter().map(|prop| prop.ident.clone()).collect();
 

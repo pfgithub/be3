@@ -20,9 +20,9 @@ use crate::node::NodeId;
 use beui_macros::{component, view};
 
 use crate::reactive::{
-    clone, component_accessibility, component_detail, copy_text, create_effect, create_memo,
-    create_signal, set_component_state, Callback, Child, ClickCatcher, Focusable, Memo, NodeRef,
-    Padding, Prop, ReadSignal, Render, Text, WriteSignal,
+    clone, component_accessibility, copy_text, create_effect, create_memo, create_signal,
+    set_component_state, Callback, Child, ClickCatcher, Focusable, Memo, NodeRef, Padding, Prop,
+    ReadSignal, Render, Text, WriteSignal,
 };
 
 const FONT_SIZE: f32 = 14.0;
@@ -104,10 +104,6 @@ pub fn TextInput(
         on_submit,
     }));
     set_component_state(editor.clone());
-    component_detail(create_memo(
-        clone!(text_value -> move || detail(&text_value.get())),
-    ));
-
     create_effect(clone!(editor -> move || {
         let value = value.get();
         if text_of(&editor.borrow().core) != value {
@@ -415,8 +411,4 @@ fn submit(editor: &Handle) {
         (state.on_submit.clone(), text_of(&state.core))
     };
     on_submit.call(value);
-}
-
-fn detail(value: &str) -> String {
-    format!("\"{value}\"")
 }

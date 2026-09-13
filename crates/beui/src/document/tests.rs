@@ -1,7 +1,7 @@
 use super::*;
 
 mod a_closure_child_receives_the_handle_its_slot_hands_over;
-mod a_component_function_appears_in_the_inspector_tree_without_hiding_its_children;
+mod a_component_function_returns_its_base_node;
 mod a_disabled_button_prop_tracks_a_signal_and_blocks_clicks_while_true;
 mod a_missing_required_prop_panics_at_the_view_that_wrote_it;
 mod a_multi_root_view_fills_a_children_prop_in_order;
@@ -82,11 +82,10 @@ mod tab_moves_focus_to_the_next_button;
 mod tabs_collapse_into_a_select_when_their_container_is_narrow;
 mod tapping_a_checkbox_with_touch_toggles_it;
 mod the_inspector_follows_nodes_added_to_the_document;
-mod the_inspector_hides_the_internals_of_a_styled_component;
 mod the_inspector_keeps_the_rows_of_nodes_that_survive_an_update;
 mod the_inspector_lists_the_document_tree;
-mod the_inspector_separates_component_internals_from_slots;
 mod the_inspector_shows_the_accesskit_tree;
+mod the_inspector_shows_the_base_nodes_of_a_styled_component;
 mod the_scroll_position_is_reported_to_its_listener;
 mod touch_dragging_a_scroll_moves_it_without_activating_a_row;
 mod touch_overscroll_bands_without_hovering_a_row;
@@ -317,7 +316,7 @@ pub(crate) fn with_installed<R>(document: &mut Document, f: impl FnOnce(&mut Doc
     crate::reactive::with_reactive_scope(document, || crate::reactive::with_document(f))
 }
 
-#[component(base)]
+#[component]
 pub(crate) fn MenuRegion() -> NodeId {
     view! {
         <Sized width=120.0 height=60.0>
@@ -326,7 +325,7 @@ pub(crate) fn MenuRegion() -> NodeId {
     }
 }
 
-#[component(base)]
+#[component]
 pub(crate) fn ButtonFace(label: String) -> NodeId {
     view! {
         <Fill color=Color32::from_gray(60) radius=4>
@@ -337,7 +336,7 @@ pub(crate) fn ButtonFace(label: String) -> NodeId {
     }
 }
 
-#[component(base)]
+#[component]
 pub(crate) fn LabelledButton(label: String, on_click: ClickCallback) -> NodeId {
     view! {
         <unstyled::Button on_click={move || on_click.call()}>

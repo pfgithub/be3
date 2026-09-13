@@ -89,8 +89,7 @@ fn RadioMark(checked: Memo<bool>) -> NodeId {
 }
 
 pub(super) fn selected_index(document: &Document, choice: NodeId) -> Option<usize> {
-    let inner = document.shadow_root(choice);
-    unstyled::choice_selected(document, inner)
+    unstyled::choice_selected(document, choice)
 }
 
 fn background(active: bool, hovered: bool) -> Color32 {

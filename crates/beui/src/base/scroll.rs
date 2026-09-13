@@ -666,7 +666,7 @@ impl Document {
     }
 }
 
-#[component(base)]
+#[component]
 pub fn VirtualList(
     count: Prop<usize>,
     item_height: Prop<f32>,
@@ -690,7 +690,7 @@ pub fn VirtualList(
     scroll
 }
 
-#[component(base)]
+#[component]
 pub fn Scroll(
     offset: Prop<f32>,
     reveal: Prop<Option<usize>>,

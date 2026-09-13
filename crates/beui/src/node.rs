@@ -125,18 +125,6 @@ impl Arena {
             .unwrap_or_else(|| panic!("node is not a {}", std::any::type_name::<T>()))
     }
 
-    pub(crate) fn reserve(&mut self) -> NodeId {
-        self.invalidate();
-        let id = NodeId(self.nodes.len() as u32);
-        self.nodes.push(None);
-        id
-    }
-
-    pub(crate) fn fill<T: Element>(&mut self, id: NodeId, element: T) {
-        self.invalidate();
-        self.nodes[id.0 as usize] = Some(Box::new(element));
-    }
-
     pub(crate) fn take(&mut self, id: NodeId) -> Box<dyn Element> {
         self.nodes[id.0 as usize].take().expect("node was removed")
     }

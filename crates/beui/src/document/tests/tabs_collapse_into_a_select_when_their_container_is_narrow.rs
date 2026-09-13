@@ -30,14 +30,11 @@ fn tabs_collapse_into_a_select_when_their_container_is_narrow() {
     let mut harness = Harness::sized(document, WIDE_VIEWPORT);
     harness.frame(Vec::new());
 
-    let column = harness.document().shadow_root(tabs);
+    let column = tabs;
     let [wide, narrow] = harness.document().children(column)[..] else {
         panic!("responsive tabs hold a branch for each width");
     };
-    let (wide, narrow) = (
-        harness.document().shadow_root(wide),
-        harness.document().shadow_root(narrow),
-    );
+    let (wide, narrow) = (wide, narrow);
     assert!(harness.document().is_visible(wide));
     assert!(!harness.document().is_visible(narrow));
     assert!(harness.document().children(narrow).is_empty());

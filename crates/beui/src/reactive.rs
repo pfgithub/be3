@@ -23,11 +23,15 @@ pub use reactive::{
 thread_local! {
     static CURRENT_DOCUMENT: RefCell<Option<Document>> = const { RefCell::new(None) };
     static ACTIVE_DOCUMENT: Cell<*mut Document> = const { Cell::new(std::ptr::null_mut()) };
-    static CURRENT_COMPONENT: Cell<Option<NodeId>> = const { Cell::new(None) };
-    static COMPONENT_NAME: Cell<Option<&'static str>> = const { Cell::new(None) };
-    static PENDING_DETAIL: RefCell<HashMap<NodeId, String>> = RefCell::new(HashMap::new());
-    static PENDING_STATE: RefCell<HashMap<NodeId, Box<dyn Any>>> = RefCell::new(HashMap::new());
-    static PENDING_ACCESSIBILITY: RefCell<HashMap<NodeId, accesskit::Node>> = RefCell::new(HashMap::new());
+    static CURRENT_COMPONENT: RefCell<Option<Rc<ComponentContext>>> = const { RefCell::new(None) };
+}
+
+#[derive(Default)]
+struct ComponentContext {
+    target: Cell<Option<NodeId>>,
+    states: RefCell<Vec<Box<dyn Any>>>,
+    accessibility: RefCell<Option<accesskit::Node>>,
+    size: RefCell<Option<(ReadSignal<Vec2>, WriteSignal<Vec2>)>>,
 }
 
 struct ActiveDocumentGuard;
@@ -135,87 +139,71 @@ pub fn in_new_scope(f: impl FnOnce() -> NodeId) -> NodeId {
     node
 }
 
-pub fn set_component_name(name: &'static str) {
-    COMPONENT_NAME.with(|cell| cell.set(Some(name)));
-}
-
-pub fn component(name: &'static str, f: impl FnOnce() -> NodeId) -> NodeId {
-    let shadow = with_document(Document::reserve_shadow);
+pub fn component(f: impl FnOnce() -> NodeId) -> NodeId {
     let scope = Scope::new();
-    let outer_name = COMPONENT_NAME.with(|cell| cell.take());
-    let root = in_component(Some(shadow), || scope.run(f));
-    let name = COMPONENT_NAME
-        .with(|cell| cell.replace(outer_name))
-        .unwrap_or(name);
+    let context = Rc::new(ComponentContext::default());
+    let root = in_component(Some(context.clone()), || scope.run(f));
+    context.target.set(Some(root));
+    let states = context.states.take();
+    let accessibility = context.accessibility.take();
+    let size = context.size.take();
     with_document(|document| {
-        document.finish_shadow(shadow, name, root, Vec::new());
-        document.register_node_scope(shadow, scope);
+        for state in states {
+            document.set_component_state_dyn(root, state);
+        }
+        if let Some(node) = accessibility {
+            document.set_accessibility(root, node);
+        }
+        if let Some((read, write)) = size {
+            document.register_size_watcher(root, read, write);
+        }
+        document.register_node_scope(root, scope);
     });
-    if let Some(detail) = PENDING_DETAIL.with(|cell| cell.borrow_mut().remove(&shadow)) {
-        with_document(|document| document.set_component_detail(shadow, detail));
-    }
-    if let Some(state) = PENDING_STATE.with(|cell| cell.borrow_mut().remove(&shadow)) {
-        with_document(|document| document.set_component_state_dyn(shadow, state));
-    }
-    if let Some(node) = PENDING_ACCESSIBILITY.with(|cell| cell.borrow_mut().remove(&shadow)) {
-        with_document(|document| document.set_accessibility(shadow, node));
-    }
-    shadow
+    root
 }
 
-pub fn current_component() -> NodeId {
+fn current_component() -> Rc<ComponentContext> {
     CURRENT_COMPONENT
-        .with(Cell::get)
+        .with(|cell| cell.borrow().clone())
         .expect("a component binding was used outside of a #[component] body")
 }
 
-fn set_detail(shadow: NodeId, detail: String) {
-    with_document(|document| {
-        if document.contains(shadow) {
-            document.set_component_detail(shadow, detail);
-        } else {
-            PENDING_DETAIL.with(|cell| {
-                cell.borrow_mut().insert(shadow, detail);
-            });
-        }
-    });
-}
-
-pub fn component_detail(detail: impl IntoProp<String>) {
-    let shadow = current_component();
-    let detail = detail.into_prop();
-    create_effect(move || set_detail(shadow, detail.get()));
+pub fn component_size() -> ReadSignal<Vec2> {
+    let component = current_component();
+    if let Some(target) = component.target.get() {
+        return node_size(target);
+    }
+    if let Some((read, _)) = component.size.borrow().as_ref() {
+        return read.clone();
+    }
+    let (read, write) = create_signal(Vec2::ZERO);
+    component.size.replace(Some((read.clone(), write)));
+    read
 }
 
 pub fn set_component_state<T: 'static>(state: T) {
-    let shadow = current_component();
-    with_document(|document| {
-        if document.contains(shadow) {
-            document.set_component_state(shadow, state);
-        } else {
-            PENDING_STATE.with(|cell| {
-                cell.borrow_mut().insert(shadow, Box::new(state));
-            });
+    let component = current_component();
+    match component.target.get() {
+        Some(target) => {
+            with_document(|document| document.set_component_state_dyn(target, Box::new(state)))
         }
-    });
+        None => component.states.borrow_mut().push(Box::new(state)),
+    }
 }
 
-fn set_accessibility(shadow: NodeId, node: accesskit::Node) {
-    with_document(|document| {
-        if document.contains(shadow) {
-            document.set_accessibility(shadow, node);
-        } else {
-            PENDING_ACCESSIBILITY.with(|cell| {
-                cell.borrow_mut().insert(shadow, node);
-            });
+fn set_accessibility(component: &ComponentContext, node: accesskit::Node) {
+    match component.target.get() {
+        Some(target) => with_document(|document| document.set_accessibility(target, node)),
+        None => {
+            component.accessibility.replace(Some(node));
         }
-    });
+    }
 }
 
 pub fn component_accessibility(node: impl IntoProp<accesskit::Node>) {
-    let shadow = current_component();
+    let component = current_component();
     let node = node.into_prop();
-    create_effect(move || set_accessibility(shadow, node.get()));
+    create_effect(move || set_accessibility(&component, node.get()));
 }
 
 #[derive(Clone, Default)]
@@ -326,28 +314,29 @@ impl ClickCallback {
     }
 }
 
-struct ComponentGuard(Option<NodeId>);
+struct ComponentGuard(Option<Rc<ComponentContext>>);
 
 impl Drop for ComponentGuard {
     fn drop(&mut self) {
-        CURRENT_COMPONENT.with(|cell| cell.set(self.0));
+        CURRENT_COMPONENT.with(|cell| *cell.borrow_mut() = self.0.take());
     }
 }
 
-fn in_component<R>(owner: Option<NodeId>, f: impl FnOnce() -> R) -> R {
-    let _guard = ComponentGuard(CURRENT_COMPONENT.with(|cell| cell.replace(owner)));
+fn in_component<R>(owner: Option<Rc<ComponentContext>>, f: impl FnOnce() -> R) -> R {
+    let previous = CURRENT_COMPONENT.with(|cell| std::mem::replace(&mut *cell.borrow_mut(), owner));
+    let _guard = ComponentGuard(previous);
     f()
 }
 
 pub struct Render<H = ()> {
-    owner: Option<NodeId>,
+    owner: Option<Rc<ComponentContext>>,
     render: Box<dyn FnOnce(H) -> NodeId>,
 }
 
 impl<H> Render<H> {
     pub fn new(render: impl FnOnce(H) -> NodeId + 'static) -> Self {
         Self {
-            owner: CURRENT_COMPONENT.with(Cell::get),
+            owner: CURRENT_COMPONENT.with(|cell| cell.borrow().clone()),
             render: Box::new(render),
         }
     }
@@ -358,27 +347,27 @@ impl<H> Render<H> {
 }
 
 pub struct RenderFn<H> {
-    owner: Option<NodeId>,
+    owner: Option<Rc<ComponentContext>>,
     render: Rc<dyn Fn(H) -> NodeId>,
 }
 
 impl<H> RenderFn<H> {
     pub fn new(render: impl Fn(H) -> NodeId + 'static) -> Self {
         Self {
-            owner: CURRENT_COMPONENT.with(Cell::get),
+            owner: CURRENT_COMPONENT.with(|cell| cell.borrow().clone()),
             render: Rc::new(render),
         }
     }
 
     pub fn call(&self, handle: H) -> NodeId {
-        in_component(self.owner, || (self.render)(handle))
+        in_component(self.owner.clone(), || (self.render)(handle))
     }
 }
 
 impl<H> Clone for RenderFn<H> {
     fn clone(&self) -> Self {
         Self {
-            owner: self.owner,
+            owner: self.owner.clone(),
             render: self.render.clone(),
         }
     }
@@ -618,7 +607,7 @@ pub use crate::base::sized::Sized;
 pub use crate::base::text::Text;
 pub use crate::base::visibility::Visibility;
 
-#[component(base)]
+#[component]
 pub fn List(
     #[prop(default = Direction::Vertical)] direction: Prop<Direction>,
     #[prop(default = Align::Stretch)] align: Prop<Align>,
@@ -635,17 +624,17 @@ pub fn List(
     list
 }
 
-#[component(base)]
+#[component]
 pub fn Row(spacing: Prop<f32>, children: Children) -> NodeId {
     view! { <List direction=Direction::Horizontal spacing children /> }
 }
 
-#[component(base)]
+#[component]
 pub fn Column(spacing: Prop<f32>, children: Children) -> NodeId {
     view! { <List direction=Direction::Vertical spacing children /> }
 }
 
-#[component(base)]
+#[component]
 pub fn CenteredRow(spacing: Prop<f32>, children: Children) -> NodeId {
     view! {
         <List
@@ -657,7 +646,7 @@ pub fn CenteredRow(spacing: Prop<f32>, children: Children) -> NodeId {
     }
 }
 
-#[component(base)]
+#[component]
 pub fn Spacer() -> NodeId {
     with_document(|document| document.create_fill(Color32::TRANSPARENT, 0))
 }

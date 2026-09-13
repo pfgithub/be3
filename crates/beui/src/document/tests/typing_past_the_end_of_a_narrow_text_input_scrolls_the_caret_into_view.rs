@@ -23,7 +23,7 @@ fn typing_past_the_end_of_a_narrow_text_input_scrolls_the_caret_into_view() {
     harness.type_text(value);
     harness.frame(Vec::new());
 
-    let inner = harness.document().shadow_root(input);
+    let inner = input;
     let text = unstyled::text_input_text(harness.document(), inner);
     let rect = harness.rect(text);
     let caret = harness

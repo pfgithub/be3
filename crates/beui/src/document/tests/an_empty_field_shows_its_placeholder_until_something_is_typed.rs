@@ -8,7 +8,7 @@ fn an_empty_field_shows_its_placeholder_until_something_is_typed() {
         toolbar_of(|| [view! { <TextInput value=String::new() placeholder="Search" /> }]);
     let mut harness = Harness::new(document);
     harness.frame(Vec::new());
-    let inner = harness.document().shadow_root(input);
+    let inner = input;
     let text = unstyled::text_input_text(harness.document(), inner);
 
     assert_eq!(text_of(harness.document(), text), "Search");

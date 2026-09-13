@@ -3,8 +3,7 @@ use beui_macros::component;
 use crate::geometry::Vec2;
 use crate::node::NodeId;
 use crate::reactive::{
-    create_memo, current_component, node_size, provide_context, use_context, Memo, ReadSignal,
-    Render,
+    component_size, create_memo, provide_context, use_context, Memo, ReadSignal, Render,
 };
 
 #[derive(Clone)]
@@ -12,7 +11,7 @@ pub struct ContainerSize(pub ReadSignal<Vec2>);
 
 #[component]
 pub fn Container(#[prop(children)] content: Render<ReadSignal<Vec2>>) -> NodeId {
-    let size = node_size(current_component());
+    let size = component_size();
     provide_context(ContainerSize(size.clone()));
     content.call(size)
 }

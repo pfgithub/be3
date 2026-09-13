@@ -6,8 +6,7 @@ use crate::color::Color32;
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
-    clone, component_detail, create_memo, Callback, CenteredRow, Fill, ItemSize, Outline, Prop,
-    Sized,
+    clone, create_memo, Callback, CenteredRow, Fill, ItemSize, Outline, Prop, Sized,
 };
 use crate::styled::theme::{ACCENT, ACCENT_HOVER, KNOB, RADIUS, TRACK};
 use crate::unstyled;
@@ -37,8 +36,6 @@ pub fn Slider(
     view! {
         <unstyled::Slider value accessibility on_change={move |value| on_change.call(value)}>
             {move |handle: SliderHandle| {
-                let value = handle.value.clone();
-                component_detail(create_memo(move || detail(value.get())));
                 view! { <SliderTrack handle /> }
             }}
         </unstyled::Slider>
@@ -70,11 +67,7 @@ fn SliderTrack(handle: SliderHandle) -> NodeId {
 }
 
 pub fn slider_value(document: &Document, slider: NodeId) -> f32 {
-    unstyled::slider_value(document, document.shadow_root(slider)).get()
-}
-
-fn detail(value: f32) -> String {
-    format!("{value:.2}")
+    unstyled::slider_value(document, slider).get()
 }
 
 fn filled_size(value: f32) -> ItemSize {

@@ -27,7 +27,7 @@ fn right_click_opens_a_context_menu_at_the_cursor_position() {
     }]);
     harness.frame(Vec::new());
 
-    let inner = harness.document().shadow_root(menu);
+    let inner = menu;
     let content = unstyled::context_menu_menu(harness.document(), inner);
     assert_eq!(unstyled::menu_list_len(harness.document(), content), 2);
     let overlay = unstyled::context_menu_overlay(harness.document(), inner);

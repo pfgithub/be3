@@ -74,7 +74,7 @@ fn TextInputFrame(handle: TextInputHandle) -> NodeId {
 }
 
 pub fn text_input_value(document: &Document, input: NodeId) -> String {
-    unstyled::text_input_value(document, document.shadow_root(input))
+    unstyled::text_input_value(document, input)
 }
 
 fn border_color(focused: bool, hovered: bool) -> Color32 {

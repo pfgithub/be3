@@ -109,7 +109,7 @@ impl Document {
     }
 }
 
-#[component(base)]
+#[component]
 pub fn Visibility(visible: Prop<bool>, children: Child) -> NodeId {
     let node = with_document(|document| {
         let node = document.create_visibility(false);

@@ -37,7 +37,7 @@ fn tab_is_trapped_inside_an_open_context_menu() {
     }]);
     harness.frame(Vec::new());
 
-    let inner = harness.document().shadow_root(menu);
+    let inner = menu;
     let content = unstyled::context_menu_menu(harness.document(), inner);
     let root_focusable = unstyled::menu_list_root_focusable(harness.document(), content);
 

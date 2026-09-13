@@ -363,7 +363,7 @@ pub fn text_index_at(text: &NodeRef, pos: Pos2) -> usize {
     with_document(|document| document.text_index_at(text, pos))
 }
 
-#[component(base)]
+#[component]
 pub fn Text(
     string: Prop<String>,
     #[prop(default = DEFAULT_FONT_SIZE)] font_size: Prop<f32>,

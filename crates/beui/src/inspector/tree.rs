@@ -13,15 +13,13 @@ const DETAIL_LIMIT: usize = 24;
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum Key {
     Node(NodeId),
-    Internals(NodeId),
-    Placeholder(NodeId),
     AccessKit(NodeId),
 }
 
 impl Key {
     pub(crate) fn node(self) -> NodeId {
         match self {
-            Key::Node(id) | Key::Internals(id) | Key::Placeholder(id) | Key::AccessKit(id) => id,
+            Key::Node(id) | Key::AccessKit(id) => id,
         }
     }
 }
@@ -191,51 +189,25 @@ pub(crate) fn label(target: &Document, id: NodeId) -> String {
 
 fn children(target: &Document, key: Key) -> Vec<Key> {
     match key {
-        Key::Placeholder(_) | Key::AccessKit(_) => Vec::new(),
-        Key::Internals(shadow) => vec![child_key(target, target.shadow_root(shadow))],
-        Key::Node(id) if target.as_shadow(id).is_some() => {
-            let slots = target.shadow_slots(id);
-            if slots.is_empty() {
-                vec![child_key(target, target.shadow_root(id))]
-            } else {
-                std::iter::once(Key::Internals(id))
-                    .chain(slots.into_iter().map(Key::Node))
-                    .collect()
-            }
-        }
-        Key::Node(id) => target
-            .children(id)
-            .into_iter()
-            .map(|child| child_key(target, child))
-            .collect(),
-    }
-}
-
-fn child_key(target: &Document, id: NodeId) -> Key {
-    match target.as_slot(id) {
-        Some(_) => Key::Placeholder(id),
-        None => Key::Node(id),
+        Key::AccessKit(_) => Vec::new(),
+        Key::Node(id) => target.children(id).into_iter().map(Key::Node).collect(),
     }
 }
 
 fn kind(target: &Document, key: Key) -> &'static str {
     match key {
         Key::Node(id) => target.node_kind(id),
-        Key::Internals(_) => "shadow",
-        Key::Placeholder(_) => "slot",
         Key::AccessKit(_) => unreachable!(),
     }
 }
 
-fn auto_expand(key: Key, depth: usize) -> bool {
-    !matches!(key, Key::Internals(_)) && depth < AUTO_EXPAND_DEPTH
+fn auto_expand(_key: Key, depth: usize) -> bool {
+    depth < AUTO_EXPAND_DEPTH
 }
 
 fn detail(target: &Document, key: Key) -> String {
     let detail = match key {
         Key::Node(id) => target.node_detail(id),
-        Key::Internals(_) => None,
-        Key::Placeholder(id) => Some(target.node_kind(id).to_owned()),
         Key::AccessKit(_) => unreachable!(),
     };
     detail.map(|detail| trim(&detail)).unwrap_or_default()

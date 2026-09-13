@@ -6,9 +6,8 @@ use crate::input::{CursorIcon, Key, KeyPress, PointerPress};
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
-    self, clone, component_accessibility, component_detail, create_effect, create_memo,
-    create_signal, set_component_state, untrack, Callback, ClickCatcher, Focusable, Prop,
-    ReadSignal, Render,
+    self, clone, component_accessibility, create_effect, create_memo, create_signal,
+    set_component_state, untrack, Callback, ClickCatcher, Focusable, Prop, ReadSignal, Render,
 };
 
 const STEP: f32 = 0.05;
@@ -43,10 +42,6 @@ pub fn Slider(
         node.set_numeric_value_step(STEP.into());
         node
     })));
-
-    component_detail(create_memo(
-        clone!(value_read -> move || detail(value_read.get())),
-    ));
 
     let content_node = content.map(|build| {
         build.call(SliderHandle {
@@ -115,8 +110,4 @@ pub fn Slider(
 
 pub fn slider_value(document: &Document, slider: NodeId) -> ReadSignal<f32> {
     document.component_state::<ReadSignal<f32>>(slider).clone()
-}
-
-fn detail(value: f32) -> String {
-    format!("{value:.2}")
 }

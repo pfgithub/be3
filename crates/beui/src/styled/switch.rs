@@ -6,8 +6,7 @@ use crate::color::Color32;
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
-    component_detail, create_memo, Callback, CenteredRow, Fill, ItemSize, Outline, Padding, Prop,
-    Sized, Spacer,
+    create_memo, Callback, CenteredRow, Fill, ItemSize, Outline, Padding, Prop, Sized, Spacer,
 };
 use crate::styled::theme::{ACCENT, ACCENT_HOVER, BORDER, KNOB, RADIUS, SURFACE_RAISED};
 use crate::unstyled;
@@ -38,8 +37,6 @@ pub fn Switch(
     view! {
         <Toggle checked={on} accessibility on_change={move |on| on_change.call(on)}>
             {move |handle: ToggleHandle| {
-                let checked = handle.checked.clone();
-                component_detail(create_memo(move || detail(checked.get()).to_owned()));
                 view! { <SwitchTrack handle /> }
             }}
         </Toggle>
@@ -84,15 +81,7 @@ fn SwitchTrack(handle: ToggleHandle) -> NodeId {
 }
 
 pub fn switch_on(document: &Document, switch: NodeId) -> bool {
-    unstyled::toggle_checked(document, document.shadow_root(switch)).get()
-}
-
-fn detail(on: bool) -> &'static str {
-    if on {
-        "on"
-    } else {
-        "off"
-    }
+    unstyled::toggle_checked(document, switch).get()
 }
 
 fn before_size(on: bool) -> ItemSize {

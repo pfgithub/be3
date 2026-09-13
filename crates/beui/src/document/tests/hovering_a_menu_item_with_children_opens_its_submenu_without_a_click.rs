@@ -30,7 +30,7 @@ fn hovering_a_menu_item_with_children_opens_its_submenu_without_a_click() {
     }]);
     harness.frame(Vec::new());
 
-    let inner = harness.document().shadow_root(menu);
+    let inner = menu;
     let content = unstyled::context_menu_menu(harness.document(), inner);
     let share_button = unstyled::menu_list_row_button(harness.document(), content, 0);
     let submenu = unstyled::menu_list_row_submenu_content(harness.document(), content, 0)

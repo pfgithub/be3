@@ -6,9 +6,8 @@ use crate::input::CursorIcon;
 use crate::document::Document;
 use crate::node::NodeId;
 use crate::reactive::{
-    self, clone, component_accessibility, component_detail, create_effect, create_memo,
-    create_signal, set_component_state, untrack, Callback, ClickCatcher, Focusable, Prop,
-    ReadSignal, Render,
+    self, clone, component_accessibility, create_effect, create_memo, create_signal,
+    set_component_state, untrack, Callback, ClickCatcher, Focusable, Prop, ReadSignal, Render,
 };
 
 pub struct ToggleHandle {
@@ -38,10 +37,6 @@ pub fn Toggle(
         node.set_toggled(Toggled::from(checked_read.get()));
         node
     })));
-
-    component_detail(create_memo(
-        clone!(checked_read -> move || detail(checked_read.get()).to_owned()),
-    ));
 
     let content_node = content.map(|build| {
         build.call(ToggleHandle {
@@ -84,12 +79,4 @@ pub fn Toggle(
 
 pub fn toggle_checked(document: &Document, toggle: NodeId) -> ReadSignal<bool> {
     document.component_state::<ReadSignal<bool>>(toggle).clone()
-}
-
-fn detail(checked: bool) -> &'static str {
-    if checked {
-        "checked"
-    } else {
-        "unchecked"
-    }
 }

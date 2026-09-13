@@ -217,7 +217,7 @@ impl Document {
     }
 }
 
-#[component(base)]
+#[component]
 pub fn ClickCatcher(
     #[prop(default = CursorIcon::Default)] cursor: Prop<CursorIcon>,
     key_active: Prop<bool>,

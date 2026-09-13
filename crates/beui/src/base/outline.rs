@@ -145,7 +145,7 @@ impl Document {
     }
 }
 
-#[component(base)]
+#[component]
 pub fn Outline(
     color: Prop<Color32>,
     width: Prop<f32>,

@@ -171,9 +171,7 @@ impl Inspector {
     #[cfg(test)]
     pub(crate) fn accesskit_tab_node(&self) -> NodeId {
         let tabs = self.tabs.get();
-        let choice = self.document.shadow_root(tabs);
-        let row = self.document.shadow_root(choice);
-        self.document.children(row)[1]
+        self.document.children(tabs)[1]
     }
 
     pub(crate) fn panel_width(&self, rect: Rect) -> f32 {
