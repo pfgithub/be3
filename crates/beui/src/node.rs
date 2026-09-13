@@ -85,6 +85,10 @@ pub(crate) struct Arena {
 }
 
 impl Arena {
+    pub(crate) fn len(&self) -> usize {
+        self.nodes.iter().flatten().count()
+    }
+
     pub(crate) fn insert<T: Element>(&mut self, element: T) -> NodeId {
         self.invalidate();
         let id = NodeId(self.nodes.len() as u32);

@@ -17,6 +17,7 @@ mod layout;
 mod node;
 mod paint;
 mod painter;
+mod performance;
 pub mod reactive;
 #[cfg(feature = "render")]
 mod renderer;
@@ -40,5 +41,6 @@ pub use input::{
 };
 pub use node::{ClickHandler, Handler, NodeId};
 pub use painter::{Painter, Shape};
+pub use performance::{FramePerformance, PerformanceSnapshot, PerformanceTimings};
 #[cfg(feature = "render")]
 pub use renderer::{clear_color, Renderer};

@@ -59,6 +59,7 @@ mod jumping_up_a_virtual_scroll_only_builds_the_items_in_view;
 mod opening_a_select_focuses_its_search_box_and_highlights_the_selected_option;
 mod percent_children_of_an_unbounded_list_use_their_intrinsic_length;
 mod percent_sized_children_still_size_an_intrinsic_lists_height;
+mod performance_measurements_report_work_and_cache_hits;
 mod picking_a_node_leaves_the_document_alone;
 mod picking_a_node_reveals_it_in_the_tree;
 mod quadruple_clicking_selects_everything_so_typing_replaces_the_value;
@@ -84,6 +85,7 @@ mod tapping_a_checkbox_with_touch_toggles_it;
 mod the_inspector_follows_nodes_added_to_the_document;
 mod the_inspector_keeps_the_rows_of_nodes_that_survive_an_update;
 mod the_inspector_lists_the_document_tree;
+mod the_inspector_shows_document_performance;
 mod the_inspector_shows_the_accesskit_tree;
 mod the_inspector_shows_the_base_nodes_of_a_styled_component;
 mod the_scroll_position_is_reported_to_its_listener;
@@ -288,6 +290,17 @@ impl Harness {
 
     pub(crate) fn accesskit_tab_center(&self) -> Pos2 {
         self.node_center(self.inspector().accesskit_tab_node())
+    }
+
+    pub(crate) fn performance_tab_center(&self) -> Pos2 {
+        self.node_center(self.inspector().performance_tab_node())
+    }
+
+    pub(crate) fn performance_panel_visible(&self) -> bool {
+        self.inspector()
+            .document
+            .node_rect(self.inspector().performance_panel_node())
+            .is_some()
     }
 
     pub(crate) fn touch_emulation(&self) -> bool {

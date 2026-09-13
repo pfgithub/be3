@@ -24,16 +24,18 @@ const GRIP_WIDTH: f32 = 4.0;
 const GRIP_PAINT_WIDTH: f32 = 2.0;
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) enum TreeKind {
+pub(crate) enum InspectorTab {
     #[default]
     Beui,
     AccessKit,
+    Performance,
 }
 
-impl TreeKind {
+impl InspectorTab {
     fn from_index(index: usize) -> Self {
         match index {
             1 => Self::AccessKit,
+            2 => Self::Performance,
             _ => Self::Beui,
         }
     }
@@ -41,26 +43,28 @@ impl TreeKind {
 
 pub(crate) struct State {
     expansion: RefCell<HashMap<Key, bool>>,
-    tree: Cell<TreeKind>,
+    tab: Cell<InspectorTab>,
     pub(crate) hovered: Cell<Option<NodeId>>,
     pub(crate) selected: Cell<Option<NodeId>>,
     pub(crate) picking: Cell<bool>,
     pub(crate) touch_emulation: Cell<bool>,
     reveal: Cell<Option<NodeId>>,
     revision: Cell<u64>,
+    reset_performance: Cell<bool>,
 }
 
 impl State {
     fn new(touch_emulation: bool) -> Self {
         Self {
             expansion: RefCell::new(HashMap::new()),
-            tree: Cell::new(TreeKind::default()),
+            tab: Cell::new(InspectorTab::default()),
             hovered: Cell::new(None),
             selected: Cell::new(None),
             picking: Cell::new(false),
             touch_emulation: Cell::new(touch_emulation),
             reveal: Cell::new(None),
             revision: Cell::new(0),
+            reset_performance: Cell::new(false),
         }
     }
 
@@ -77,8 +81,13 @@ impl State {
         self.touch();
     }
 
-    fn set_tree(&self, index: usize) {
-        self.tree.set(TreeKind::from_index(index));
+    fn set_tab(&self, index: usize) {
+        self.tab.set(InspectorTab::from_index(index));
+        self.touch();
+    }
+
+    fn reset_performance(&self) {
+        self.reset_performance.set(true);
         self.touch();
     }
 
@@ -113,6 +122,7 @@ pub(crate) struct Inspector {
     set_keys: WriteSignal<Vec<Key>>,
     set_entries: WriteSignal<HashMap<Key, Entry>>,
     set_summary: WriteSignal<Summary>,
+    set_performance: WriteSignal<panel::PerformanceSummary>,
     set_reveal: WriteSignal<Option<usize>>,
     #[cfg(test)]
     rows: Rc<RefCell<HashMap<Key, panel::Row>>>,
@@ -120,6 +130,8 @@ pub(crate) struct Inspector {
     touch_toggle: crate::reactive::NodeRef,
     #[cfg(test)]
     tabs: crate::reactive::NodeRef,
+    #[cfg(test)]
+    performance_panel: crate::reactive::NodeRef,
     pub(crate) width: f32,
     grabbed: Option<f32>,
     grip: bool,
@@ -139,10 +151,13 @@ impl Inspector {
             touch_toggle: panel.touch_toggle,
             #[cfg(test)]
             tabs: panel.tabs,
+            #[cfg(test)]
+            performance_panel: panel.performance_panel,
             state,
             set_keys: panel.set_keys,
             set_entries: panel.set_entries,
             set_summary: panel.set_summary,
+            set_performance: panel.set_performance,
             set_reveal: panel.set_reveal,
             width: DEFAULT_WIDTH,
             grabbed: None,
@@ -172,6 +187,17 @@ impl Inspector {
     pub(crate) fn accesskit_tab_node(&self) -> NodeId {
         let tabs = self.tabs.get();
         self.document.children(tabs)[1]
+    }
+
+    #[cfg(test)]
+    pub(crate) fn performance_tab_node(&self) -> NodeId {
+        let tabs = self.tabs.get();
+        self.document.children(tabs)[2]
+    }
+
+    #[cfg(test)]
+    pub(crate) fn performance_panel_node(&self) -> NodeId {
+        self.performance_panel.get()
     }
 
     pub(crate) fn panel_width(&self, rect: Rect) -> f32 {
@@ -209,10 +235,20 @@ impl Inspector {
         self.grip = self.grabbed.is_some() || grip.contains(pointer);
     }
 
-    pub(crate) fn show(&mut self, target: &Document, ctx: &Context, content: Rect, panel: Rect) {
+    pub(crate) fn show(
+        &mut self,
+        target: &mut Document,
+        ctx: &Context,
+        content: Rect,
+        panel: Rect,
+    ) {
         self.forget_removed(target);
         self.sync(target);
         self.document.show(ctx, panel);
+        if self.state.reset_performance.take() {
+            target.reset_performance();
+            ctx.request_repaint();
+        }
         ctx.set_touch_emulation(self.state.touch_emulation.get());
         self.pick(target, ctx, content);
         self.reveal();
@@ -232,16 +268,19 @@ impl Inspector {
     }
 
     fn sync(&mut self, target: &Document) {
-        let entries = match self.state.tree.get() {
-            TreeKind::Beui => tree::collect(target, &self.state),
-            TreeKind::AccessKit => tree::collect_accesskit(target, &self.state),
+        let entries = match self.state.tab.get() {
+            InspectorTab::Beui => tree::collect(target, &self.state),
+            InspectorTab::AccessKit => tree::collect_accesskit(target, &self.state),
+            InspectorTab::Performance => Vec::new(),
         };
         let summary = self.summary(target, &entries);
+        let performance = panel::PerformanceSummary::from(target.performance());
         let Self {
             document,
             set_keys,
             set_entries,
             set_summary,
+            set_performance,
             ..
         } = self;
         with_reactive_scope(document, || {
@@ -253,6 +292,7 @@ impl Inspector {
                     .collect(),
             );
             set_summary.set(summary);
+            set_performance.set(performance);
         });
         self.entries = entries;
     }
@@ -263,9 +303,10 @@ impl Inspector {
             .and_then(|id| entries.iter().find(|entry| entry.key.node() == id))
             .map_or_else(nothing_selected, entry_label);
         Summary {
-            total: match self.state.tree.get() {
-                TreeKind::Beui => target.root().map_or(0, |root| tree::count(target, root)),
-                TreeKind::AccessKit => tree::accesskit_count(target),
+            total: match self.state.tab.get() {
+                InspectorTab::Beui => target.root().map_or(0, |root| tree::count(target, root)),
+                InspectorTab::AccessKit => tree::accesskit_count(target),
+                InspectorTab::Performance => 0,
             },
             picking: self.state.picking.get(),
             selection,
@@ -304,9 +345,10 @@ impl Inspector {
     }
 
     fn choose(&mut self, target: &Document, id: NodeId) {
-        let path = match self.state.tree.get() {
-            TreeKind::Beui => tree::path(target, id),
-            TreeKind::AccessKit => tree::accesskit_path(target, id),
+        let path = match self.state.tab.get() {
+            InspectorTab::Beui => tree::path(target, id),
+            InspectorTab::AccessKit => tree::accesskit_path(target, id),
+            InspectorTab::Performance => return,
         };
         if let Some((_, ancestors)) = path.split_last() {
             for key in ancestors {
@@ -320,9 +362,10 @@ impl Inspector {
         let Some(id) = self.state.reveal.get() else {
             return;
         };
-        let key = match self.state.tree.get() {
-            TreeKind::Beui => Key::Node(id),
-            TreeKind::AccessKit => Key::AccessKit(id),
+        let key = match self.state.tab.get() {
+            InspectorTab::Beui => Key::Node(id),
+            InspectorTab::AccessKit => Key::AccessKit(id),
+            InspectorTab::Performance => return,
         };
         let Some(index) = self.entries.iter().position(|entry| entry.key == key) else {
             return;

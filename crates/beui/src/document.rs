@@ -16,6 +16,7 @@ use crate::layout;
 use crate::node::{Arena, NodeId};
 use crate::paint;
 use crate::painter::Shape;
+use crate::performance::{FrameMeasurement, PerformanceSnapshot, PerformanceTracker};
 
 const SIZE_PASSES: usize = 4;
 
@@ -43,6 +44,7 @@ pub struct Document {
     component_states: HashMap<NodeId, Vec<Box<dyn Any>>>,
     pub(crate) accessibility_id: u32,
     pub(crate) accessibility: HashMap<NodeId, Node>,
+    performance: PerformanceTracker,
 }
 
 struct SizeWatcher {
@@ -76,6 +78,7 @@ impl Document {
             component_states: HashMap::new(),
             accessibility_id: accessibility::next_document_id(),
             accessibility: HashMap::new(),
+            performance: PerformanceTracker::default(),
         }
     }
 
@@ -124,6 +127,14 @@ impl Document {
 
     pub fn contains(&self, id: NodeId) -> bool {
         self.arena.contains(id)
+    }
+
+    pub fn performance(&self) -> PerformanceSnapshot {
+        self.performance.snapshot()
+    }
+
+    pub fn reset_performance(&mut self) {
+        self.performance.clear();
     }
 
     pub fn set_accessibility(&mut self, id: NodeId, node: Node) {
@@ -199,6 +210,7 @@ impl Document {
     }
 
     fn show_content(&mut self, ctx: &Context, rect: Rect, interactive: bool) {
+        let mut measurement = FrameMeasurement::new();
         let scale = ctx.pixels_per_point();
         if self
             .viewport
@@ -210,19 +222,24 @@ impl Document {
             self.arena.invalidate();
             self.viewport = Some((ctx.clone(), rect, scale));
         }
-        self.settle_layout(ctx, rect);
-        let actions = ctx.take_accessibility_actions(self.accessibility_id);
-        if !actions.is_empty() {
-            let context = self.reactive_scope().context();
-            let _guard = crate::reactive::install(self);
-            context.run(|| {
-                crate::reactive::with_document(|document| {
-                    for request in actions {
-                        document.handle_accessibility_action(request);
-                    }
-                });
+        measurement.layout_passes +=
+            FrameMeasurement::measure(&mut measurement.timings.layout, || {
+                self.settle_layout(ctx, rect)
             });
-        }
+        FrameMeasurement::measure(&mut measurement.timings.accessibility, || {
+            let actions = ctx.take_accessibility_actions(self.accessibility_id);
+            if !actions.is_empty() {
+                let context = self.reactive_scope().context();
+                let _guard = crate::reactive::install(self);
+                context.run(|| {
+                    crate::reactive::with_document(|document| {
+                        for request in actions {
+                            document.handle_accessibility_action(request);
+                        }
+                    });
+                });
+            }
+        });
         for (test_id, id) in &self.test_ids {
             if let Some(node_rect) = self.rects.get(id) {
                 ctx.publish_test_id(test_id, *node_rect);
@@ -230,38 +247,46 @@ impl Document {
         }
 
         if interactive {
-            if let Some(root) = self.root {
-                let rects = Rc::clone(&self.rects);
-                let painter = ctx.painter();
-                let context = self.reactive_scope().context();
-                let _guard = crate::reactive::install(self);
-                context.run(|| {
-                    crate::reactive::with_document(|document| {
-                        interact::interact(document, ctx, &painter, &rects, root)
+            FrameMeasurement::measure(&mut measurement.timings.interaction, || {
+                if let Some(root) = self.root {
+                    let rects = Rc::clone(&self.rects);
+                    let painter = ctx.painter();
+                    let context = self.reactive_scope().context();
+                    let _guard = crate::reactive::install(self);
+                    context.run(|| {
+                        crate::reactive::with_document(|document| {
+                            interact::interact(document, ctx, &painter, &rects, root)
+                        });
                     });
-                });
-            }
+                }
+            });
         }
 
         if let Some(text) = self.copied_text.take() {
             ctx.copy_text(text);
         }
-        self.settle_layout(ctx, rect);
+        measurement.layout_passes +=
+            FrameMeasurement::measure(&mut measurement.timings.layout, || {
+                self.settle_layout(ctx, rect)
+            });
         let now = Instant::now();
         if self.paint_revision != self.arena.revision
             || self.next_paint.is_some_and(|deadline| deadline <= now)
         {
-            let (shapes, delay) = ctx.capture(|| {
-                if let Some(root) = self.root {
-                    paint::paint(self, &ctx.painter(), &self.rects, root);
-                }
-                for overlay in self.overlay_stack.clone() {
-                    if let Some(content) = self.overlay_content(overlay) {
-                        if self.rects.contains_key(&content) {
-                            paint::paint(self, &ctx.painter(), &self.rects, content);
+            measurement.painted = true;
+            let (shapes, delay) = FrameMeasurement::measure(&mut measurement.timings.paint, || {
+                ctx.capture(|| {
+                    if let Some(root) = self.root {
+                        paint::paint(self, &ctx.painter(), &self.rects, root);
+                    }
+                    for overlay in self.overlay_stack.clone() {
+                        if let Some(content) = self.overlay_content(overlay) {
+                            if self.rects.contains_key(&content) {
+                                paint::paint(self, &ctx.painter(), &self.rects, content);
+                            }
                         }
                     }
-                }
+                })
             });
             self.shapes = shapes;
             self.next_paint = Instant::now().checked_add(delay);
@@ -271,9 +296,13 @@ impl Document {
             ctx.request_repaint_after(deadline.saturating_duration_since(Instant::now()));
         }
         ctx.extend(&self.shapes);
-        if let Some(fragment) = self.accessibility_fragment() {
-            ctx.publish_accessibility(fragment);
-        }
+        FrameMeasurement::measure(&mut measurement.timings.accessibility, || {
+            if let Some(fragment) = self.accessibility_fragment() {
+                ctx.publish_accessibility(fragment);
+            }
+        });
+        let frame = measurement.finish(self.arena.len(), self.shapes.len());
+        self.performance.record(frame);
     }
 
     pub(crate) fn watch_size(&mut self, id: NodeId) -> ::reactive::ReadSignal<Vec2> {
@@ -315,14 +344,15 @@ impl Document {
             .unwrap_or_else(|| panic!("component has no {} state", std::any::type_name::<T>()))
     }
 
-    fn settle_layout(&mut self, ctx: &Context, rect: Rect) {
+    fn settle_layout(&mut self, ctx: &Context, rect: Rect) -> usize {
+        let mut passes = 0;
         for _ in 0..SIZE_PASSES {
-            self.update_layout(ctx, rect);
+            passes += usize::from(self.update_layout(ctx, rect));
             if !self.publish_sizes() {
-                return;
+                return passes;
             }
         }
-        self.update_layout(ctx, rect);
+        passes + usize::from(self.update_layout(ctx, rect))
     }
 
     fn publish_sizes(&mut self) -> bool {
@@ -355,9 +385,9 @@ impl Document {
             .map_or(Rect::NOTHING, |(_, rect, _)| *rect)
     }
 
-    fn update_layout(&mut self, ctx: &Context, rect: Rect) {
+    fn update_layout(&mut self, ctx: &Context, rect: Rect) -> bool {
         if self.layout_revision == self.arena.revision {
-            return;
+            return false;
         }
         let mut rects = HashMap::new();
         if let Some(root) = self.root {
@@ -365,6 +395,7 @@ impl Document {
         }
         self.rects = Rc::new(rects);
         self.layout_revision = self.arena.revision;
+        true
     }
 }
 
