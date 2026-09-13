@@ -14,6 +14,7 @@ pub(crate) fn interact(
     painter: &Painter,
     rects: &HashMap<NodeId, Rect>,
     root: NodeId,
+    keyboard_interactive: bool,
 ) {
     let input = InteractInput {
         pointer_pos: ctx.input(|input| input.pointer.interact_pos()),
@@ -75,6 +76,7 @@ pub(crate) fn interact(
                 doc.cancel_focus_activation();
                 continue;
             }
+            Event::Text(_) | Event::Key { .. } if !keyboard_interactive => continue,
             Event::Text(text) => {
                 doc.text_focused(&text);
                 doc.reveal_focus(painter);

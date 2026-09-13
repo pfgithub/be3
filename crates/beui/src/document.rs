@@ -201,15 +201,25 @@ impl Document {
             .inspector
             .as_ref()
             .is_some_and(|inspector| inspector.intercepts());
-        self.show_content(ctx, content, !intercepted);
+        let inspector_has_focus = self
+            .inspector
+            .as_ref()
+            .is_some_and(|inspector| inspector.document.focused_node().is_some());
+        self.show_content(ctx, content, !intercepted, !inspector_has_focus);
 
         if let Some(mut inspector) = self.inspector.take() {
-            inspector.show(self, ctx, content, panel);
+            inspector.show(self, ctx, content, panel, inspector_has_focus);
             self.inspector = Some(inspector);
         }
     }
 
-    fn show_content(&mut self, ctx: &Context, rect: Rect, interactive: bool) {
+    pub(crate) fn show_content(
+        &mut self,
+        ctx: &Context,
+        rect: Rect,
+        interactive: bool,
+        keyboard_interactive: bool,
+    ) {
         let mut measurement = FrameMeasurement::new();
         let scale = ctx.pixels_per_point();
         if self
@@ -255,7 +265,14 @@ impl Document {
                     let _guard = crate::reactive::install(self);
                     context.run(|| {
                         crate::reactive::with_document(|document| {
-                            interact::interact(document, ctx, &painter, &rects, root)
+                            interact::interact(
+                                document,
+                                ctx,
+                                &painter,
+                                &rects,
+                                root,
+                                keyboard_interactive,
+                            )
                         });
                     });
                 }

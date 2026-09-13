@@ -241,10 +241,12 @@ impl Inspector {
         ctx: &Context,
         content: Rect,
         panel: Rect,
+        keyboard_interactive: bool,
     ) {
         self.forget_removed(target);
         self.sync(target);
-        self.document.show(ctx, panel);
+        self.document
+            .show_content(ctx, panel, true, keyboard_interactive);
         if self.state.reset_performance.take() {
             target.reset_performance();
             ctx.request_repaint();
