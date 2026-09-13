@@ -1,99 +1,83 @@
+use std::rc::Rc;
 use std::sync::Arc;
 
 use block_client::blocks::checklist::{Checklist, ChecklistOperation};
-use block_editor_plugin::block_ui::test_id::TestId;
-use block_editor_plugin::egui;
+use block_editor_plugin::beui::{Context, Rect};
+use block_editor_plugin::EditorHost;
 
-#[derive(Clone, Copy, Default, Eq, PartialEq)]
-enum Filter {
-    #[default]
-    All,
-    Open,
-    Done,
-}
+mod checklist_changes;
+mod ui;
 
-impl Filter {
-    const ALL: [(Self, &'static str); 3] = [
-        (Self::All, "All"),
-        (Self::Open, "Open"),
-        (Self::Done, "Done"),
-    ];
-
-    fn keeps(self, done: bool) -> bool {
-        match self {
-            Self::All => true,
-            Self::Open => !done,
-            Self::Done => done,
-        }
-    }
-}
+use checklist_changes::ChecklistChanges;
+use ui::{ChecklistModel, ChecklistSnapshot, ChecklistUi};
 
 #[derive(Default)]
 pub struct ChecklistApp {
-    block: Option<block_client::BlockHandle<Checklist>>,
+    ui: Option<ChecklistUi>,
+    checklist: Option<Rc<BlockChecklist>>,
+    changes: Option<ChecklistChanges>,
     creation: Option<Arc<block_client::BlockClient>>,
-    draft: String,
-    filter: Filter,
 }
 
 impl ChecklistApp {
-    fn items(&self) -> Option<Vec<(String, bool)>> {
-        let checklist = self.block.as_ref()?.read()?;
-        Some(
-            checklist
-                .items()
-                .iter()
-                .map(|item| (item.text.clone(), item.done))
-                .collect(),
-        )
+    pub fn ui(&self) -> Option<&ChecklistUi> {
+        self.ui.as_ref()
     }
+}
 
-    fn apply(&self, operation: ChecklistOperation) {
-        if let Some(block) = &self.block {
-            block.operate(operation);
-        }
-    }
+struct BlockChecklist {
+    block: block_client::BlockHandle<Checklist>,
+    host: EditorHost,
+}
 
-    fn add_draft(&mut self) {
-        let text = self.draft.trim().to_owned();
-        if text.is_empty() {
-            return;
-        }
-        self.apply(ChecklistOperation::Add { text });
-        self.draft.clear();
-    }
-
-    fn draft_ui(&mut self, ui: &mut egui::Ui) {
-        let response = ui
-            .add(
-                egui::TextEdit::singleline(&mut self.draft)
-                    .hint_text("New item")
-                    .desired_width(160.0),
-            )
-            .test_id("checklist.draft");
-        let submitted =
-            response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
-        if ui.button("Add").test_id("checklist.add").clicked() || submitted {
-            self.add_draft();
+impl BlockChecklist {
+    fn operate(&self, operation: ChecklistOperation) {
+        if self.host.editable() {
+            self.block.operate(operation);
         }
     }
 }
 
-impl block_editor_plugin::App for ChecklistApp {
+impl ChecklistModel for BlockChecklist {
+    fn snapshot(&self) -> ChecklistSnapshot {
+        self.block
+            .read()
+            .map_or_else(ChecklistSnapshot::default, |checklist| {
+                ChecklistSnapshot::from(&*checklist)
+            })
+    }
+
+    fn add(&self, text: String) {
+        self.operate(ChecklistOperation::Add { text });
+    }
+
+    fn set_done(&self, index: u32, done: bool) {
+        self.operate(ChecklistOperation::SetDone { index, done });
+    }
+
+    fn remove(&self, index: u32) {
+        self.operate(ChecklistOperation::Remove { index });
+    }
+
+    fn clear_done(&self) {
+        self.operate(ChecklistOperation::ClearDone);
+    }
+}
+
+impl block_editor_plugin::BeuiApp for ChecklistApp {
     fn connect(
         &mut self,
-        _host: block_editor_plugin::EditorHost,
+        host: EditorHost,
         client: Arc<block_client::BlockClient>,
         block_id: uuid::Uuid,
     ) {
-        self.block = Some(client.get_block(block_id));
+        let block = client.get_block(block_id);
+        self.changes = Some(ChecklistChanges::new(block.clone(), host.waker()));
+        self.checklist = Some(Rc::new(BlockChecklist { block, host }));
+        self.ui = None;
     }
 
-    fn connect_creation(
-        &mut self,
-        _host: block_editor_plugin::EditorHost,
-        client: Arc<block_client::BlockClient>,
-    ) {
+    fn connect_creation(&mut self, _host: EditorHost, client: Arc<block_client::BlockClient>) {
         self.creation = Some(client);
     }
 
@@ -105,88 +89,20 @@ impl block_editor_plugin::App for ChecklistApp {
         Ok(client.create_block(Checklist::default()).id())
     }
 
-    fn ui(&mut self, ui: &mut egui::Ui) {
-        let Some(items) = self.items() else {
-            ui.spinner();
-            return;
-        };
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            let mut shown = 0;
-            for (index, (text, done)) in items.iter().enumerate() {
-                if !self.filter.keeps(*done) {
-                    continue;
+    fn frame(&mut self, context: &Context, rect: Rect) {
+        if let Some(snapshot) = self.changes.as_mut().and_then(ChecklistChanges::take) {
+            if self.ui.is_none() {
+                if let Some(checklist) = &self.checklist {
+                    self.ui = Some(ChecklistUi::new(checklist.clone()));
                 }
-                shown += 1;
-                ui.horizontal(|ui| {
-                    let mut checked = *done;
-                    if ui
-                        .checkbox(&mut checked, text)
-                        .test_id(&format!("checklist.item.{index}.done"))
-                        .changed()
-                    {
-                        self.apply(ChecklistOperation::SetDone {
-                            index: index as u32,
-                            done: checked,
-                        });
-                    }
-                    if ui
-                        .button("Remove")
-                        .test_id(&format!("checklist.item.{index}.remove"))
-                        .clicked()
-                    {
-                        self.apply(ChecklistOperation::Remove {
-                            index: index as u32,
-                        });
-                    }
-                });
             }
-            if shown == 0 {
-                ui.label("Nothing here yet.");
-            }
-        });
-    }
-
-    fn toolbar_ui(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            self.draft_ui(ui);
-            ui.separator();
-            if ui
-                .button("Clear done")
-                .test_id("checklist.clear-done")
-                .clicked()
-            {
-                self.apply(ChecklistOperation::ClearDone);
-            }
-        });
-    }
-
-    fn left_sidebar_ui(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Show");
-        for (filter, label) in Filter::ALL {
-            if ui
-                .selectable_label(self.filter == filter, label)
-                .test_id(&format!("checklist.filter.{}", label.to_lowercase()))
-                .clicked()
-            {
-                self.filter = filter;
+            if let Some(ui) = &mut self.ui {
+                ui.set_snapshot(snapshot);
             }
         }
-    }
-
-    fn right_sidebar_ui(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Progress");
-        let Some(items) = self.items() else {
-            ui.spinner();
+        let Some(ui) = &mut self.ui else {
             return;
         };
-        let done = items.iter().filter(|(_, done)| *done).count();
-        ui.label(format!("Done: {done}"));
-        ui.label(format!("Open: {}", items.len() - done));
-        let fraction = if items.is_empty() {
-            0.0
-        } else {
-            done as f32 / items.len() as f32
-        };
-        ui.add(egui::ProgressBar::new(fraction).show_percentage());
+        ui.show(context, rect);
     }
 }
