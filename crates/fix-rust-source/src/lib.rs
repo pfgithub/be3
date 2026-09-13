@@ -1,8 +1,9 @@
+use ra_ap_syntax::ast::{self, AstNode, AstToken, HasAttrs, HasName};
+use ra_ap_syntax::{Edition, NodeOrToken, SourceFile, SyntaxNode};
 use std::error::Error;
 use std::fs;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
-use tree_sitter::{Node, Parser, Tree};
 
 pub fn fix_repository(root: &Path, check: bool) -> Result<(), Box<dyn Error>> {
     let mut violations = find_layout_violations(root)?;
@@ -34,8 +35,16 @@ pub fn fix_repository(root: &Path, check: bool) -> Result<(), Box<dyn Error>> {
 
 pub fn strip_comments(source: &[u8]) -> Result<Vec<u8>, Box<dyn Error>> {
     let tree = parse(source)?;
-    let mut comments = Vec::new();
-    collect_comments(tree.root_node(), &mut comments);
+    let mut comments = tree
+        .syntax()
+        .descendants_with_tokens()
+        .filter_map(NodeOrToken::into_token)
+        .filter_map(ast::AnyComment::cast)
+        .map(|comment| Comment {
+            range: syntax_range(comment.syntax().text_range()),
+            block: comment.shape().is_block(),
+        })
+        .collect::<Vec<_>>();
     comments.sort_unstable_by_key(|comment| comment.range.start);
 
     let mut stripped = Vec::with_capacity(source.len());
@@ -84,16 +93,18 @@ pub fn strip_comments(source: &[u8]) -> Result<Vec<u8>, Box<dyn Error>> {
     Ok(stripped)
 }
 
-fn parse(source: &[u8]) -> Result<Tree, Box<dyn Error>> {
-    let mut parser = Parser::new();
-    parser.set_language(&tree_sitter_rust::LANGUAGE.into())?;
-    let tree = parser
-        .parse(source, None)
-        .ok_or("Rust parser did not produce a syntax tree")?;
-    if tree.root_node().has_error() {
-        return Err("Rust parser found invalid syntax".into());
-    }
-    Ok(tree)
+fn parse(source: &[u8]) -> Result<SourceFile, Box<dyn Error>> {
+    let source = std::str::from_utf8(source)?;
+    SourceFile::parse(source, Edition::Edition2021)
+        .ok()
+        .map_err(|errors| {
+            let errors = errors
+                .into_iter()
+                .map(|error| error.to_string())
+                .collect::<Vec<_>>()
+                .join("\n");
+            format!("Rust parser found invalid syntax:\n{errors}").into()
+        })
 }
 
 struct Comment {
@@ -101,19 +112,8 @@ struct Comment {
     block: bool,
 }
 
-fn collect_comments(node: Node<'_>, comments: &mut Vec<Comment>) {
-    if matches!(node.kind(), "line_comment" | "block_comment") {
-        comments.push(Comment {
-            range: node.byte_range(),
-            block: node.kind() == "block_comment",
-        });
-        return;
-    }
-
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        collect_comments(child, comments);
-    }
+fn syntax_range(range: ra_ap_syntax::TextRange) -> Range<usize> {
+    u32::from(range.start()) as usize..u32::from(range.end()) as usize
 }
 
 #[derive(Clone)]
@@ -135,118 +135,86 @@ struct PathModule {
     retained_attributes: Vec<String>,
 }
 
-fn path_modules(node: Node<'_>, source: &[u8]) -> Vec<PathModule> {
+fn path_modules(node: &SyntaxNode) -> Vec<PathModule> {
     let mut modules = Vec::new();
-    let mut attributes = Vec::new();
-    let mut cursor = node.walk();
-    for child in node.named_children(&mut cursor) {
-        if child.kind() == "attribute_item" {
-            attributes.push(child);
+    for module in node.children().filter_map(ast::Module::cast) {
+        if module.item_list().is_some() {
             continue;
         }
-        if child.kind() == "mod_item" && child.child_by_field_name("body").is_none() {
-            let path_attribute = attributes.iter().find_map(|attribute| {
-                let attribute = text(source, attribute.byte_range());
-                parse_path_attribute(attribute).map(|path| (attribute, path))
+        let attributes = module.attrs().collect::<Vec<_>>();
+        let path_attribute = attributes
+            .iter()
+            .find_map(|attribute| parse_path_attribute(attribute).map(|path| (attribute, path)));
+        if let (Some(name), Some((path_attribute, custom_path))) = (module.name(), path_attribute) {
+            modules.push(PathModule {
+                name: name.text().trim_start_matches("r#").to_owned(),
+                range: syntax_range(module.syntax().text_range()),
+                custom_path,
+                retained_attributes: attributes
+                    .iter()
+                    .filter(|attribute| *attribute != path_attribute)
+                    .map(|attribute| attribute.syntax().text().to_string())
+                    .collect(),
             });
-            if let (Some(name), Some((path_attribute, custom_path))) =
-                (child.child_by_field_name("name"), path_attribute)
-            {
-                modules.push(PathModule {
-                    name: text(source, name.byte_range()).to_owned(),
-                    range: attributes
-                        .first()
-                        .map_or(child.start_byte(), Node::start_byte)
-                        ..child.end_byte(),
-                    custom_path,
-                    retained_attributes: attributes
-                        .iter()
-                        .map(|attribute| text(source, attribute.byte_range()))
-                        .filter(|attribute| *attribute != path_attribute)
-                        .map(str::to_owned)
-                        .collect(),
-                });
-            }
         }
-        attributes.clear();
     }
     modules
 }
 
-fn parse_path_attribute(attribute: &str) -> Option<String> {
-    let compact = attribute
-        .chars()
-        .filter(|character| !character.is_whitespace())
-        .collect::<String>();
-    if !compact.starts_with("#[path=") {
+fn parse_path_attribute(attribute: &ast::Attr) -> Option<String> {
+    let ast::Meta::KeyValueMeta(meta) = attribute.meta()? else {
+        return None;
+    };
+    if meta.path()?.as_single_name_ref()?.text() != "path" {
         return None;
     }
-    let start = attribute.find('"')? + 1;
-    let end = attribute[start..].find('"')? + start;
-    Some(attribute[start..end].to_owned())
+    let ast::Expr::Literal(literal) = meta.expr()? else {
+        return None;
+    };
+    let ast::LiteralKind::String(value) = literal.kind() else {
+        return None;
+    };
+    Some(value.value().ok()?.into_owned())
 }
 
-fn attributed_test_functions(node: Node<'_>, source: &[u8]) -> Vec<TestFunction> {
+fn attributed_test_functions(node: &SyntaxNode) -> Vec<TestFunction> {
     let mut functions = Vec::new();
-    let mut attributes = Vec::new();
-    let mut cursor = node.walk();
-    for child in node.named_children(&mut cursor) {
-        if child.kind() == "attribute_item" {
-            attributes.push(child);
-            continue;
-        }
-        if child.kind() == "function_item"
-            && attributes
-                .iter()
-                .any(|attribute| is_test_attribute(&source[attribute.byte_range()]))
+    for function in node.children().filter_map(ast::Fn::cast) {
+        if function
+            .attrs()
+            .any(|attribute| is_test_attribute(&attribute))
         {
-            if let Some(name) = child.child_by_field_name("name") {
+            if let Some(name) = function.name() {
                 functions.push(TestFunction {
-                    name: text(source, name.byte_range())
-                        .trim_start_matches("r#")
-                        .to_owned(),
-                    range: attributes.first().unwrap().start_byte()..child.end_byte(),
+                    name: name.text().trim_start_matches("r#").to_owned(),
+                    range: syntax_range(function.syntax().text_range()),
                 });
             }
         }
-        attributes.clear();
     }
     functions
 }
 
-fn is_test_attribute(attribute: &[u8]) -> bool {
-    let compact = String::from_utf8_lossy(attribute)
-        .chars()
-        .filter(|character| !character.is_whitespace())
-        .collect::<String>();
-    compact == "#[test]" || compact.ends_with("::test]")
+fn is_test_attribute(attribute: &ast::Attr) -> bool {
+    attribute
+        .path()
+        .and_then(|path| path.segment())
+        .and_then(|segment| segment.name_ref())
+        .is_some_and(|name| name.text() == "test")
 }
 
-fn inline_tests(node: Node<'_>, source: &[u8]) -> Option<InlineTests> {
-    let mut attributes = Vec::new();
-    let mut cursor = node.walk();
-    for child in node.named_children(&mut cursor) {
-        if child.kind() == "attribute_item" {
-            attributes.push(child);
-            continue;
-        }
-        if child.kind() == "mod_item"
-            && child
-                .child_by_field_name("name")
-                .is_some_and(|name| text(source, name.byte_range()) == "tests")
-        {
-            if let Some(body) = child.child_by_field_name("body") {
+fn inline_tests(node: &SyntaxNode) -> Option<InlineTests> {
+    for module in node.children().filter_map(ast::Module::cast) {
+        if module.name().is_some_and(|name| name.text() == "tests") {
+            if let Some(body) = module.item_list() {
                 return Some(InlineTests {
-                    range: attributes
-                        .first()
-                        .map_or(child.start_byte(), Node::start_byte)
-                        ..child.end_byte(),
-                    body_range: body.start_byte() + 1..body.end_byte() - 1,
-                    functions: attributed_test_functions(body, source),
+                    range: syntax_range(module.syntax().text_range()),
+                    body_range: u32::from(body.l_curly_token()?.text_range().end()) as usize
+                        ..u32::from(body.r_curly_token()?.text_range().start()) as usize,
+                    functions: attributed_test_functions(body.syntax()),
                 });
             }
         }
-        attributes.clear();
     }
     None
 }
@@ -293,17 +261,17 @@ fn find_layout_violations(root: &Path) -> Result<Vec<String>, Box<dyn Error>> {
 
         let source = fs::read(path)?;
         let tree = parse(&source)?;
-        if inline_tests(tree.root_node(), &source).is_some() {
+        if inline_tests(tree.syntax()).is_some() {
             violations.push(format!("inline tests: {}", relative(root, path)));
         }
-        if path_modules(tree.root_node(), &source)
+        if path_modules(tree.syntax())
             .iter()
             .any(|module| is_test_module_owner(path, &module.name))
         {
             violations.push(format!("test path attribute: {}", relative(root, path)));
         }
 
-        let functions = attributed_test_functions(tree.root_node(), &source);
+        let functions = attributed_test_functions(tree.syntax());
         if !functions.is_empty()
             && !(is_individual_test_file(path)
                 && functions.len() == 1
@@ -413,7 +381,7 @@ fn fix_test_path_modules(root: &Path) -> Result<(), Box<dyn Error>> {
         }
         let source = fs::read(&path)?;
         let tree = parse(&source)?;
-        let modules = path_modules(tree.root_node(), &source)
+        let modules = path_modules(tree.syntax())
             .into_iter()
             .filter(|module| is_test_module_owner(&path, &module.name))
             .collect::<Vec<_>>();
@@ -466,7 +434,7 @@ fn is_test_module_owner(path: &Path, module: &str) -> bool {
 fn fix_inline_tests(path: &Path) -> Result<(), Box<dyn Error>> {
     let source = fs::read(path)?;
     let tree = parse(&source)?;
-    let Some(inline) = inline_tests(tree.root_node(), &source) else {
+    let Some(inline) = inline_tests(tree.syntax()) else {
         return Ok(());
     };
     let (aggregator, tests_directory) = test_locations(path)?;
@@ -498,7 +466,7 @@ fn fix_inline_tests(path: &Path) -> Result<(), Box<dyn Error>> {
 fn fix_top_level_tests(path: &Path) -> Result<(), Box<dyn Error>> {
     let source = fs::read(path)?;
     let tree = parse(&source)?;
-    let functions = attributed_test_functions(tree.root_node(), &source);
+    let functions = attributed_test_functions(tree.syntax());
     if functions.is_empty()
         || (is_individual_test_file(path)
             && functions.len() == 1

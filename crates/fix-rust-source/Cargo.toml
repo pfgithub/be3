@@ -5,5 +5,4 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-tree-sitter = "0.26"
-tree-sitter-rust = "0.24"
+ra_ap_syntax = "0.0.351"

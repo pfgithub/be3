@@ -8,6 +8,7 @@ fn strip_comments() {
     let value = 1 /* removed
     across lines */ + 2;
 }
+fn gen() {}
 "##;
 
     let stripped = strip(source).unwrap();
@@ -21,4 +22,9 @@ fn strip_comments() {
         String::from_utf8_lossy(source).lines().count()
     );
     assert!(stripped.contains("let value = 1\n + 2;"));
+
+    assert_eq!(
+        strip(b"/// removed docs\npub fn documented() {}\n").unwrap(),
+        b"pub fn documented() {}\n"
+    );
 }
