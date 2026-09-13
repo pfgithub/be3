@@ -37,16 +37,18 @@ if ! "$repository/scripts/internal/build-ghostty-vt.sh" --triple "$host_triple" 
     exit 1
 fi
 
-t() {
+timed() {
     if which time >/dev/null 2>&1; then
-        if ! TIME="Took %E" time "$@"; then
-            failed=true
-        fi
+        TIME="Took %E" time "$@"
     else
         # git bash only has the builtin, no executable
-        if ! time "$@"; then
-            failed=true
-        fi
+        time "$@"
+    fi
+}
+
+t() {
+    if ! timed "$@"; then
+        failed=true
     fi
 }
 
@@ -71,12 +73,17 @@ echo 'cargo clippy...'
 if $check; then
     t cargo clippy "${clippy_targets[@]}" -- -D warnings
 else
-    # The tree is expected to be mid-change; fixing only a pristine checkout
-    # would make the script useless during development.
-    t cargo clippy --quiet --fix --allow-dirty --allow-staged "${clippy_targets[@]}" -- -D warnings
-    # cargo clippy --fix caps lints while applying suggestions, so run clippy
-    # again to make any warnings that remain fail verification.
-    t cargo clippy --quiet "${clippy_targets[@]}" -- -D warnings
+    # Fix mode forces every target to be checked even when nothing changed, so
+    # only pay for it when the cacheable check finds something it can fix.
+    if ! timed cargo clippy --quiet "${clippy_targets[@]}" -- -D warnings; then
+        echo 'Applying clippy fixes...'
+        # The tree is expected to be mid-change; fixing only a pristine checkout
+        # would make the script useless during development.
+        t cargo clippy --quiet --fix --allow-dirty --allow-staged "${clippy_targets[@]}" -- -D warnings
+        # cargo clippy --fix caps lints while applying suggestions, so run clippy
+        # again to make any warnings that remain fail verification.
+        t cargo clippy --quiet "${clippy_targets[@]}" -- -D warnings
+    fi
 fi
 
 echo 'cargo nextest run...'
