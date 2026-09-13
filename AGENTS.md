@@ -15,7 +15,7 @@ Do not:
 - Don't use worktrees. If using subagents, run them sequentially rather than in parallel.
 
 Verification:
-- `./scripts/check`: Use this for fast compile feedback. It prepares non-Cargo prerequisites and checks the complete workspace with the feature unification the project expects. Do not use package-scoped `cargo build` or `cargo check` as a substitute; packages can fail or pass incorrectly when built outside the workspace.
+- `./scripts/check`: Use this for fast compile feedback. It prepares non-Cargo prerequisites and checks the complete workspace with the feature unification the project expects. Prefer this over `cargo build` or `cargo check` directly.
 - `./scripts/verify`: This is the primary full check and is required before committing. Run it after coherent changes and use a 10 minute timeout in the tool call arguments so it doesn't convert itself to a background task.
   - This will run all project tests and clippy lints
   - It will autofix formatting, clippy fixable rules, and it will autofix to enforce project-specific rules: It will delete all code comments & doc comments, it will structure test folders & files to the project's one test per file standard, and it will automatically move+rename mod.rs files to be in the parent folder named after the folder instead.
