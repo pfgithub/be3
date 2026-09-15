@@ -356,7 +356,14 @@ fn paint_beui(
         };
         drawn.repaint = drawn.repaint.min(output.repaint_after);
         let scale = output.pixels_per_point();
-        renderer.prepare(target.device, target.queue, output, screen, scale);
+        renderer.prepare(
+            target.device,
+            target.queue,
+            output,
+            screen,
+            scale,
+            beui::Repaint::Everything,
+        );
         let mut encoder = target
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());

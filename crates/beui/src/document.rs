@@ -1,4 +1,5 @@
 use std::any::Any;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::Instant;
@@ -7,7 +8,7 @@ use accesskit::Node;
 
 use crate::accessibility;
 use crate::context::Context;
-use crate::damage;
+use crate::damage::Damage;
 use crate::flash::FlashLog;
 use crate::geometry::{Rect, Vec2, pos2};
 use crate::input::{Event, Key};
@@ -16,7 +17,7 @@ use crate::inspector::Inspector;
 use crate::interact;
 use crate::layout;
 use crate::node::{Arena, NodeId};
-use crate::paint;
+use crate::paint::{self, PaintCache, Painted};
 use crate::painter::Shape;
 use crate::performance::{FrameMeasurement, PerformanceSnapshot, PerformanceTracker};
 use crate::styled::{Theme, ThemeStore};
@@ -42,6 +43,11 @@ pub struct Document {
     paint_revision: u64,
     viewport: Option<(Context, Rect, f32)>,
     shapes: Vec<Shape>,
+    paint_cache: RefCell<PaintCache>,
+    paint_region: Cell<Rect>,
+    paint_base: Cell<Option<usize>>,
+    grown: Cell<Rect>,
+    deadlines: Vec<NodeId>,
     pub(crate) copied_text: Option<String>,
     next_paint: Option<Instant>,
     reactive_scope: ::reactive::Scope,
@@ -53,7 +59,8 @@ pub struct Document {
     pub(crate) accessibility: HashMap<NodeId, Node>,
     performance: PerformanceTracker,
     changes: FlashLog<NodeId>,
-    damage: FlashLog<Rect>,
+    damage: Damage,
+    damage_flashes: FlashLog<Rect>,
 }
 
 struct SizeWatcher {
@@ -83,6 +90,11 @@ impl Document {
             paint_revision: 0,
             viewport: None,
             shapes: Vec::new(),
+            paint_cache: RefCell::new(PaintCache::default()),
+            paint_region: Cell::new(Rect::NOTHING),
+            paint_base: Cell::new(None),
+            grown: Cell::new(Rect::NOTHING),
+            deadlines: Vec::new(),
             copied_text: None,
             next_paint: None,
             reactive_scope: ::reactive::Scope::new(),
@@ -94,7 +106,8 @@ impl Document {
             accessibility: HashMap::new(),
             performance: PerformanceTracker::default(),
             changes: FlashLog::default(),
-            damage: FlashLog::default(),
+            damage: Damage::default(),
+            damage_flashes: FlashLog::default(),
         }
     }
 
@@ -186,11 +199,50 @@ impl Document {
 
     pub(crate) fn track_changes(&mut self, enabled: bool) {
         self.changes.set_enabled(enabled);
-        self.arena.set_change_tracking(enabled);
     }
 
     pub(crate) fn track_damage(&mut self, enabled: bool) {
-        self.damage.set_enabled(enabled);
+        self.damage_flashes.set_enabled(enabled);
+    }
+
+    pub(crate) fn paint_cache(&self) -> std::cell::Ref<'_, PaintCache> {
+        self.paint_cache.borrow()
+    }
+
+    pub(crate) fn cached_start(&self, id: NodeId, parent: Option<NodeId>) -> Option<usize> {
+        self.paint_cache.borrow().start(id, parent)
+    }
+
+    pub(crate) fn cached_bounds(&self, id: NodeId) -> Rect {
+        self.paint_cache.borrow().bounds(id)
+    }
+
+    pub(crate) fn store_painted(&self, id: NodeId, painted: Painted) {
+        self.paint_cache.borrow_mut().store(id, painted);
+    }
+
+    pub(crate) fn paint_region(&self) -> Rect {
+        self.paint_region.get()
+    }
+
+    pub(crate) fn paint_base(&self) -> Option<usize> {
+        self.paint_base.get()
+    }
+
+    pub(crate) fn enter_paint_base(&self, base: Option<usize>) -> Option<usize> {
+        self.paint_base.replace(base)
+    }
+
+    pub(crate) fn leave_paint_base(&self, base: Option<usize>) {
+        self.paint_base.set(base);
+    }
+
+    pub(crate) fn painted_shapes(&self, base: usize, len: usize) -> Option<&[Shape]> {
+        self.shapes.get(base..base + len)
+    }
+
+    pub(crate) fn note_grown(&self, bounds: Rect) {
+        self.grown.set(self.grown.get().union(bounds));
     }
 
     pub(crate) fn change_flashes(&self) -> impl Iterator<Item = (NodeId, Instant)> {
@@ -198,17 +250,17 @@ impl Document {
     }
 
     pub(crate) fn damage_flashes(&self) -> impl Iterator<Item = (Rect, Instant)> {
-        self.damage.entries().map(|(rect, at)| (*rect, at))
+        self.damage_flashes.entries().map(|(rect, at)| (*rect, at))
     }
 
     pub(crate) fn flashing(&self) -> bool {
-        !self.changes.is_empty() || !self.damage.is_empty()
+        !self.changes.is_empty() || !self.damage_flashes.is_empty()
     }
 
     pub fn set_accessibility(&mut self, id: NodeId, node: Node) {
         if self.accessibility.get(&id) != Some(&node) {
             self.accessibility.insert(id, node);
-            self.arena.invalidate();
+            self.arena.invalidate_node(id);
         }
     }
 
@@ -232,6 +284,7 @@ impl Document {
             self.detach_subtree(child, scopes);
         }
         self.arena.remove(id);
+        self.paint_cache.borrow_mut().forget(id);
         self.sizes.remove(&id);
         self.component_states.remove(&id);
         self.accessibility.remove(&id);
@@ -380,17 +433,31 @@ impl Document {
             });
         let now = Instant::now();
         self.changes.prune(now);
-        self.damage.prune(now);
+        self.damage_flashes.prune(now);
+        if self.arena.take_everything() {
+            self.damage.everything();
+        }
         for id in self.arena.take_changed() {
             self.changes.record(id, now);
+            if let Some(node) = self.rects.get(&id) {
+                self.damage.add(*node);
+            }
+            self.damage.add(self.paint_cache.borrow().bounds(id));
         }
-        if self.paint_revision != self.arena.revision
-            || self.next_paint.is_some_and(|deadline| deadline <= now)
-        {
+        let due = self.next_paint.is_some_and(|deadline| deadline <= now);
+        if due {
+            for id in std::mem::take(&mut self.deadlines) {
+                self.damage.add(self.paint_cache.borrow().bounds(id));
+            }
+        }
+        if self.paint_revision != self.arena.revision || due {
             measurement.painted = true;
+            self.paint_region.set(self.damage.take(rect));
+            self.grown.set(Rect::NOTHING);
             let (shapes, delay) = FrameMeasurement::measure(&mut measurement.timings.paint, || {
                 ctx.capture(|| {
                     if let Some(root) = self.root {
+                        self.paint_base.set(Some(0));
                         paint::paint(self, &ctx.painter(), &self.rects, root);
                     }
                     ctx.flush_top();
@@ -398,16 +465,22 @@ impl Document {
                         if let Some(content) = self.overlay_content(overlay)
                             && self.rects.contains_key(&content)
                         {
+                            self.paint_base.set(Some(0));
                             paint::paint(self, &ctx.painter(), &self.rects, content);
                         }
                         ctx.flush_top();
                     }
                 })
             });
-            let region = damage::between(&self.shapes, &shapes).intersect(rect);
             self.shapes = shapes;
+            self.deadlines = ctx.take_deadlines();
+            let region = self
+                .paint_region
+                .get()
+                .union(self.grown.get())
+                .intersect(rect);
             if region.is_positive() {
-                self.damage.record(region, now);
+                self.damage_flashes.record(region, now);
                 ctx.report_damage(region);
             }
             self.next_paint = Instant::now().checked_add(delay);
@@ -514,7 +587,19 @@ impl Document {
         if let Some(root) = self.root {
             layout::layout(self, &ctx.painter(), root, rect, &mut rects);
         }
-        self.rects = Rc::new(rects);
+        let previous = std::mem::replace(&mut self.rects, Rc::new(rects));
+        for (id, placed) in self.rects.iter() {
+            if previous.get(id) != Some(placed) {
+                self.damage.add(*placed);
+                self.damage.add(self.paint_cache.borrow().bounds(*id));
+            }
+        }
+        for (id, placed) in previous.iter() {
+            if !self.rects.contains_key(id) {
+                self.damage.add(*placed);
+                self.damage.add(self.paint_cache.borrow().bounds(*id));
+            }
+        }
         self.layout_revision = self.arena.revision;
         true
     }

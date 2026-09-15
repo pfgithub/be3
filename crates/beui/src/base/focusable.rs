@@ -276,7 +276,9 @@ impl Document {
         let old = self.focused;
         self.cancel_focus_activation();
         self.focused = new_focus;
-        self.arena.invalidate();
+        for id in [old, new_focus].into_iter().flatten() {
+            self.arena.invalidate_node(id);
+        }
         if let Some(old) = old {
             self.set_focusable_focused(old, false);
         }

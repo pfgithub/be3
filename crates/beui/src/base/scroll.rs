@@ -392,7 +392,7 @@ impl Element for ScrollNode {
         position.offset = position.offset.clamp(0.0, position.max_offset());
 
         if self.offset != position.offset || self.overscroll != previous_overscroll {
-            doc.arena.invalidate();
+            doc.arena.invalidate_node(id);
             self.offset = position.offset;
         }
         self.realize(doc, painter, rect);

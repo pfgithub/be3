@@ -6,7 +6,7 @@ use crate::color::Color32;
 use crate::context::FrameOutput;
 use crate::draw::{Quad, quads};
 use crate::font::{GlyphId, GlyphImage};
-use crate::geometry::Vec2;
+use crate::geometry::{Rect, Vec2};
 
 const ATLAS_SIZE: u32 = 2048;
 const GLYPH_PADDING: u32 = 1;
@@ -148,6 +148,12 @@ impl Atlas {
     }
 }
 
+#[derive(Clone, Copy)]
+pub enum Repaint {
+    Everything,
+    Region { region: Rect, background: Color32 },
+}
+
 pub struct Renderer {
     srgb: bool,
     pipeline: wgpu::RenderPipeline,
@@ -156,6 +162,7 @@ pub struct Renderer {
     instance_buffer: wgpu::Buffer,
     instance_capacity: usize,
     instance_count: u32,
+    scissor: Option<[u32; 4]>,
     atlas: Atlas,
 }
 
@@ -260,6 +267,7 @@ impl Renderer {
             instance_buffer,
             instance_capacity,
             instance_count: 0,
+            scissor: None,
             atlas,
         }
     }
@@ -271,6 +279,7 @@ impl Renderer {
         output: &FrameOutput,
         screen: Vec2,
         pixels_per_point: f32,
+        repaint: Repaint,
     ) {
         if self.atlas.full {
             self.atlas.reset();
@@ -285,6 +294,20 @@ impl Renderer {
         );
 
         let mut instances = Vec::new();
+        let damaged = match repaint {
+            Repaint::Everything => None,
+            Repaint::Region { region, background } => {
+                let region = physical(region, screen, pixels_per_point);
+                instances.push(Instance {
+                    rect: region,
+                    clip: region,
+                    uv: [0.0; 4],
+                    color: self.encode(background),
+                    params: [0.0, 0.0, 0.0, 0.0],
+                });
+                Some(region)
+            }
+        };
         for quad in quads(output, pixels_per_point) {
             match quad {
                 Quad::Rect {
@@ -293,19 +316,27 @@ impl Renderer {
                     color,
                     corner_radius,
                     stroke_width,
-                } => instances.push(Instance {
-                    rect,
-                    clip,
-                    uv: [0.0; 4],
-                    color: self.encode(color),
-                    params: [corner_radius, stroke_width, 0.0, 0.0],
-                }),
+                } => {
+                    if skipped(damaged, expand(rect, stroke_width), clip) {
+                        continue;
+                    }
+                    instances.push(Instance {
+                        rect,
+                        clip,
+                        uv: [0.0; 4],
+                        color: self.encode(color),
+                        params: [corner_radius, stroke_width, 0.0, 0.0],
+                    });
+                }
                 Quad::Glyph {
                     rect,
                     clip,
                     color,
                     glyph,
                 } => {
+                    if skipped(damaged, rect, clip) {
+                        continue;
+                    }
                     let Some(uv) = self.atlas.insert(queue, glyph.id, &glyph.image) else {
                         continue;
                     };
@@ -320,6 +351,7 @@ impl Renderer {
             }
         }
 
+        self.scissor = damaged.map(scissor);
         self.instance_count = instances.len() as u32;
         if instances.is_empty() {
             return;
@@ -347,11 +379,60 @@ impl Renderer {
         if self.instance_count == 0 {
             return;
         }
+        if let Some([left, top, width, height]) = self.scissor {
+            if width == 0 || height == 0 {
+                return;
+            }
+            pass.set_scissor_rect(left, top, width, height);
+        }
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &self.bind_group, &[]);
         pass.set_vertex_buffer(0, self.instance_buffer.slice(..));
         pass.draw(0..6, 0..self.instance_count);
     }
+}
+
+fn physical(region: Rect, screen: Vec2, pixels_per_point: f32) -> [f32; 4] {
+    [
+        (region.left() * pixels_per_point)
+            .floor()
+            .clamp(0.0, screen.x),
+        (region.top() * pixels_per_point)
+            .floor()
+            .clamp(0.0, screen.y),
+        (region.right() * pixels_per_point)
+            .ceil()
+            .clamp(0.0, screen.x),
+        (region.bottom() * pixels_per_point)
+            .ceil()
+            .clamp(0.0, screen.y),
+    ]
+}
+
+fn expand(rect: [f32; 4], amount: f32) -> [f32; 4] {
+    [
+        rect[0] - amount,
+        rect[1] - amount,
+        rect[2] + amount,
+        rect[3] + amount,
+    ]
+}
+
+fn skipped(damaged: Option<[f32; 4]>, rect: [f32; 4], clip: [f32; 4]) -> bool {
+    let Some(damaged) = damaged else {
+        return false;
+    };
+    let left = rect[0].max(clip[0]).max(damaged[0]);
+    let top = rect[1].max(clip[1]).max(damaged[1]);
+    let right = rect[2].min(clip[2]).min(damaged[2]);
+    let bottom = rect[3].min(clip[3]).min(damaged[3]);
+    left >= right || top >= bottom
+}
+
+fn scissor(damaged: [f32; 4]) -> [u32; 4] {
+    let width = (damaged[2] - damaged[0]).max(0.0) as u32;
+    let height = (damaged[3] - damaged[1]).max(0.0) as u32;
+    [damaged[0] as u32, damaged[1] as u32, width, height]
 }
 
 pub fn clear_color(color: Color32) -> wgpu::Color {

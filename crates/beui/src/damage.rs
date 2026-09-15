@@ -1,23 +1,42 @@
 use crate::geometry::Rect;
 use crate::painter::Shape;
 
-pub(crate) fn between(before: &[Shape], after: &[Shape]) -> Rect {
-    let shared = before
-        .iter()
-        .zip(after)
-        .take_while(|(before, after)| before == after)
-        .count();
-    let remaining = before.len().min(after.len()) - shared;
-    let matching = (1..=remaining)
-        .take_while(|offset| before[before.len() - offset] == after[after.len() - offset])
-        .count();
-    let changed = before[shared..before.len() - matching]
-        .iter()
-        .chain(&after[shared..after.len() - matching]);
-    changed.fold(Rect::NOTHING, |region, shape| region.union(bounds(shape)))
+pub(crate) struct Damage {
+    region: Rect,
+    everything: bool,
 }
 
-fn bounds(shape: &Shape) -> Rect {
+impl Default for Damage {
+    fn default() -> Self {
+        Self {
+            region: Rect::NOTHING,
+            everything: false,
+        }
+    }
+}
+
+impl Damage {
+    pub(crate) fn add(&mut self, rect: Rect) {
+        if rect.is_positive() {
+            self.region = self.region.union(rect);
+        }
+    }
+
+    pub(crate) fn everything(&mut self) {
+        self.everything = true;
+    }
+
+    pub(crate) fn take(&mut self, viewport: Rect) -> Rect {
+        let region = match self.everything {
+            true => viewport,
+            false => self.region.intersect(viewport),
+        };
+        *self = Self::default();
+        region
+    }
+}
+
+pub(crate) fn bounds(shape: &Shape) -> Rect {
     match shape {
         Shape::Rect {
             rect,

@@ -176,6 +176,7 @@ pub(crate) struct Inspector {
     grabbed: Option<f32>,
     grip: bool,
     seen: u64,
+    overlay_bounds: Cell<Rect>,
 }
 
 impl Inspector {
@@ -215,6 +216,7 @@ impl Inspector {
             grabbed: None,
             grip: false,
             seen: 0,
+            overlay_bounds: Cell::new(Rect::NOTHING),
         }
     }
 
@@ -543,25 +545,28 @@ impl Inspector {
         let scale = scale(ctx);
         let local = scale.recip();
         ctx.scaled(scale, || {
-            let painter = ctx.painter().with_clip_rect(content.scaled(local));
-            flashes(&painter, target, local);
-            let hovered = self.state.hovered.get();
-            let selected = self.state.selected.get();
-            if let Some(id) = selected.filter(|id| Some(*id) != hovered) {
-                overlay::highlight(&painter, target, id, false, local);
-            }
-            if let Some(id) = hovered {
-                overlay::highlight(&painter, target, id, true, local);
-            }
-            if self.grip {
-                let panel = panel.scaled(local);
-                let grip = Rect::from_min_max(
-                    panel.min,
-                    pos2(panel.left() + GRIP_PAINT_WIDTH, panel.bottom()),
-                );
-                ctx.painter().rect_filled(grip, 0.0, Theme::DARK.accent);
-                ctx.set_cursor_icon(CursorIcon::ResizeHorizontal);
-            }
+            let painted = ctx.measure_paint(|| {
+                let painter = ctx.painter().with_clip_rect(content.scaled(local));
+                flashes(&painter, target, local);
+                let hovered = self.state.hovered.get();
+                let selected = self.state.selected.get();
+                if let Some(id) = selected.filter(|id| Some(*id) != hovered) {
+                    overlay::highlight(&painter, target, id, false, local);
+                }
+                if let Some(id) = hovered {
+                    overlay::highlight(&painter, target, id, true, local);
+                }
+                if self.grip {
+                    let panel = panel.scaled(local);
+                    let grip = Rect::from_min_max(
+                        panel.min,
+                        pos2(panel.left() + GRIP_PAINT_WIDTH, panel.bottom()),
+                    );
+                    ctx.painter().rect_filled(grip, 0.0, Theme::DARK.accent);
+                    ctx.set_cursor_icon(CursorIcon::ResizeHorizontal);
+                }
+            });
+            ctx.report_damage(painted.union(self.overlay_bounds.replace(painted)));
         });
     }
 }

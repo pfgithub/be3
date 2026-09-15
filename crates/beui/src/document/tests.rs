@@ -18,6 +18,7 @@ mod a_reactive_tree_can_nest_builder_calls_without_threading_the_document;
 mod a_selection_handle_takes_a_tap_before_the_button_it_covers;
 mod a_signal_write_from_a_click_handler_updates_its_bound_text_in_the_same_frame;
 mod a_simulated_mouse_click_lands_where_the_trackpad_moved_its_cursor;
+mod a_skipped_element_keeps_the_repaint_deadline_it_asked_for;
 mod a_stack_becomes_a_column_when_its_container_gets_narrow;
 mod a_stack_built_inside_a_show_still_measures_the_container_above_it;
 mod a_tag_can_take_a_node_ref_and_a_test_id_slot_at_once;
@@ -78,6 +79,7 @@ mod hovering_a_row_highlights_the_node_it_lists;
 mod hovering_a_select_option_moves_the_keyboard_highlight;
 mod jumping_up_a_virtual_scroll_only_builds_the_items_in_view;
 mod opening_a_select_focuses_its_search_box_and_highlights_the_selected_option;
+mod painting_skips_the_elements_outside_the_damaged_region;
 mod percent_children_of_an_unbounded_list_use_their_intrinsic_length;
 mod percent_sized_children_still_size_an_intrinsic_lists_height;
 mod performance_measurements_report_work_and_cache_hits;
@@ -89,6 +91,7 @@ mod removing_a_keyed_node_drops_the_test_ids_it_registered;
 mod removing_a_node_runs_the_cleanups_its_components_registered;
 mod removing_a_node_stops_the_effects_that_were_built_for_it;
 mod resizing_a_virtual_scroll_reuses_visible_items;
+mod resizing_an_element_damages_where_it_was_and_where_it_moved_to;
 mod resizing_rows_preserves_the_scroll_anchor;
 mod right_arrow_opens_a_submenu_and_left_arrow_closes_it_and_refocuses_the_parent_item;
 mod right_click_opens_a_context_menu_at_the_cursor_position;
@@ -674,6 +677,7 @@ fn counted(document: &mut Document, node: NodeId) -> (Rc<Cell<usize>>, Rc<Cell<u
     );
     (layouts, paints)
 }
+mod a_blinking_caret_only_damages_the_text_it_belongs_to;
 mod a_click_handler_can_mutate_the_tree_in_the_current_frame;
 mod accordion_headers_are_keyboard_operable_and_skip_collapsed_content;
 mod activation_requires_a_matching_release_and_escape_cancels_it;

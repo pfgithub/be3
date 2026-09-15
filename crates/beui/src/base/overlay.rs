@@ -284,7 +284,7 @@ impl Document {
         }
         self.arena.get_mut_as::<OverlayNode>(overlay).open = true;
         self.overlay_stack.push(overlay);
-        self.arena.invalidate();
+        self.arena.invalidate_node(overlay);
     }
 
     pub(crate) fn close_overlay(&mut self, overlay: NodeId) {
@@ -305,9 +305,9 @@ impl Document {
             if self.contains(id) {
                 self.arena.get_mut_as::<OverlayNode>(id).open = false;
             }
+            self.arena.invalidate_node(id);
             self.call_overlay_dismiss(id);
         }
-        self.arena.invalidate();
     }
 
     fn call_overlay_dismiss(&mut self, id: NodeId) {

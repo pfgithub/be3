@@ -1,15 +1,18 @@
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use accesskit::{ActionRequest, TreeUpdate};
 
 use crate::accessibility::{self, Fragment};
+use crate::damage;
 use crate::font::{FontId, FontSources, Fonts, Galley};
 use crate::geometry::{Rect, pos2};
 use crate::input::{CursorIcon, InputState, RawInput};
 use crate::mouse_simulation::MouseSimulation;
+use crate::node::NodeId;
+use crate::paint::Painted;
 use crate::painter::{Painter, Shape};
 
 #[derive(Clone)]
@@ -22,6 +25,9 @@ struct Inner {
     input: RefCell<InputState>,
     shapes: RefCell<Vec<Shape>>,
     top_shapes: RefCell<Vec<Shape>>,
+    capture_base: Cell<usize>,
+    paint_stack: RefCell<Vec<PaintFrame>>,
+    deadlines: RefCell<Vec<NodeId>>,
     damage: RefCell<Vec<Rect>>,
     test_ids: RefCell<HashMap<String, Rect>>,
     copied_text: RefCell<Option<String>>,
@@ -92,6 +98,9 @@ impl Context {
                 input: RefCell::new(InputState::default()),
                 shapes: RefCell::new(Vec::new()),
                 top_shapes: RefCell::new(Vec::new()),
+                capture_base: Cell::new(0),
+                paint_stack: RefCell::new(Vec::new()),
+                deadlines: RefCell::new(Vec::new()),
                 damage: RefCell::new(Vec::new()),
                 test_ids: RefCell::new(HashMap::new()),
                 copied_text: RefCell::new(None),
@@ -122,6 +131,8 @@ impl Context {
         self.inner.input.borrow_mut().begin_frame(raw);
         self.inner.shapes.borrow_mut().clear();
         self.inner.top_shapes.borrow_mut().clear();
+        self.inner.paint_stack.borrow_mut().clear();
+        self.inner.deadlines.borrow_mut().clear();
         self.inner.damage.borrow_mut().clear();
         self.inner.test_ids.borrow_mut().clear();
         self.inner.copied_text.borrow_mut().take();
@@ -248,6 +259,15 @@ impl Context {
         self.inner
             .repaint_after
             .set(self.inner.repaint_after.get().min(delay));
+        let deadline = self
+            .inner
+            .paint_stack
+            .borrow()
+            .last()
+            .and_then(|frame| frame.id);
+        if let Some(id) = deadline {
+            self.inner.deadlines.borrow_mut().push(id);
+        }
     }
 
     pub(crate) fn same(&self, other: &Self) -> bool {
@@ -257,10 +277,88 @@ impl Context {
     pub(crate) fn capture(&self, paint: impl FnOnce()) -> (Vec<Shape>, Duration) {
         let previous_delay = self.inner.repaint_after.replace(Duration::MAX);
         let start = self.inner.shapes.borrow().len();
+        let base = self.inner.capture_base.replace(start);
+        self.inner.deadlines.borrow_mut().clear();
         paint();
+        self.inner.capture_base.set(base);
         let delay = self.inner.repaint_after.get();
         self.request_repaint_after(previous_delay);
         (self.inner.shapes.borrow_mut().split_off(start), delay)
+    }
+
+    pub(crate) fn measure_paint(&self, paint: impl FnOnce()) -> Rect {
+        self.push_paint_frame(None);
+        paint();
+        self.exit_paint().bounds
+    }
+
+    pub(crate) fn enter_paint(&self, id: NodeId) {
+        self.push_paint_frame(Some(id));
+    }
+
+    fn push_paint_frame(&self, id: Option<NodeId>) {
+        let frame = PaintFrame {
+            id,
+            main_start: self.captured(),
+            top_start: self.inner.top_shapes.borrow().len(),
+            bounds: Rect::NOTHING,
+            outer_delay: self.inner.repaint_after.replace(Duration::MAX),
+        };
+        self.inner.paint_stack.borrow_mut().push(frame);
+    }
+
+    pub(crate) fn exit_paint(&self) -> Painted {
+        let frame = self
+            .inner
+            .paint_stack
+            .borrow_mut()
+            .pop()
+            .expect("a painted node was entered");
+        let top = self.inner.top_shapes.borrow()[frame.top_start..].to_vec();
+        let delay = self.inner.repaint_after.get();
+        self.inner.repaint_after.set(frame.outer_delay.min(delay));
+        let painted = Painted {
+            parent: self.parent_node(),
+            main: frame.main_start..self.captured(),
+            top,
+            bounds: frame.bounds,
+            deadline: (delay < Duration::MAX).then(|| Instant::now() + delay),
+        };
+        self.note_bounds(frame.bounds);
+        painted
+    }
+
+    pub(crate) fn parent_start(&self) -> usize {
+        self.inner
+            .paint_stack
+            .borrow()
+            .last()
+            .map_or(0, |frame| frame.main_start)
+    }
+
+    pub(crate) fn parent_node(&self) -> Option<NodeId> {
+        self.inner
+            .paint_stack
+            .borrow()
+            .last()
+            .and_then(|frame| frame.id)
+    }
+
+    pub(crate) fn note_bounds(&self, bounds: Rect) {
+        if let Some(frame) = self.inner.paint_stack.borrow_mut().last_mut() {
+            frame.bounds = frame.bounds.union(bounds);
+        }
+    }
+
+    pub(crate) fn take_deadlines(&self) -> Vec<NodeId> {
+        let mut deadlines = std::mem::take(&mut *self.inner.deadlines.borrow_mut());
+        deadlines.sort_unstable_by_key(|id| id.index());
+        deadlines.dedup();
+        deadlines
+    }
+
+    fn captured(&self) -> usize {
+        self.inner.shapes.borrow().len() - self.inner.capture_base.get()
     }
 
     pub(crate) fn report_damage(&self, rect: Rect) {
@@ -271,6 +369,10 @@ impl Context {
 
     pub(crate) fn extend(&self, shapes: &[Shape]) {
         self.inner.shapes.borrow_mut().extend_from_slice(shapes);
+    }
+
+    pub(crate) fn extend_top(&self, shapes: &[Shape]) {
+        self.inner.top_shapes.borrow_mut().extend_from_slice(shapes);
     }
 
     pub(crate) fn publish_test_id(&self, test_id: &str, rect: Rect) {
@@ -376,17 +478,34 @@ impl Context {
     }
 
     pub(crate) fn push(&self, shape: Shape) {
+        self.note_shape(&shape);
         self.inner.shapes.borrow_mut().push(shape);
     }
 
     pub(crate) fn push_top(&self, shape: Shape) {
+        self.note_shape(&shape);
         self.inner.top_shapes.borrow_mut().push(shape);
+    }
+
+    fn note_shape(&self, shape: &Shape) {
+        let mut stack = self.inner.paint_stack.borrow_mut();
+        if let Some(frame) = stack.last_mut() {
+            frame.bounds = frame.bounds.union(damage::bounds(shape));
+        }
     }
 
     pub(crate) fn flush_top(&self) {
         let top = std::mem::take(&mut *self.inner.top_shapes.borrow_mut());
         self.inner.shapes.borrow_mut().extend(top);
     }
+}
+
+struct PaintFrame {
+    id: Option<NodeId>,
+    main_start: usize,
+    top_start: usize,
+    bounds: Rect,
+    outer_delay: Duration,
 }
 
 fn scale_shape(shape: &mut Shape, scale: f32) {

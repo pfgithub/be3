@@ -87,8 +87,8 @@ pub(crate) struct Arena {
     nodes: Vec<Option<Box<dyn Element>>>,
     live: usize,
     pub(crate) revision: u64,
-    track_changes: bool,
     changed: Vec<NodeId>,
+    everything: bool,
 }
 
 impl Arena {
@@ -97,11 +97,10 @@ impl Arena {
     }
 
     pub(crate) fn insert<T: Element>(&mut self, element: T) -> NodeId {
-        self.invalidate();
         let id = NodeId(self.nodes.len() as u32);
         self.nodes.push(Some(Box::new(element)));
         self.live += 1;
-        self.mark_changed(id);
+        self.invalidate_node(id);
         id
     }
 
@@ -118,8 +117,7 @@ impl Arena {
     }
 
     pub(crate) fn get_mut(&mut self, id: NodeId) -> &mut dyn Element {
-        self.invalidate();
-        self.mark_changed(id);
+        self.invalidate_node(id);
         self.nodes[id.0 as usize]
             .as_deref_mut()
             .expect("node was removed")
@@ -149,14 +147,12 @@ impl Arena {
 
     pub(crate) fn invalidate(&mut self) {
         self.revision = self.revision.wrapping_add(1);
+        self.everything = true;
     }
 
-    pub(crate) fn set_change_tracking(&mut self, enabled: bool) {
-        if self.track_changes == enabled {
-            return;
-        }
-        self.track_changes = enabled;
-        self.changed = Vec::new();
+    pub(crate) fn invalidate_node(&mut self, id: NodeId) {
+        self.revision = self.revision.wrapping_add(1);
+        self.changed.push(id);
     }
 
     pub(crate) fn take_changed(&mut self) -> Vec<NodeId> {
@@ -166,14 +162,12 @@ impl Arena {
         changed
     }
 
-    fn mark_changed(&mut self, id: NodeId) {
-        if self.track_changes {
-            self.changed.push(id);
-        }
+    pub(crate) fn take_everything(&mut self) -> bool {
+        std::mem::take(&mut self.everything)
     }
 
     pub(crate) fn remove(&mut self, id: NodeId) {
-        self.invalidate();
+        self.invalidate_node(id);
         if self.nodes[id.0 as usize].take().is_some() {
             self.live -= 1;
         }

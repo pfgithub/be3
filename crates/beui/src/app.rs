@@ -19,7 +19,7 @@ use crate::geometry::{Pos2, Rect, Vec2, pos2, vec2};
 use crate::input::{
     CursorIcon, Event, Key, Modifiers, PointerButton, RawInput, TouchId, TouchPhase,
 };
-use crate::renderer::{Renderer, clear_color};
+use crate::renderer::{Renderer, Repaint, clear_color};
 
 const LINE_HEIGHT: f32 = 40.0;
 const DEFAULT_SIZE: Vec2 = Vec2::new(1280.0, 800.0);
@@ -74,7 +74,56 @@ struct Surface {
     touch_cursor: CustomCursor,
     prepared_size: Option<(Vec2, f32)>,
     clear_color: Option<Color32>,
+    repaint: Repaint,
+    retained: Option<Retained>,
     accessibility: AccessKitAdapter,
+}
+
+struct Retained {
+    texture: wgpu::Texture,
+    view: wgpu::TextureView,
+    size: (u32, u32),
+}
+
+impl Surface {
+    fn retain(&mut self) {
+        if !self.config.usage.contains(wgpu::TextureUsages::COPY_DST) {
+            return;
+        }
+        let size = (self.config.width, self.config.height);
+        if self
+            .retained
+            .as_ref()
+            .is_none_or(|retained| retained.size != size)
+        {
+            let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("beui retained frame"),
+                size: wgpu::Extent3d {
+                    width: size.0,
+                    height: size.1,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: self.config.format,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                view_formats: &[],
+            });
+            let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+            self.retained = Some(Retained {
+                texture,
+                view,
+                size,
+            });
+        }
+    }
+
+    fn retains(&self) -> bool {
+        self.retained
+            .as_ref()
+            .is_some_and(|retained| retained.size == (self.config.width, self.config.height))
+    }
 }
 
 struct Runner {
@@ -163,22 +212,37 @@ impl Runner {
         }
 
         let size = (physical, scale);
-        let changed = output.changed || surface.prepared_size != Some(size);
-        if changed {
-            surface
-                .renderer
-                .prepare(&surface.device, &surface.queue, &output, physical, scale);
-            surface.prepared_size = Some(size);
-        }
         let clear_color = self.app.clear_color();
-        let changed = changed || surface.clear_color != Some(clear_color);
+        let stale = surface.prepared_size != Some(size)
+            || surface.clear_color != Some(clear_color)
+            || !surface.retains();
+        let repaint = match output.damage() {
+            Some(region) if !stale => Repaint::Region {
+                region,
+                background: clear_color,
+            },
+            _ => Repaint::Everything,
+        };
+        let changed = output.changed || stale;
+        if changed {
+            surface.renderer.prepare(
+                &surface.device,
+                &surface.queue,
+                &output,
+                physical,
+                scale,
+                repaint,
+            );
+            surface.prepared_size = Some(size);
+            surface.repaint = repaint;
+        }
         surface.clear_color = Some(clear_color);
         self.next_update = Instant::now().checked_add(output.repaint_after);
         changed
     }
 
     fn redraw(&mut self) {
-        self.update();
+        let changed = self.update();
         let Some(surface) = &mut self.surface else {
             return;
         };
@@ -204,15 +268,29 @@ impl Runner {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("beui encoder"),
             });
-        {
+        let clear = clear_color(self.app.clear_color());
+        let repaint = surface.repaint;
+        surface.retain();
+        let retained = surface.retained.as_ref();
+        let (target, load) = match retained {
+            Some(retained) => (
+                &retained.view,
+                match repaint {
+                    Repaint::Everything => wgpu::LoadOp::Clear(clear),
+                    Repaint::Region { .. } => wgpu::LoadOp::Load,
+                },
+            ),
+            None => (&view, wgpu::LoadOp::Clear(clear)),
+        };
+        if changed || retained.is_none() {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("beui pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
+                    view: target,
                     depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(clear_color(self.app.clear_color())),
+                        load,
                         store: wgpu::StoreOp::Store,
                     },
                 })],
@@ -222,6 +300,27 @@ impl Runner {
                 multiview_mask: None,
             });
             surface.renderer.paint(&mut pass);
+        }
+        if let Some(retained) = retained {
+            encoder.copy_texture_to_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &retained.texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                wgpu::TexelCopyTextureInfo {
+                    texture: &frame.texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                wgpu::Extent3d {
+                    width: retained.size.0,
+                    height: retained.size.1,
+                    depth_or_array_layers: 1,
+                },
+            );
         }
         surface.queue.submit(Some(encoder.finish()));
         frame.present();
@@ -534,6 +633,9 @@ async fn create_surface(
     if let Some(format) = capabilities.formats.iter().copied().find(|it| it.is_srgb()) {
         config.format = format;
     }
+    if capabilities.usages.contains(wgpu::TextureUsages::COPY_DST) {
+        config.usage |= wgpu::TextureUsages::COPY_DST;
+    }
     surface.configure(&device, &config);
     let renderer = Renderer::new(&device, config.format);
 
@@ -549,6 +651,8 @@ async fn create_surface(
         touch_cursor,
         prepared_size: None,
         clear_color: None,
+        repaint: Repaint::Everything,
+        retained: None,
         accessibility,
     })
 }
