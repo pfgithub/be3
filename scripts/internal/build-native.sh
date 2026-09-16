@@ -9,6 +9,10 @@ profile='debug'
 output=''
 client=true
 server=true
+# The plugins and games are wasm, identical whatever the app is built for, so a
+# build that is one of several for different machines leaves them to
+# build-plugins.sh rather than compiling the same modules again.
+with_plugins=true
 sign_identity=''
 
 while [[ $# -gt 0 ]]; do
@@ -31,6 +35,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --no-server)
             server=false
+            shift
+            ;;
+        --no-plugins)
+            with_plugins=false
             shift
             ;;
         --sign-identity)
@@ -149,11 +157,16 @@ for executable in "${executables[@]}"; do
     sign "$artifact_directory/$executable"
 done
 
-if $client; then
+if $client && $with_plugins; then
     build_plugin_wasm "$profile" "$artifact_directory"
     precompile_plugin_wasm "$artifact_directory" "$target_triple"
     stage_plugin_manifests "$artifact_directory"
     build_games "$profile"
+fi
+
+# PDFium is a native library the PDF plugin loads at runtime, so it belongs to
+# the machine this is built for however the modules are built.
+if $client; then
     "$internal/fetch-pdfium.sh" --triple "$target_triple" --output "$artifact_directory"
 fi
 
@@ -170,10 +183,12 @@ if [[ -n "$output" ]]; then
                 cp "$artifact_directory/$library" "$output/"
             fi
         done
-        rm -f "$output"/*.plugin.json
-        for manifest in "${plugin_manifests[@]}"; do
-            cp "$artifact_directory/$manifest" "$output/$manifest"
-        done
+        if $with_plugins; then
+            rm -f "$output"/*.plugin.json
+            for manifest in "${plugin_manifests[@]}"; do
+                cp "$artifact_directory/$manifest" "$output/$manifest"
+            done
+        fi
     fi
     echo "Packaged $target_triple in $output"
 fi

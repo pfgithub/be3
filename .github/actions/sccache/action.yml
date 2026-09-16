@@ -1,0 +1,32 @@
+name: Install sccache
+description: >-
+  Installs the sccache the build scripts route rustc through, so a job answers
+  a compilation from the project's shared store instead of repeating what
+  another runner already did.
+
+runs:
+  using: composite
+  steps:
+    # Which store, and whether this job may write to it, is decided by
+    # scripts/internal/common.sh, which every script in scripts/ sources: it
+    # points RUSTC_WRAPPER at whatever sccache is on PATH and writes only when
+    # BUNNY_SCCACHE_PASSWORD is in the environment, which for a pull request
+    # from a fork it is not. So there is nothing to configure here beyond
+    # putting the binary where that lookup finds it.
+    #
+    # The version comes out of common.sh rather than being repeated here, for
+    # the same reason the toolchain action reads the channel out of
+    # rust-toolchain.toml: two copies of a version are one copy and a bug.
+    - id: pin
+      shell: bash
+      run: |
+        version="$(sed -n "s/^sccache_version='\(.*\)'$/\1/p" scripts/internal/common.sh)"
+        if [ -z "$version" ]; then
+          echo 'scripts/internal/common.sh pins no sccache version to install' >&2
+          exit 1
+        fi
+        echo "version=$version" >> "$GITHUB_OUTPUT"
+
+    - uses: taiki-e/install-action@v2
+      with:
+        tool: sccache@${{ steps.pin.outputs.version }}

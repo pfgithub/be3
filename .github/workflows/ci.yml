@@ -15,6 +15,18 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0
+  # scripts/internal/common.sh routes rustc through sccache against a shared
+  # object store, reading with a key that is public and writing only when it is
+  # handed one that is not. Every job takes the write key from here, so any run
+  # that has the secret fills the cache for the ones that don't: a pull request
+  # from a fork sees an empty value and reads the same cache read-only.
+  #
+  # That store is the only compilation cache these jobs have, and Swatinem's
+  # target/ cache was dropped for it rather than kept beside it: this workflow
+  # never runs on main, and a GitHub Actions cache written on a pull request's
+  # branch can only be read back from that same branch, so nothing here ever
+  # wrote a key another run could restore.
+  BUNNY_SCCACHE_PASSWORD: ${{ secrets.BUNNY_SCCACHE_PASSWORD }}
 
 jobs:
   check:
@@ -50,12 +62,7 @@ jobs:
           components: rustfmt, clippy
           targets: wasm32-unknown-unknown, wasm32-wasip1-threads
 
-      # Keyed to the LLVM version for the same reason as the web job: the C
-      # objects in target/ are built by whichever clang the scripts pick,
-      # which cargo cannot see a change in.
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: llvm-20
+      - uses: ./.github/actions/sccache
 
       - uses: taiki-e/install-action@v2
         with:
@@ -75,6 +82,12 @@ jobs:
           version: 0.16.0
 
       - run: ./scripts/verify --check
+
+      # What the shared cache answered for this job, which is the only way to
+      # see from a run whether it is being hit and filled.
+      - name: sccache statistics
+        if: always()
+        run: sccache --show-stats
 
   web:
     name: web bundle
@@ -99,14 +112,7 @@ jobs:
         with:
           targets: wasm32-unknown-unknown, wasm32-wasip1-threads
 
-      # CC_wasm32_wasip1 names the compiler as plain "clang", resolved through
-      # PATH, so a cached target/ from a run with a different LLVM on PATH
-      # looks unchanged to cargo's own rebuild detection and gets reused as
-      # is. Keying the cache to the LLVM version forces a clean rebuild
-      # whenever that version changes instead of silently linking old objects.
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: llvm-20
+      - uses: ./.github/actions/sccache
 
       # The build script installs this itself when it is missing; a prebuilt one
       # is much faster. The version has to match the wasm-bindgen crate.
@@ -129,6 +135,10 @@ jobs:
 
       - run: ./scripts/build --target web --release
 
+      - name: sccache statistics
+        if: always()
+        run: sccache --show-stats
+
       - uses: actions/upload-artifact@v7
         with:
           name: block-web
@@ -139,6 +149,49 @@ jobs:
         if: github.ref == 'refs/heads/main'
         with:
           path: target/web
+
+  plugins:
+    name: plugin and game modules
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      # A plugin's C dependencies are compiled by clang rather than by rustc,
+      # so this needs a local LLVM of at least version 19 for the same reason
+      # the web job does: only from 19 onwards do FreeType's setjmp/longjmp
+      # calls lower to imports that resolve inside the module.
+      - name: Install LLVM
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y clang-20 llvm-20
+          echo /usr/lib/llvm-20/bin >> "$GITHUB_PATH"
+
+      - uses: ./.github/actions/rust-toolchain
+        with:
+          targets: wasm32-unknown-unknown, wasm32-wasip1-threads
+
+      - uses: ./.github/actions/sccache
+
+      - name: Cache the WASI sysroot
+        uses: actions/cache@v6
+        with:
+          path: target/tools
+          key: wasi-sysroot-33
+
+      - run: ./scripts/build --target plugins --release --output dist
+
+      - name: sccache statistics
+        if: always()
+        run: sccache --show-stats
+
+      # Every platform loads these same bytes, so they are uploaded once rather
+      # than repeated inside each platform's archive. A manifest resolves its
+      # entry point against its own directory, so the two ship together.
+      - uses: actions/upload-artifact@v7
+        with:
+          name: block-plugins
+          path: dist
+          retention-days: 14
 
   android:
     name: android apk
@@ -178,12 +231,7 @@ jobs:
         with:
           targets: aarch64-linux-android, wasm32-wasip1-threads, wasm32-unknown-unknown
 
-      # Keyed to the LLVM version for the same reason as the web job: the C
-      # objects in target/ are built by whichever "clang" PATH resolves to,
-      # which cargo cannot see a change in.
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: llvm-20
+      - uses: ./.github/actions/sccache
 
       - name: Cache the WASI sysroot
         uses: actions/cache@v6
@@ -239,6 +287,10 @@ jobs:
           --android-sdk "$ANDROID_SDK_ROOT"
           --application-id com.be3.block.ci
           --label "Block (CI)"
+
+      - name: sccache statistics
+        if: always()
+        run: sccache --show-stats
 
       - uses: actions/upload-artifact@v7
         with:
@@ -306,50 +358,11 @@ jobs:
             echo AR_aarch64_unknown_linux_gnu=aarch64-linux-gnu-ar
           } >> "$GITHUB_ENV"
 
-      # The client carries every plugin as a WASI module, whose C dependencies
-      # are compiled by clang rather than by rustc, so it needs a local LLVM of
-      # at least version 19 for the same reason the web job does: only from 19
-      # onwards do FreeType's setjmp/longjmp calls lower to imports that
-      # resolve inside the module. Apple's clang cannot emit wasm at all, and
-      # neither toolchain ships llvm-ar. The Windows runners come with an LLVM
-      # on PATH already.
-      - name: Install LLVM
-        id: llvm
-        if: matrix.client && runner.os != 'Windows'
-        shell: bash
-        run: |
-          if [ "$RUNNER_OS" = macOS ]; then
-            brew install llvm
-            bin="$(brew --prefix llvm)/bin"
-          else
-            sudo apt-get update
-            sudo apt-get install --no-install-recommends -y clang-20 llvm-20
-            bin=/usr/lib/llvm-20/bin
-          fi
-          echo "$bin" >> "$GITHUB_PATH"
-          echo "version=$("$bin/llvm-config" --version)" >> "$GITHUB_OUTPUT"
-
-      # That LLVM goes on the front of PATH, where it also becomes the "clang"
-      # the cc crate picks for the host target. Name Apple's explicitly for
-      # the macOS builds so only the wasm modules change compiler.
-      - name: Use Apple clang for the macOS target
-        if: runner.os == 'macOS'
-        run: |
-          {
-            echo "CC_${{ matrix.target }}=/usr/bin/clang"
-            echo "CXX_${{ matrix.target }}=/usr/bin/clang++"
-          } >> "$GITHUB_ENV"
-
       - uses: ./.github/actions/rust-toolchain
         with:
           targets: ${{ matrix.target }}
 
-      # Keyed to the LLVM version for the same reason as the web job: the C
-      # objects in target/ are built by whichever "clang" PATH resolves to,
-      # which cargo cannot see a change in.
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: ${{ matrix.target }}-llvm-${{ steps.llvm.outputs.version }}
+      - uses: ./.github/actions/sccache
 
       # The app links libghostty-vt, the terminal emulator behind the debug
       # terminal window, which scripts/internal/build-ghostty-vt.sh compiles from
@@ -371,14 +384,20 @@ jobs:
           path: target/tools/pdfium-*
           key: pdfium-${{ matrix.target }}-1
 
-      # The client build also stages every plugin under crates/editors beside
-      # the app and fetches PDFium, which the PDF plugin loads at runtime.
+      # The plugins job builds the wasm modules for every platform at once, so
+      # this builds only what belongs to this one: the executables, and the
+      # PDFium the PDF plugin loads at runtime.
       - name: Build
         shell: bash
         run: >-
           ./scripts/build --target ${{ matrix.target }} --release --output dist
+          --no-plugins
           ${{ matrix.client && ' ' || '--no-client' }}
           ${{ runner.os == 'macOS' && '--sign-identity -' || ' ' }}
+
+      - name: sccache statistics
+        if: always()
+        run: sccache --show-stats
 
       - uses: actions/upload-artifact@v7
         with:
@@ -398,7 +417,7 @@ jobs:
   ci-ok-queue:
     name: ${{ github.event_name != 'pull_request' && 'CI OK' || 'CI gate (merge queue only)' }}
     if: always() && github.event_name != 'pull_request'
-    needs: [check, web, android, native]
+    needs: [check, web, plugins, android, native]
     runs-on: ubuntu-24.04
     steps:
       - name: Require every job to have passed

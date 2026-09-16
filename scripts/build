@@ -8,13 +8,15 @@ usage() {
     cat >&2 <<'USAGE'
 Usage: ./scripts/build [--target TARGET] [options...]
 
-TARGET is native (the default), web, android, or a Rust target triple to
-cross-compile the native app and its plugins for.
+TARGET is native (the default), web, android, plugins, or a Rust target triple
+to cross-compile the native app and its plugins for.
 
 Native options:  [--release] [--triple TRIPLE] [--output DIRECTORY]
-                 [--no-client] [--no-server] [--sign-identity IDENTITY]
+                 [--no-client] [--no-server] [--no-plugins]
+                 [--sign-identity IDENTITY]
 Web options:     [--release] [--wasi-sysroot DIRECTORY]
 Android options: [--android-sdk DIRECTORY] [--application-id ID] [--label LABEL]
+Plugin options:  [--release] [--output DIRECTORY] [--wasi-sysroot DIRECTORY]
 USAGE
 }
 
@@ -46,6 +48,9 @@ case "$target" in
         ;;
     android)
         exec "$internal/build-android.sh" "${arguments[@]}"
+        ;;
+    plugins)
+        exec "$internal/build-plugins.sh" "${arguments[@]}"
         ;;
     *-*-*)
         exec "$internal/build-native.sh" --triple "$target" "${arguments[@]}"

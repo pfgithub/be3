@@ -103,6 +103,27 @@ else
     DEBIAN_FRONTEND=noninteractive $sudo apt-get install -y "${missing[@]}"
 fi
 
+# Everything cargo compiles from here on, including cargo-nextest and the cache
+# warming at the end, goes through sccache, which answers from the project's
+# shared store whatever some other machine has already built. That is most of
+# what setting a machine up costs, so it is installed before the first cargo
+# call rather than after. Sourcing common.sh above found nothing to point cargo
+# at; configuring it again is what picks up what was just installed.
+#
+# Nothing here depends on the cache, so a machine that cannot reach it is set up
+# the slow way rather than turned away.
+if "$internal/install-sccache.sh"; then
+    configure_sccache
+fi
+if [[ -z "${RUSTC_WRAPPER:-}" ]]; then
+    echo 'Building without a shared compiler cache.'
+elif [[ "${SCCACHE_S3_RW_MODE:-}" == 'READ_WRITE' ]]; then
+    echo 'Building through sccache, reading and writing the shared cache.'
+else
+    echo 'Building through sccache, reading the shared cache. Set BUNNY_SCCACHE_PASSWORD'
+    echo 'to a zone password that may write to fill it as well.'
+fi
+
 # rust-toolchain.toml pins the channel and the wasm targets, so installing
 # rustup is enough to get all three; any cargo call in the repository then
 # fetches them. Asking for the toolchain here means that download happens now
